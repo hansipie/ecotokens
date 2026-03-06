@@ -21,14 +21,14 @@ doivent être écrits et ÉCHOUER avant toute implémentation.
 
 **Purpose**: Initialisation du projet Rust et structure de base
 
-- [ ] T001 Créer le projet Rust avec `cargo new --bin ecotokens` à la racine du dépôt
-- [ ] T002 Configurer `Cargo.toml` avec les dépendances P1/P2 : `clap`, `serde`, `serde_json`, `regex`, `lazy_regex`, `dirs`, `toml`
-- [ ] T003 [P] Configurer `clippy.toml` et `.rustfmt.toml` (strict mode, Rust stable only)
-- [ ] T004 [P] Créer la structure de répertoires `src/` conforme à `plan.md` : `filter/`, `masking/`, `metrics/`, `tokens/`, `hook/`, `config/`
-- [ ] T005 [P] Créer la structure de répertoires `tests/` : `filter/`, `masking/`, `metrics/`, `hook/`, `integration/`, `tokens/`, `config/`, `search/`, `trace/`, `tui/`
-- [ ] T006 Implémenter le point d'entrée `src/main.rs` avec la structure `clap` (sous-commandes vides : `hook`, `filter`, `gain`, `install`, `uninstall`, `config`)
-- [ ] T007 [P] Créer `src/config/mod.rs` et `src/config/settings.rs` : struct `Settings` avec tous les champs du data-model, sérialisation JSON, valeurs par défaut
-- [ ] T008 [P] Créer `src/tokens/mod.rs` et `src/tokens/counter.rs` : fonction `estimate_tokens(text: &str) -> usize` (heuristique chars * 0.25)
+- [X] T001 Créer le projet Rust avec `cargo new --bin ecotokens` à la racine du dépôt
+- [X] T002 Configurer `Cargo.toml` avec les dépendances P1/P2 : `clap`, `serde`, `serde_json`, `regex`, `lazy_regex`, `dirs`, `toml`
+- [X] T003 [P] Configurer `clippy.toml` et `.rustfmt.toml` (strict mode, Rust stable only)
+- [X] T004 [P] Créer la structure de répertoires `src/` conforme à `plan.md` : `filter/`, `masking/`, `metrics/`, `tokens/`, `hook/`, `config/`
+- [X] T005 [P] Créer la structure de répertoires `tests/` : `filter/`, `masking/`, `metrics/`, `hook/`, `integration/`, `tokens/`, `config/`, `search/`, `trace/`, `tui/`
+- [X] T006 Implémenter le point d'entrée `src/main.rs` avec la structure `clap` (sous-commandes vides : `hook`, `filter`, `gain`, `install`, `uninstall`, `config`)
+- [X] T007 [P] Créer `src/config/mod.rs` et `src/config/settings.rs` : struct `Settings` avec tous les champs du data-model, sérialisation JSON, valeurs par défaut
+- [X] T008 [P] Créer `src/tokens/mod.rs` et `src/tokens/counter.rs` : fonction `estimate_tokens(text: &str) -> usize` (heuristique chars * 0.25)
 
 **Checkpoint**: `cargo build` réussit, `cargo clippy` sans warnings, structure complète
 
@@ -40,18 +40,18 @@ doivent être écrits et ÉCHOUER avant toute implémentation.
 
 **⚠️ CRITIQUE**: Aucune user story ne peut démarrer avant la fin de cette phase
 
-- [ ] T009 [P] Tests unitaires pour `src/tokens/counter.rs` dans `tests/tokens/counter_test.rs` : vérifier estimation sur texte vide, texte court, texte > 1000 chars — DOIT ÉCHOUER avant T010
-- [ ] T010 Implémenter `estimate_tokens` dans `src/tokens/counter.rs` jusqu'à ce que T009 passe (Red-Green)
-- [ ] T011 [P] Tests unitaires pour `src/config/settings.rs` dans `tests/config/settings_test.rs` : lecture config inexistante → valeurs par défaut, lecture config valide, valeurs hors limites rejetées — DOIT ÉCHOUER avant T012
-- [ ] T012 Implémenter chargement/sauvegarde `Settings` dans `src/config/settings.rs` via `dirs::config_dir()` jusqu'à ce que T011 passe
-- [ ] T013 [P] Tests unitaires pour `src/masking/patterns.rs` dans `tests/masking/patterns_test.rs` : chaque pattern (AWS key, GitHub PAT, Bearer, PEM, .env secrets, JWT, URL credentials) détecte et masque — DOIT ÉCHOUER avant T014
-- [ ] T014 Implémenter `src/masking/mod.rs` et `src/masking/patterns.rs` : pipeline de regex `lazy_regex`, fonction `mask(text: &str) -> (String, bool)` jusqu'à ce que T013 passe
-- [ ] T015 [P] Tests unitaires pour le filtre générique dans `tests/filter/generic_test.rs` : output < seuil → passthrough, output > 500 lignes → résumé N premières + N dernières, output > 50 Ko → résumé — DOIT ÉCHOUER avant T016
-- [ ] T015b [P] Tests unitaires filtre markdown dans `tests/filter/markdown_test.rs` : fichier < 200 lignes → passthrough, fichier > 200 lignes → ToC headings + première section, heading H2 ciblé → section extraite, fichier sans headings → filtre générique — DOIT ÉCHOUER avant T016b
-- [ ] T015c [P] Tests unitaires filtre config_file dans `tests/filter/config_file_test.rs` : TOML → liste tables premier niveau + compte clés, JSON > 100 lignes → clés racine + valeurs scalaires, YAML → même stratégie — DOIT ÉCHOUER avant T016c
-- [ ] T016 Implémenter `src/filter/mod.rs` et `src/filter/generic.rs` : détection famille commande (extension fichier incluse), résumé générique, passthrough jusqu'à ce que T015 passe
-- [ ] T016b [P] Implémenter `src/filter/markdown.rs` : parsing headings par regex `^#{1,3} `, extraction section par index, génération ToC jusqu'à ce que T015b passe
-- [ ] T016c [P] Implémenter `src/filter/config_file.rs` : résumé TOML (tables), JSON (clés racine), YAML (clés racine) jusqu'à ce que T015c passe
+- [X] T009 [P] Tests unitaires pour `src/tokens/counter.rs` dans `tests/tokens/counter_test.rs` : vérifier estimation sur texte vide, texte court, texte > 1000 chars — DOIT ÉCHOUER avant T010
+- [X] T010 Implémenter `estimate_tokens` dans `src/tokens/counter.rs` jusqu'à ce que T009 passe (Red-Green)
+- [X] T011 [P] Tests unitaires pour `src/config/settings.rs` dans `tests/config/settings_test.rs` : lecture config inexistante → valeurs par défaut, lecture config valide, valeurs hors limites rejetées — DOIT ÉCHOUER avant T012
+- [X] T012 Implémenter chargement/sauvegarde `Settings` dans `src/config/settings.rs` via `dirs::config_dir()` jusqu'à ce que T011 passe
+- [X] T013 [P] Tests unitaires pour `src/masking/patterns.rs` dans `tests/masking/patterns_test.rs` : chaque pattern (AWS key, GitHub PAT, Bearer, PEM, .env secrets, JWT, URL credentials) détecte et masque — DOIT ÉCHOUER avant T014
+- [X] T014 Implémenter `src/masking/mod.rs` et `src/masking/patterns.rs` : pipeline de regex `lazy_regex`, fonction `mask(text: &str) -> (String, bool)` jusqu'à ce que T013 passe
+- [X] T015 [P] Tests unitaires pour le filtre générique dans `tests/filter/generic_test.rs` : output < seuil → passthrough, output > 500 lignes → résumé N premières + N dernières, output > 50 Ko → résumé — DOIT ÉCHOUER avant T016
+- [X] T015b [P] Tests unitaires filtre markdown dans `tests/filter/markdown_test.rs` : fichier < 200 lignes → passthrough, fichier > 200 lignes → ToC headings + première section, heading H2 ciblé → section extraite, fichier sans headings → filtre générique — DOIT ÉCHOUER avant T016b
+- [X] T015c [P] Tests unitaires filtre config_file dans `tests/filter/config_file_test.rs` : TOML → liste tables premier niveau + compte clés, JSON > 100 lignes → clés racine + valeurs scalaires, YAML → même stratégie — DOIT ÉCHOUER avant T016c
+- [X] T016 Implémenter `src/filter/mod.rs` et `src/filter/generic.rs` : détection famille commande (extension fichier incluse), résumé générique, passthrough jusqu'à ce que T015 passe
+- [X] T016b [P] Implémenter `src/filter/markdown.rs` : parsing headings par regex `^#{1,3} `, extraction section par index, génération ToC jusqu'à ce que T015b passe
+- [X] T016c [P] Implémenter `src/filter/config_file.rs` : résumé TOML (tables), JSON (clés racine), YAML (clés racine) jusqu'à ce que T015c passe
 
 **Checkpoint**: `cargo test` — tous les tests fondamentaux passent (T009, T011, T013, T015)
 
