@@ -6,9 +6,11 @@ mod filter;
 mod hook;
 mod install;
 mod masking;
+mod mcp;
 mod metrics;
 mod search;
 mod tokens;
+mod trace;
 mod tui;
 
 #[derive(Parser)]
@@ -82,6 +84,38 @@ enum Commands {
         query: String,
         #[arg(long, default_value = "5")]
         top_k: usize,
+        #[arg(long)]
+        index_dir: Option<PathBuf>,
+        #[arg(long)]
+        json: bool,
+    },
+    /// Trace callers or callees of a symbol
+    Trace {
+        #[command(subcommand)]
+        action: TraceAction,
+    },
+    /// Start MCP server (JSON-RPC over stdio)
+    Mcp {
+        #[arg(long)]
+        index_dir: Option<PathBuf>,
+    },
+}
+
+#[derive(Subcommand)]
+enum TraceAction {
+    /// Find callers of a symbol
+    Callers {
+        symbol: String,
+        #[arg(long)]
+        index_dir: Option<PathBuf>,
+        #[arg(long)]
+        json: bool,
+    },
+    /// Find callees of a symbol
+    Callees {
+        symbol: String,
+        #[arg(long, default_value = "1")]
+        depth: u32,
         #[arg(long)]
         index_dir: Option<PathBuf>,
         #[arg(long)]
@@ -322,6 +356,73 @@ fn main() {
                 }
                 Err(e) => { eprintln!("search error: {e}"); std::process::exit(1); }
             }
+        }
+
+        Commands::Trace { action } => {
+            match action {
+                TraceAction::Callers { symbol, index_dir, json } => {
+                    let idx_dir = index_dir.unwrap_or_else(default_index_dir);
+                    match trace::callers::find_callers(&symbol, &idx_dir) {
+                        Ok(edges) => {
+                            if json {
+                                println!("{}", serde_json::to_string_pretty(&edges).unwrap());
+                            } else if std::io::IsTerminal::is_terminal(&std::io::stdout()) {
+                                use ratatui::backend::CrosstermBackend;
+                                use ratatui::Terminal;
+                                let backend = CrosstermBackend::new(std::io::stdout());
+                                if let Ok(mut terminal) = Terminal::new(backend) {
+                                    let _ = terminal.draw(|f| {
+                                        tui::trace::render_trace(f, f.area(), &edges, &symbol, "callers");
+                                    });
+                                }
+                            } else {
+                                for e in &edges {
+                                    println!("{} {}:{}", e.name, e.file_path, e.line);
+                                }
+                            }
+                        }
+                        Err(e) => { eprintln!("trace error: {e}"); std::process::exit(1); }
+                    }
+                }
+                TraceAction::Callees { symbol, depth, index_dir, json } => {
+                    let idx_dir = index_dir.unwrap_or_else(default_index_dir);
+                    match trace::callees::find_callees(&symbol, &idx_dir, depth) {
+                        Ok(edges) => {
+                            if json {
+                                println!("{}", serde_json::to_string_pretty(&edges).unwrap());
+                            } else if std::io::IsTerminal::is_terminal(&std::io::stdout()) {
+                                use ratatui::backend::CrosstermBackend;
+                                use ratatui::Terminal;
+                                let backend = CrosstermBackend::new(std::io::stdout());
+                                if let Ok(mut terminal) = Terminal::new(backend) {
+                                    let _ = terminal.draw(|f| {
+                                        tui::trace::render_trace(f, f.area(), &edges, &symbol, "callees");
+                                    });
+                                }
+                            } else {
+                                for e in &edges {
+                                    println!("{} {}:{}", e.name, e.file_path, e.line);
+                                }
+                            }
+                        }
+                        Err(e) => { eprintln!("trace error: {e}"); std::process::exit(1); }
+                    }
+                }
+            }
+        }
+
+        Commands::Mcp { index_dir } => {
+            let idx_dir = index_dir.unwrap_or_else(default_index_dir);
+            let rt = tokio::runtime::Builder::new_current_thread()
+                .enable_all()
+                .build()
+                .expect("failed to build tokio runtime");
+            rt.block_on(async {
+                if let Err(e) = mcp::server::run_server(idx_dir).await {
+                    eprintln!("mcp error: {e}");
+                    std::process::exit(1);
+                }
+            });
         }
     }
 }

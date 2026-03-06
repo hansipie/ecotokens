@@ -87,6 +87,83 @@ fn config_dir_created_on_install() {
     assert!(settings_path.exists(), "settings.json should exist after install");
 }
 
+// ── T062t — install --with-mcp ────────────────────────────────────────────────
+
+#[test]
+fn install_with_mcp_adds_mcp_entry() {
+    let dir = TempDir::new().unwrap();
+    let settings_path = temp_claude_settings(&dir);
+
+    install_hook(&settings_path, true).unwrap();
+
+    let content = std::fs::read_to_string(&settings_path).unwrap();
+    let v: serde_json::Value = serde_json::from_str(&content).unwrap();
+    assert!(
+        v["mcpServers"]["ecotokens"].is_object(),
+        "mcpServers.ecotokens should be present after --with-mcp"
+    );
+    assert_eq!(
+        v["mcpServers"]["ecotokens"]["command"].as_str().unwrap_or(""),
+        "ecotokens mcp",
+        "MCP command should be 'ecotokens mcp'"
+    );
+}
+
+#[test]
+fn install_with_mcp_is_idempotent() {
+    let dir = TempDir::new().unwrap();
+    let settings_path = temp_claude_settings(&dir);
+
+    install_hook(&settings_path, true).unwrap();
+    install_hook(&settings_path, true).unwrap();
+
+    let content = std::fs::read_to_string(&settings_path).unwrap();
+    let v: serde_json::Value = serde_json::from_str(&content).unwrap();
+    let servers = v["mcpServers"].as_object().unwrap();
+    let ecotokens_count = servers.keys().filter(|k| k.as_str() == "ecotokens").count();
+    assert_eq!(ecotokens_count, 1, "should not duplicate MCP entry");
+}
+
+#[test]
+fn install_with_mcp_preserves_existing_hooks() {
+    let dir = TempDir::new().unwrap();
+    let settings_path = temp_claude_settings(&dir);
+
+    // Pre-populate with another hook
+    let initial = serde_json::json!({
+        "hooks": {
+            "PreToolUse": [{
+                "matcher": "OtherTool",
+                "hooks": [{"type": "command", "command": "other-hook"}]
+            }]
+        }
+    });
+    std::fs::write(&settings_path, serde_json::to_string_pretty(&initial).unwrap()).unwrap();
+
+    install_hook(&settings_path, true).unwrap();
+
+    let content = std::fs::read_to_string(&settings_path).unwrap();
+    let v: serde_json::Value = serde_json::from_str(&content).unwrap();
+    let hooks = v["hooks"]["PreToolUse"].as_array().unwrap();
+    assert!(hooks.len() >= 2, "both hooks should be present");
+    assert!(v["mcpServers"]["ecotokens"].is_object(), "MCP entry should be present");
+}
+
+#[test]
+fn install_without_mcp_does_not_add_mcp_entry() {
+    let dir = TempDir::new().unwrap();
+    let settings_path = temp_claude_settings(&dir);
+
+    install_hook(&settings_path, false).unwrap();
+
+    let content = std::fs::read_to_string(&settings_path).unwrap();
+    let v: serde_json::Value = serde_json::from_str(&content).unwrap();
+    assert!(
+        v["mcpServers"].is_null() || !v["mcpServers"].as_object().map_or(false, |m| m.contains_key("ecotokens")),
+        "mcpServers.ecotokens should NOT be present without --with-mcp"
+    );
+}
+
 // ── T039t — ecotokens index CLI ───────────────────────────────────────────────
 
 fn ecotokens_bin() -> String {

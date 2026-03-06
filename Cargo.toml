@@ -29,6 +29,10 @@ tree-sitter-rust = "0.23"
 tree-sitter-python = "0.23"
 tree-sitter-javascript = "0.23"
 
+# P3.5 — trace + MCP server
+rmcp = { version = "1", features = ["server", "transport-io"] }
+tokio = { version = "1", features = ["rt", "macros", "io-util"] }
+
 # Optional
 tiktoken-rs = { version = "0.5", optional = true }
 reqwest = { version = "0.12", features = ["json", "blocking"], optional = true }
@@ -132,3 +136,15 @@ path = "tests/tui/outline_test.rs"
 [[test]]
 name = "progress_tui_test"
 path = "tests/tui/progress_test.rs"
+
+[[test]]
+name = "trace_test"
+path = "tests/trace/trace_test.rs"
+
+[[test]]
+name = "mcp_test"
+path = "tests/integration/mcp_test.rs"
+
+[[test]]
+name = "trace_tui_test"
+path = "tests/tui/trace_test.rs"

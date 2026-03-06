@@ -93,6 +93,103 @@ Claude reçoit l'output filtré (≥60% tokens économisés)
 └── metrics.jsonl        # Log des interceptions (append-only)
 ```
 
+## Mode MCP (navigation structurelle)
+
+`ecotokens` expose un serveur MCP natif qui permet à Claude d'appeler directement
+les outils de recherche et de navigation sans passer par bash.
+
+### Activation
+
+```bash
+# Option 1 : installation automatique (opt-in)
+ecotokens install --with-mcp
+
+# Option 2 : ajout manuel dans ~/.claude/settings.json
+```
+
+```json
+{
+  "mcpServers": {
+    "ecotokens": {
+      "command": "ecotokens mcp",
+      "type": "stdio"
+    }
+  }
+}
+```
+
+### Indexer votre projet
+
+```bash
+# Indexer le répertoire courant (BM25 + symboles tree-sitter)
+ecotokens index
+
+# Indexer un répertoire spécifique
+ecotokens index --path /chemin/vers/projet
+
+# Réinitialiser l'index
+ecotokens index --reset
+```
+
+### Outils MCP disponibles
+
+| Outil | Description |
+|-------|-------------|
+| `ecotokens_search` | Recherche BM25 dans le codebase indexé |
+| `ecotokens_outline` | Liste les symboles d'un fichier ou répertoire |
+| `ecotokens_symbol` | Retourne le source d'un symbole par ID stable |
+| `ecotokens_trace_callers` | Trouve qui appelle un symbole donné |
+| `ecotokens_trace_callees` | Trouve ce qu'appelle un symbole donné |
+
+### Utilisation depuis la CLI
+
+```bash
+# Recherche sémantique
+ecotokens search "gestion des erreurs" --top-k 5
+ecotokens search "authentication" --json
+
+# Outline d'un fichier ou répertoire
+ecotokens outline src/filter/git.rs
+ecotokens outline src/ --kinds fn,struct
+ecotokens outline src/ --depth 1 --json
+
+# Lookup d'un symbole par ID stable
+ecotokens symbol "git.rs::filter_git#fn"
+
+# Graphe d'appels
+ecotokens trace callers filter_git
+ecotokens trace callees filter_git --depth 2
+ecotokens trace callers filter_git --json
+```
+
+### IDs de symboles stables
+
+Le format d'un ID de symbole est `{fichier}::{nom}#{kind}` :
+
+```
+src/filter/git.rs::filter_git#fn
+src/config/settings.rs::Settings#struct
+lib.rs::greet#fn
+```
+
+### Architecture MCP
+
+```
+Claude Code (avec MCP configuré)
+    │
+    │ (tool call JSON-RPC stdio)
+    ▼
+ecotokens mcp
+    ├── ecotokens_search   → tantivy BM25 index
+    ├── ecotokens_outline  → tree-sitter AST symbols
+    ├── ecotokens_symbol   → source snippet lookup
+    ├── ecotokens_trace_callers → graphe d'appels inverse
+    └── ecotokens_trace_callees → graphe d'appels direct
+```
+
+Les outils MCP lisent l'index local (`~/.config/ecotokens/index/`) — **aucune
+connexion réseau requise**.
+
 ## Variables d'environnement
 
 | Variable | Description |

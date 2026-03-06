@@ -220,9 +220,9 @@ appel du tool `ecotokens_outline` → réponse identique à la CLI.
 
 ### Tests pour US4 — écrire en premier, vérifier qu'ils ÉCHOUENT
 
-- [ ] T053 [P] [US4] Tests unitaires callers dans `tests/trace/trace_test.rs` : symbole avec 2 callers → retourne 2 CallEdges, symbole sans callers → vec vide, symbole inconnu → erreur claire — DOIT ÉCHOUER avant T056
-- [ ] T054 [P] [US4] Tests unitaires callees dans `tests/trace/trace_test.rs` : symbole appelant 3 autres → retourne 3 CallEdges, `--depth 2` → retourne les transitifs — DOIT ÉCHOUER avant T057
-- [ ] T055 [P] [US4] Tests unitaires MCP server dans `tests/integration/mcp_test.rs` :
+- [X] T053 [P] [US4] Tests unitaires callers dans `tests/trace/trace_test.rs` : symbole avec 2 callers → retourne 2 CallEdges, symbole sans callers → vec vide, symbole inconnu → erreur claire — DOIT ÉCHOUER avant T056
+- [X] T054 [P] [US4] Tests unitaires callees dans `tests/trace/trace_test.rs` : symbole appelant 3 autres → retourne 3 CallEdges, `--depth 2` → retourne les transitifs — DOIT ÉCHOUER avant T057
+- [X] T055 [P] [US4] Tests unitaires MCP server dans `tests/integration/mcp_test.rs` :
   démarrage serveur → répond au handshake MCP,
   appel `ecotokens_outline` sur fixture → JSON valide avec liste de symboles,
   appel `ecotokens_search` sur fixture → JSON valide avec extraits et scores,
@@ -234,24 +234,24 @@ appel du tool `ecotokens_outline` → réponse identique à la CLI.
 
 ### Implémentation US4
 
-- [ ] T056 [US4] Implémenter `src/trace/callers.rs` : construction CallEdge lors de l'indexation AST (tree-sitter), requête "qui appelle X" sur l'index jusqu'à ce que T053 passe
-- [ ] T057 [US4] Implémenter `src/trace/callees.rs` : requête "qu'appelle X" sur l'index, support `--depth` récursif jusqu'à ce que T054 passe
-- [ ] T058 [US4] Implémenter sous-commandes `ecotokens trace callers` et `ecotokens trace callees` dans `src/main.rs`
-- [ ] T058at [P] [US4] Tests TUI trace dans `tests/tui/trace_test.rs` :
+- [X] T056 [US4] Implémenter `src/trace/callers.rs` : construction CallEdge lors de l'indexation AST (tree-sitter), requête "qui appelle X" sur l'index jusqu'à ce que T053 passe
+- [X] T057 [US4] Implémenter `src/trace/callees.rs` : requête "qu'appelle X" sur l'index, support `--depth` récursif jusqu'à ce que T054 passe
+- [X] T058 [US4] Implémenter sous-commandes `ecotokens trace callers` et `ecotokens trace callees` dans `src/main.rs`
+- [X] T058at [P] [US4] Tests TUI trace dans `tests/tui/trace_test.rs` :
   rendu avec TestBackend → colonnes caller/fichier/ligne présentes, vec vide → message
   "No callers found", --depth 2 → résultats transitifs affichés
   — DOIT ÉCHOUER avant T058a
-- [ ] T058a [US4] Implémenter `src/tui/trace.rs` : tableau ratatui callers/callees (colonnes caller, fichier, ligne), scrollable, fallback texte plat si non-TTY
-- [ ] T059 [US4] Implémenter `src/mcp/server.rs` : boucle JSON-RPC stdio via `rmcp`, handshake MCP, dispatch vers handlers jusqu'à ce que T055 passe
-- [ ] T060 [US4] Implémenter `src/mcp/tools.rs` : handlers pour `ecotokens_search`, `ecotokens_outline`, `ecotokens_symbol`, `ecotokens_trace_callers`, `ecotokens_trace_callees`
-- [ ] T061 [US4] Implémenter sous-commande `ecotokens mcp` dans `src/main.rs` : démarrage serveur MCP stdio
-- [ ] T062t [P] [US4] Tests extension install MCP dans `tests/integration/install_test.rs` :
+- [X] T058a [US4] Implémenter `src/tui/trace.rs` : tableau ratatui callers/callees (colonnes caller, fichier, ligne), scrollable, fallback texte plat si non-TTY
+- [X] T059 [US4] Implémenter `src/mcp/server.rs` : boucle JSON-RPC stdio via `rmcp`, handshake MCP, dispatch vers handlers jusqu'à ce que T055 passe
+- [X] T060 [US4] Implémenter `src/mcp/tools.rs` : handlers pour `ecotokens_search`, `ecotokens_outline`, `ecotokens_symbol`, `ecotokens_trace_callers`, `ecotokens_trace_callees`
+- [X] T061 [US4] Implémenter sous-commande `ecotokens mcp` dans `src/main.rs` : démarrage serveur MCP stdio
+- [X] T062t [P] [US4] Tests extension install MCP dans `tests/integration/install_test.rs` :
   `ecotokens install --with-mcp` → entrée MCP présente dans `~/.claude/settings.json`,
   déjà présente → idempotent (pas de doublon), `--with-mcp` refusé par l'utilisateur →
   settings inchangé, autres hooks existants intacts après ajout MCP
   — DOIT ÉCHOUER avant T062
-- [ ] T062 [US4] Étendre `ecotokens install` pour proposer (opt-in) l'ajout du serveur MCP dans `~/.claude/settings.json`
-- [ ] T063 [P] [US4] Documentation `quickstart.md` : section "Mode MCP" avec configuration Claude Code
+- [X] T062 [US4] Étendre `ecotokens install` pour proposer (opt-in) l'ajout du serveur MCP dans `~/.claude/settings.json`
+- [X] T063 [P] [US4] Documentation `quickstart.md` : section "Mode MCP" avec configuration Claude Code
 
 **Checkpoint**: US4 complète — `ecotokens trace callers/callees` fonctionnel ; `ecotokens mcp`
 répond aux tools MCP depuis Claude Code
