@@ -1,3 +1,4 @@
+#[allow(dead_code)]
 pub const THRESHOLD_LINES: u32 = 500;
 
 const HEAD_TAIL_LINES: usize = 20;

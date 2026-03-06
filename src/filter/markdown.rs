@@ -1,6 +1,7 @@
 use crate::filter::generic::filter_generic;
 use lazy_regex::regex;
 
+#[allow(dead_code)]
 const MD_LINE_THRESHOLD: usize = 200;
 
 /// Filter Markdown content: passthrough if short; ToC + first section if long.

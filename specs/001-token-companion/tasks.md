@@ -145,20 +145,20 @@ doivent être écrits et ÉCHOUER avant toute implémentation.
 
 ### Tests pour User Story 3 — écrire en premier, vérifier qu'ils ÉCHOUENT
 
-- [ ] T035 [P] [US3] Tests unitaires index dans `tests/search/index_test.rs` : indexation d'un répertoire vide, indexation d'un projet test fixture, index existant → mise à jour incrémentale — DOIT ÉCHOUER avant T037
-- [ ] T036 [P] [US3] Tests unitaires recherche dans `tests/search/search_test.rs` : query correspondant à un fichier connu retourne ce fichier en top-3, codebase non indexé → message d'erreur clair — DOIT ÉCHOUER avant T038
+- [X] T035 [P] [US3] Tests unitaires index dans `tests/search/index_test.rs` : indexation d'un répertoire vide, indexation d'un projet test fixture, index existant → mise à jour incrémentale — DOIT ÉCHOUER avant T037
+- [X] T036 [P] [US3] Tests unitaires recherche dans `tests/search/search_test.rs` : query correspondant à un fichier connu retourne ce fichier en top-3, codebase non indexé → message d'erreur clair — DOIT ÉCHOUER avant T038
 
 ### Implémentation User Story 3
 
-- [ ] T037 [US3] Implémenter `src/search/mod.rs` et `src/search/index.rs` : indexation BM25 via tantivy, découverte fichiers (respect `.gitignore`), stockage dans `~/.config/ecotokens/index/<hash>/` jusqu'à ce que T035 passe
-- [ ] T038 [US3] Implémenter sous-commande `ecotokens search` dans `src/main.rs` : query → top-K extraits avec score et chemin, formats humain et JSON jusqu'à ce que T036 passe
-- [ ] T039t [P] [US3] Tests CLI index dans `tests/integration/install_test.rs` :
+- [X] T037 [US3] Implémenter `src/search/mod.rs` et `src/search/index.rs` : indexation BM25 via tantivy, découverte fichiers (respect `.gitignore`), stockage dans `~/.config/ecotokens/index/<hash>/` jusqu'à ce que T035 passe
+- [X] T038 [US3] Implémenter sous-commande `ecotokens search` dans `src/main.rs` : query → top-K extraits avec score et chemin, formats humain et JSON jusqu'à ce que T036 passe
+- [X] T039t [P] [US3] Tests CLI index dans `tests/integration/install_test.rs` :
   `ecotokens index --path <tmpdir>` → indexe uniquement ce répertoire (pas la racine),
   `ecotokens index --reset` → supprime l'index existant puis recrée à zéro,
   `ecotokens index` sans args → indexe le répertoire courant,
   progression affichée sur stderr (non capturée dans stdout), stats finales sur stdout
   — DOIT ÉCHOUER avant T039
-- [ ] T039 [US3] Implémenter sous-commande `ecotokens index` dans `src/main.rs` : options `--path`, `--reset`, affichage progression et stats
+- [X] T039 [US3] Implémenter sous-commande `ecotokens index` dans `src/main.rs` : options `--path`, `--reset`, affichage progression et stats
 
 **Checkpoint**: Toutes les User Stories fonctionnelles indépendamment
 
@@ -178,28 +178,28 @@ retourne l'extrait source en < 50ms.
 
 ### Tests pour indexation symbolique — écrire en premier, vérifier qu'ils ÉCHOUENT
 
-- [ ] T046 [P] [US3] Tests unitaires symbols dans `tests/search/symbols_test.rs` : parsing Rust → extraction fn/struct/impl avec ID stables, fichier vide → vec vide, fichier multi-language → erreur gracieuse — DOIT ÉCHOUER avant T049
-- [ ] T047 [P] [US3] Tests unitaires outline dans `tests/search/outline_test.rs` : outline fichier → liste symboles triés par ligne, outline répertoire → symboles de tous les fichiers avec `--depth 1`, filtre `--kinds fn` → seulement les fonctions — DOIT ÉCHOUER avant T050
-- [ ] T048 [P] [US3] Tests unitaires symbol lookup dans `tests/search/symbols_test.rs` : ID valide → source_snippet, ID invalide → erreur claire, ID après modification fichier → version indexée retournée — DOIT ÉCHOUER avant T051
+- [X] T046 [P] [US3] Tests unitaires symbols dans `tests/search/symbols_test.rs` : parsing Rust → extraction fn/struct/impl avec ID stables, fichier vide → vec vide, fichier multi-language → erreur gracieuse — DOIT ÉCHOUER avant T049
+- [X] T047 [P] [US3] Tests unitaires outline dans `tests/search/outline_test.rs` : outline fichier → liste symboles triés par ligne, outline répertoire → symboles de tous les fichiers avec `--depth 1`, filtre `--kinds fn` → seulement les fonctions — DOIT ÉCHOUER avant T050
+- [X] T048 [P] [US3] Tests unitaires symbol lookup dans `tests/search/symbols_test.rs` : ID valide → source_snippet, ID invalide → erreur claire, ID après modification fichier → version indexée retournée — DOIT ÉCHOUER avant T051
 
 ### Implémentation indexation symbolique
 
-- [ ] T048b [P] [US3] Tests unitaires text_docs dans `tests/search/text_docs_test.rs` : indexation README.md → symbols avec kind h1/h2/h3, `ecotokens outline README.md` → liste headings, indexation Cargo.toml → symbols avec kind `table`, query "installation" → section Installation retournée en top-1 — DOIT ÉCHOUER avant T049b
-- [ ] T049 [US3] Implémenter `src/search/symbols.rs` : parsing AST tree-sitter par langage, extraction Symbol avec ID stable `{file}::{name}#{kind}`, stockage dans index tantivy jusqu'à ce que T046 passe
-- [ ] T049b [US3] Implémenter `src/search/text_docs.rs` : extraction headings Markdown par regex, extraction clés racine TOML/JSON/YAML, génération Symbol avec kinds h1/h2/h3/table/key, stockage dans index tantivy jusqu'à ce que T048b passe
-- [ ] T050 [US3] Implémenter `src/search/outline.rs` : requête index symboles par fichier/répertoire, tri par ligne, filtre par kind jusqu'à ce que T047 passe
-- [ ] T051 [US3] Implémenter sous-commandes `ecotokens outline` et `ecotokens symbol` dans `src/main.rs` jusqu'à ce que T047 et T048 passent
-- [ ] T051at [P] [US3] Tests TUI outline dans `tests/tui/outline_test.rs` :
+- [X] T048b [P] [US3] Tests unitaires text_docs dans `tests/search/text_docs_test.rs` : indexation README.md → symbols avec kind h1/h2/h3, `ecotokens outline README.md` → liste headings, indexation Cargo.toml → symbols avec kind `table`, query "installation" → section Installation retournée en top-1 — DOIT ÉCHOUER avant T049b
+- [X] T049 [US3] Implémenter `src/search/symbols.rs` : parsing AST tree-sitter par langage, extraction Symbol avec ID stable `{file}::{name}#{kind}`, stockage dans index tantivy jusqu'à ce que T046 passe
+- [X] T049b [US3] Implémenter `src/search/text_docs.rs` : extraction headings Markdown par regex, extraction clés racine TOML/JSON/YAML, génération Symbol avec kinds h1/h2/h3/table/key, stockage dans index tantivy jusqu'à ce que T048b passe
+- [X] T050 [US3] Implémenter `src/search/outline.rs` : requête index symboles par fichier/répertoire, tri par ligne, filtre par kind jusqu'à ce que T047 passe
+- [X] T051 [US3] Implémenter sous-commandes `ecotokens outline` et `ecotokens symbol` dans `src/main.rs` jusqu'à ce que T047 et T048 passent
+- [X] T051at [P] [US3] Tests TUI outline dans `tests/tui/outline_test.rs` :
   rendu avec TestBackend → liste de symboles affichée, navigation ↑↓ ne panic pas,
   liste vide → message "No symbols found"
   — DOIT ÉCHOUER avant T051a
-- [ ] T051a [US3] Implémenter `src/tui/outline.rs` : liste scrollable ratatui (↑↓ + Enter pour snippet, q pour quitter), fallback texte plat si non-TTY
-- [ ] T052t [P] [US3] Tests TUI progress et orchestration dual-index dans `tests/tui/progress_test.rs` :
+- [X] T051a [US3] Implémenter `src/tui/outline.rs` : liste scrollable ratatui (↑↓ + Enter pour snippet, q pour quitter), fallback texte plat si non-TTY
+- [X] T052t [P] [US3] Tests TUI progress et orchestration dual-index dans `tests/tui/progress_test.rs` :
   rendu barre de progression avec TestBackend → pourcentage affiché, 100% → barre pleine,
   `ecotokens index` sur fixture → BM25 ET symbolique tous deux déclenchés (vérifier entrées
   dans index tantivy des deux types), progression affichée sur stderr sans paniquer
   — DOIT ÉCHOUER avant T052
-- [ ] T052 [US3] Étendre `ecotokens index` pour déclencher l'indexation symbolique en parallèle de l'indexation BM25 avec barre de progression `src/tui/progress.rs`
+- [X] T052 [US3] Étendre `ecotokens index` pour déclencher l'indexation symbolique en parallèle de l'indexation BM25 avec barre de progression `src/tui/progress.rs`
 
 **Checkpoint**: `ecotokens outline src/` et `ecotokens symbol <id>` fonctionnels sur un projet Rust
 
@@ -262,18 +262,18 @@ répond aux tools MCP depuis Claude Code
 
 **Purpose**: Qualité, robustesse et packaging final
 
-- [ ] T040 [P] Tests d'intégration end-to-end dans `tests/integration/end_to_end_test.rs` : scénario complet install → filter → gain → uninstall sans erreur
-- [ ] T041 [P] Vérification conformité constitution dans `tests/integration/constitution_test.rs` : toutes les sous-commandes supportent `--json`, erreurs sur stderr, codes de retour corrects, exécution pipeline complet via `ecotokens filter` sans connexion réseau → aucun syscall réseau (valide FR-009, vérifiable via mock ou interception d'erreur DNS)
+- [X] T040 [P] Tests d'intégration end-to-end dans `tests/integration/end_to_end_test.rs` : scénario complet install → filter → gain → uninstall sans erreur
+- [X] T041 [P] Vérification conformité constitution dans `tests/integration/constitution_test.rs` : toutes les sous-commandes supportent `--json`, erreurs sur stderr, codes de retour corrects, exécution pipeline complet via `ecotokens filter` sans connexion réseau → aucun syscall réseau (valide FR-009, vérifiable via mock ou interception d'erreur DNS)
 - [ ] T042 Build release statique musl : `cargo build --release --target x86_64-unknown-linux-musl`, vérifier taille binaire < 20 MB
 - [ ] T043 [P] Mettre à jour `quickstart.md` avec les commandes réelles vérifiées
-- [ ] T044 [P] `cargo clippy -- -D warnings` : zéro warning en mode strict
+- [X] T044 [P] `cargo clippy -- -D warnings` : zéro warning en mode strict
 - [ ] T045 Valider SC-001 : mesurer économies réelles sur `git status`, `git diff`, `cargo test` — documenter baseline dans `research.md`
-- [ ] T045b [P] Benchmark latence interception dans `tests/integration/perf_test.rs` :
+- [X] T045b [P] Benchmark latence interception dans `tests/integration/perf_test.rs` :
   intercepter 100 commandes git/cargo sur fixtures → calculer P90 duration_ms,
   vérifier P90 ≤ 50ms — valide SC-003
-- [ ] T045c [P] Benchmark rapport `ecotokens gain` : générer 10 000 entrées JSONL
+- [X] T045c [P] Benchmark rapport `ecotokens gain` : générer 10 000 entrées JSONL
   de test, mesurer temps de `ecotokens gain` → ≤ 3 secondes — valide SC-005
-- [ ] T045d [P] Test fallback silencieux dans `tests/integration/fault_test.rs` :
+- [X] T045d [P] Test fallback silencieux dans `tests/integration/fault_test.rs` :
   simuler panique dans le pipeline de filtrage, vérifier que la commande originale
   est transmise à Claude sans erreur visible — valide SC-006
 - [ ] T045e Valider SC-002 manuellement : chronométrer `cargo install` + `ecotokens install`

@@ -2,18 +2,13 @@ use serde::{Deserialize, Serialize};
 use std::collections::HashMap;
 use std::path::PathBuf;
 
-#[derive(Debug, Clone, Serialize, Deserialize, PartialEq)]
+#[derive(Debug, Clone, Default, Serialize, Deserialize, PartialEq)]
 #[serde(rename_all = "snake_case")]
 pub enum EmbedProvider {
+    #[default]
     None,
     Ollama { url: String },
     LmStudio { url: String },
-}
-
-impl Default for EmbedProvider {
-    fn default() -> Self {
-        EmbedProvider::None
-    }
 }
 
 #[derive(Debug, Clone, Serialize, Deserialize)]
@@ -101,6 +96,7 @@ impl Settings {
         serde_json::from_str(&data).unwrap_or_default()
     }
 
+    #[allow(dead_code)]
     pub fn save(&self) -> std::io::Result<()> {
         let path = Self::config_path().ok_or_else(|| {
             std::io::Error::new(std::io::ErrorKind::NotFound, "cannot resolve config dir")
@@ -113,6 +109,7 @@ impl Settings {
         std::fs::write(&path, json)
     }
 
+    #[allow(dead_code)]
     pub fn validate(&self) -> Result<(), String> {
         if !(10..=10000).contains(&self.summary_threshold_lines) {
             return Err(format!(

@@ -12,7 +12,7 @@ pub enum Period {
 }
 
 impl Period {
-    pub fn from_str(s: &str) -> Self {
+    pub fn parse(s: &str) -> Self {
         match s {
             "today" => Period::Today,
             "week" => Period::Week,

@@ -38,6 +38,7 @@ pub struct Interception {
 }
 
 impl Interception {
+    #[allow(clippy::too_many_arguments)]
     pub fn new(
         command: String,
         command_family: CommandFamily,
@@ -105,6 +106,7 @@ pub fn read_from(path: &std::path::Path) -> std::io::Result<Vec<Interception>> {
 }
 
 /// Append to default metrics path (~/.config/ecotokens/metrics.jsonl).
+#[allow(dead_code)]
 pub fn append(interception: &Interception) -> std::io::Result<()> {
     let path = metrics_path().ok_or_else(|| {
         std::io::Error::new(std::io::ErrorKind::NotFound, "cannot resolve config dir")
@@ -113,6 +115,7 @@ pub fn append(interception: &Interception) -> std::io::Result<()> {
 }
 
 /// Read from default metrics path.
+#[allow(dead_code)]
 pub fn read_all() -> std::io::Result<Vec<Interception>> {
     match metrics_path() {
         Some(p) => read_from(&p),

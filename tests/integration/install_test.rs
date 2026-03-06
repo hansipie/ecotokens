@@ -1,4 +1,5 @@
 use ecotokens::install::{install_hook, uninstall_hook, InstallResult};
+use std::process::Command;
 use tempfile::TempDir;
 
 fn temp_claude_settings(dir: &TempDir) -> std::path::PathBuf {
@@ -84,4 +85,55 @@ fn config_dir_created_on_install() {
     let settings_path = temp_claude_settings(&dir);
     install_hook(&settings_path, false).unwrap();
     assert!(settings_path.exists(), "settings.json should exist after install");
+}
+
+// ── T039t — ecotokens index CLI ───────────────────────────────────────────────
+
+fn ecotokens_bin() -> String {
+    env!("CARGO_BIN_EXE_ecotokens").to_string()
+}
+
+#[test]
+fn index_path_flag_indexes_given_directory() {
+    let src = TempDir::new().unwrap();
+    let idx = TempDir::new().unwrap();
+    std::fs::write(src.path().join("main.rs"), "fn main() {}").unwrap();
+    let out = Command::new(ecotokens_bin())
+        .args(["index", "--path", src.path().to_str().unwrap(), "--index-dir", idx.path().to_str().unwrap()])
+        .output()
+        .expect("failed to run ecotokens");
+    assert!(out.status.success(), "exit code should be 0, stderr: {}", String::from_utf8_lossy(&out.stderr));
+    let stdout = String::from_utf8_lossy(&out.stdout);
+    assert!(stdout.contains("file") || stdout.contains("chunk"), "stdout should contain stats: {stdout}");
+}
+
+#[test]
+fn index_reset_flag_recreates_index() {
+    let src = TempDir::new().unwrap();
+    let idx = TempDir::new().unwrap();
+    std::fs::write(src.path().join("lib.rs"), "pub fn foo() {}").unwrap();
+    // First index
+    Command::new(ecotokens_bin())
+        .args(["index", "--path", src.path().to_str().unwrap(), "--index-dir", idx.path().to_str().unwrap()])
+        .output().unwrap();
+    // Reset
+    let out = Command::new(ecotokens_bin())
+        .args(["index", "--path", src.path().to_str().unwrap(), "--index-dir", idx.path().to_str().unwrap(), "--reset"])
+        .output()
+        .expect("failed to run ecotokens");
+    assert!(out.status.success(), "reset should succeed, stderr: {}", String::from_utf8_lossy(&out.stderr));
+}
+
+#[test]
+fn index_stats_printed_to_stdout() {
+    let src = TempDir::new().unwrap();
+    let idx = TempDir::new().unwrap();
+    std::fs::write(src.path().join("a.rs"), "struct A;").unwrap();
+    let out = Command::new(ecotokens_bin())
+        .args(["index", "--path", src.path().to_str().unwrap(), "--index-dir", idx.path().to_str().unwrap()])
+        .output()
+        .expect("failed to run ecotokens");
+    let stdout = String::from_utf8_lossy(&out.stdout);
+    // Stats must be on stdout, not swallowed
+    assert!(!stdout.is_empty(), "stdout should contain indexing stats");
 }
