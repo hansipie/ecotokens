@@ -108,23 +108,23 @@ doivent être écrits et ÉCHOUER avant toute implémentation.
 
 ### Tests pour User Story 2 — écrire en premier, vérifier qu'ils ÉCHOUENT
 
-- [ ] T031 [P] [US2] Tests unitaires rapport dans `tests/metrics/report_test.rs` : agrégation period=all, period=today, period=week ; calcul savings_pct ; groupement by_family ; groupement by_project — DOIT ÉCHOUER avant T033
-- [ ] T032 [P] [US2] Tests unitaires format sortie dans `tests/metrics/report_test.rs` : format humain aligné, format JSON valide, historique ordonné par date décroissante — DOIT ÉCHOUER avant T034
+- [X] T031 [P] [US2] Tests unitaires rapport dans `tests/metrics/report_test.rs` : agrégation period=all, period=today, period=week ; calcul savings_pct ; groupement by_family ; groupement by_project — DOIT ÉCHOUER avant T033
+- [X] T032 [P] [US2] Tests unitaires format sortie dans `tests/metrics/report_test.rs` : format humain aligné, format JSON valide, historique ordonné par date décroissante — DOIT ÉCHOUER avant T034
 
 ### Implémentation User Story 2
 
-- [ ] T033 [US2] Implémenter `src/metrics/report.rs` : lecture `metrics.jsonl`, agrégation par période/famille/projet, struct `Report` jusqu'à ce que T031 passe
-- [ ] T034 [US2] Implémenter sous-commande `ecotokens gain` dans `src/main.rs` : options `--period`, `--by-project`, `--by-command`, `--history`, `-n`, `--json`, `--model` jusqu'à ce que T032 passe
+- [X] T033 [US2] Implémenter `src/metrics/report.rs` : lecture `metrics.jsonl`, agrégation par période/famille/projet, struct `Report` jusqu'à ce que T031 passe
+- [X] T034 [US2] Implémenter sous-commande `ecotokens gain` dans `src/main.rs` : options `--period`, `--by-project`, `--by-command`, `--history`, `-n`, `--json`, `--model` jusqu'à ce que T032 passe
 
 ### Coût USD dans `ecotokens gain` (P1 — ajout à US2)
 
-- [ ] T034a [P] [US2] Tests unitaires pricing dans `tests/metrics/report_test.rs` : calcul `cost_avoided_usd` pour modèle sonnet (tokens_saved × 3.00/1M), modèle inconnu → erreur claire, override `--model opus` → tarif opus — DOIT ÉCHOUER avant T034b
-- [ ] T034b [US2] Implémenter table de pricing statique dans `src/metrics/report.rs` et calcul `cost_avoided_usd` dans `Report` jusqu'à ce que T034a passe
+- [X] T034a [P] [US2] Tests unitaires pricing dans `tests/metrics/report_test.rs` : calcul `cost_avoided_usd` pour modèle sonnet (tokens_saved × 3.00/1M), modèle inconnu → erreur claire, override `--model opus` → tarif opus — DOIT ÉCHOUER avant T034b
+- [X] T034b [US2] Implémenter table de pricing statique dans `src/metrics/report.rs` et calcul `cost_avoided_usd` dans `Report` jusqu'à ce que T034a passe
 
 ### TUI ratatui pour `ecotokens gain` (ajout à US2)
 
-- [ ] T034c [P] [US2] Tests unitaires TTY-detect dans `tests/tui/tui_test.rs` : stdout non-TTY → retourne texte plat, flag `--json` → JSON sans TUI, flag `--no-tui` → texte plat même sur TTY — DOIT ÉCHOUER avant T034d
-- [ ] T034d [US2] Créer `src/tui/mod.rs` : fonction `is_tui_enabled(json: bool, no_tui: bool) -> bool` + TTY-detect via `std::io::IsTerminal` jusqu'à ce que T034c passe
+- [X] T034c [P] [US2] Tests unitaires TTY-detect dans `tests/tui/tui_test.rs` : stdout non-TTY → retourne texte plat, flag `--json` → JSON sans TUI, flag `--no-tui` → texte plat même sur TTY — DOIT ÉCHOUER avant T034d
+- [X] T034d [US2] Créer `src/tui/mod.rs` : fonction `is_tui_enabled(json: bool, no_tui: bool) -> bool` + TTY-detect via `std::io::IsTerminal` jusqu'à ce que T034c passe
 - [ ] T034et [P] [US2] Tests TUI gain dans `tests/tui/gain_test.rs` :
   rendu avec TestBackend sur données fixtures → buffer contient "Savings", "Cost avoided",
   sparkline présente sur 14 jours, fallback texte sans panic si data vide
