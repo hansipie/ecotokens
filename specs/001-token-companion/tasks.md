@@ -65,36 +65,36 @@ doivent être écrits et ÉCHOUER avant toute implémentation.
 
 ### Tests pour User Story 1 — écrire en premier, vérifier qu'ils ÉCHOUENT
 
-- [ ] T017 [P] [US1] Tests unitaires hook dans `tests/hook/handler_test.rs` : parsing JSON stdin valide, commande exclue → passthrough JSON, commande non-exclue → JSON avec `updatedInput` réécrit, modifier exclusion list dans config.json puis ré-invoquer → nouvelle liste prise en compte sans redémarrage — DOIT ÉCHOUER avant T021
-- [ ] T018 [P] [US1] Tests unitaires filtre git dans `tests/filter/git_test.rs` : `git status` propre → résumé court, `git status` avec fichiers modifiés → sections pertinentes conservées, `git diff` long → tronqué — DOIT ÉCHOUER avant T022
-- [ ] T019 [P] [US1] Tests unitaires filtre cargo dans `tests/filter/cargo_test.rs` : `cargo build` succès → stats seulement, `cargo build` avec erreurs → erreurs conservées, warnings → résumé comptage — DOIT ÉCHOUER avant T023
-- [ ] T020 [P] [US1] Tests unitaires filtre fs dans `tests/filter/fs_test.rs` : `ls -la` court → passthrough, `ls -la` long → tronqué à N entrées, `find` > 500 lignes → résumé — DOIT ÉCHOUER avant T024
-- [ ] T021 [US1] Intégration : test `ecotokens install` dans `tests/integration/install_test.rs` : vérifie écriture dans `~/.claude/settings.json` et création `~/.config/ecotokens/config.json` — DOIT ÉCHOUER avant T028
+- [X] T017 [P] [US1] Tests unitaires hook dans `tests/hook/handler_test.rs` : parsing JSON stdin valide, commande exclue → passthrough JSON, commande non-exclue → JSON avec `updatedInput` réécrit, modifier exclusion list dans config.json puis ré-invoquer → nouvelle liste prise en compte sans redémarrage — DOIT ÉCHOUER avant T021
+- [X] T017 [P] [US1] Tests unitaires filtre git dans `tests/filter/git_test.rs` : `git status` propre → résumé court, `git status` avec fichiers modifiés → sections pertinentes conservées, `git diff` long → tronqué — DOIT ÉCHOUER avant T022
+- [X] T017 [P] [US1] Tests unitaires filtre cargo dans `tests/filter/cargo_test.rs` : `cargo build` succès → stats seulement, `cargo build` avec erreurs → erreurs conservées, warnings → résumé comptage — DOIT ÉCHOUER avant T023
+- [X] T020 [P] [US1] Tests unitaires filtre fs dans `tests/filter/fs_test.rs` : `ls -la` court → passthrough, `ls -la` long → tronqué à N entrées, `find` > 500 lignes → résumé — DOIT ÉCHOUER avant T024
+- [X] T020 [US1] Intégration : test `ecotokens install` dans `tests/integration/install_test.rs` : vérifie écriture dans `~/.claude/settings.json` et création `~/.config/ecotokens/config.json` — DOIT ÉCHOUER avant T028
 
 ### Implémentation User Story 1
 
-- [ ] T022 [P] [US1] Implémenter `src/filter/git.rs` : filtres pour `git status`, `git diff`, `git log`, `git show` jusqu'à ce que T018 passe
-- [ ] T023 [P] [US1] Implémenter `src/filter/cargo.rs` : filtres pour `cargo build`, `cargo test`, `cargo check`, `cargo clippy` jusqu'à ce que T019 passe
-- [ ] T024 [P] [US1] Implémenter `src/filter/fs.rs` : filtres pour `ls`, `find`, `tree` jusqu'à ce que T020 passe
-- [ ] T025 [US1] Implémenter `src/hook/mod.rs` et `src/hook/handler.rs` : lecture stdin JSON, détection exclusion, réécriture commande → `ecotokens filter -- <cmd>`, output JSON PreToolUse jusqu'à ce que T017 passe
-- [ ] T026t [P] [US1] Tests unitaires metrics store dans `tests/metrics/store_test.rs` :
+- [X] T020 [P] [US1] Implémenter `src/filter/git.rs` : filtres pour `git status`, `git diff`, `git log`, `git show` jusqu'à ce que T018 passe
+- [X] T020 [P] [US1] Implémenter `src/filter/cargo.rs` : filtres pour `cargo build`, `cargo test`, `cargo check`, `cargo clippy` jusqu'à ce que T019 passe
+- [X] T020 [P] [US1] Implémenter `src/filter/fs.rs` : filtres pour `ls`, `find`, `tree` jusqu'à ce que T020 passe
+- [X] T020 [US1] Implémenter `src/hook/mod.rs` et `src/hook/handler.rs` : lecture stdin JSON, détection exclusion, réécriture commande → `ecotokens filter -- <cmd>`, output JSON PreToolUse jusqu'à ce que T017 passe
+- [X] T020t [P] [US1] Tests unitaires metrics store dans `tests/metrics/store_test.rs` :
   écriture d'une `Interception` dans JSONL → fichier créé et ligne valide JSON,
   lecture fichier existant → vec<Interception> correct, fichier absent → Ok (crée vide),
   deux appels successifs → deux lignes distinctes, champ `savings_pct` = 0 si mode passthrough
   — DOIT ÉCHOUER avant T026
-- [ ] T026 [US1] Implémenter `src/metrics/mod.rs` et `src/metrics/store.rs` : struct `Interception`, écriture append-only dans `~/.config/ecotokens/metrics.jsonl`
-- [ ] T027 [US1] Implémenter sous-commande `ecotokens filter` dans `src/main.rs` : exécution commande originale, pipeline filtre famille → masquage → comptage tokens → enregistrement métriques → stdout
-- [ ] T028 [US1] Implémenter sous-commande `ecotokens install` dans `src/main.rs` : écriture hook dans `~/.claude/settings.json` (idempotent), création config par défaut jusqu'à ce que T021 passe
-- [ ] T029t [P] [US1] Tests unitaires uninstall dans `tests/integration/install_test.rs` :
+- [X] T020 [US1] Implémenter `src/metrics/mod.rs` et `src/metrics/store.rs` : struct `Interception`, écriture append-only dans `~/.config/ecotokens/metrics.jsonl`
+- [X] T020 [US1] Implémenter sous-commande `ecotokens filter` dans `src/main.rs` : exécution commande originale, pipeline filtre famille → masquage → comptage tokens → enregistrement métriques → stdout
+- [X] T020 [US1] Implémenter sous-commande `ecotokens install` dans `src/main.rs` : écriture hook dans `~/.claude/settings.json` (idempotent), création config par défaut jusqu'à ce que T021 passe
+- [X] T020t [P] [US1] Tests unitaires uninstall dans `tests/integration/install_test.rs` :
   hook présent → suppression de l'entrée ecotokens uniquement (autres hooks intacts),
   hook absent → Ok sans erreur (idempotent), config ~/.config/ecotokens/ intacte après
   uninstall — DOIT ÉCHOUER avant T029
-- [ ] T029 [US1] Implémenter sous-commande `ecotokens uninstall` dans `src/main.rs` : suppression entrée hook de `~/.claude/settings.json`
-- [ ] T030t [P] [US1] Tests unitaires --debug dans `tests/hook/handler_test.rs` :
+- [X] T020 [US1] Implémenter sous-commande `ecotokens uninstall` dans `src/main.rs` : suppression entrée hook de `~/.claude/settings.json`
+- [X] T030t [P] [US1] Tests unitaires --debug dans `tests/hook/handler_test.rs` :
   flag --debug activé → lignes "[ecotokens debug]" sur stderr avec command/tokens/savings,
   flag absent → stderr vide pour les métriques, stdout identique avec ou sans --debug
   — DOIT ÉCHOUER avant T030
-- [ ] T030 [US1] Implémenter mode `--debug` dans `src/hook/handler.rs` et `ecotokens filter` : affichage command/tokens_before/tokens_after/savings/duration_ms sur stderr
+- [X] T030 [US1] Implémenter mode `--debug` dans `src/hook/handler.rs` et `ecotokens filter` : affichage command/tokens_before/tokens_after/savings/duration_ms sur stderr
 
 **Checkpoint**: User Story 1 complète — `ecotokens install && git status` dans Claude Code réduit les tokens ≥ 60% pour git
 
