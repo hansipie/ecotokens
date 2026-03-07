@@ -274,7 +274,7 @@ fn main() {
                     loop {
                         let ts = chrono::Utc::now().format("%H:%M:%S").to_string();
                         let _ = terminal.draw(|f| {
-                            tui::gain::render_gain(f, f.area(), &report, &items, Some(&ts));
+                            tui::gain::render_gain(f, f.area(), &report, &items, Some(&ts), by_project);
                         });
                         if poll(std::time::Duration::from_secs(1)).unwrap_or(false) {
                             if let Ok(Event::Key(key)) = read() {

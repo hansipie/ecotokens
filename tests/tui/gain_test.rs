@@ -40,7 +40,7 @@ fn gain_renders_savings_label() {
     let backend = TestBackend::new(100, 25);
     let mut terminal = Terminal::new(backend).unwrap();
     terminal
-        .draw(|frame| render_gain(frame, frame.area(), &report, &items, None))
+        .draw(|frame| render_gain(frame, frame.area(), &report, &items, None, false))
         .unwrap();
     let content = buffer_text(&terminal);
     assert!(
@@ -56,7 +56,7 @@ fn gain_renders_cost_avoided_label() {
     let backend = TestBackend::new(100, 25);
     let mut terminal = Terminal::new(backend).unwrap();
     terminal
-        .draw(|frame| render_gain(frame, frame.area(), &report, &items, None))
+        .draw(|frame| render_gain(frame, frame.area(), &report, &items, None, false))
         .unwrap();
     let content = buffer_text(&terminal);
     assert!(
@@ -71,7 +71,7 @@ fn gain_renders_without_panic_on_empty_data() {
     let backend = TestBackend::new(100, 25);
     let mut terminal = Terminal::new(backend).unwrap();
     terminal
-        .draw(|frame| render_gain(frame, frame.area(), &report, &[], None))
+        .draw(|frame| render_gain(frame, frame.area(), &report, &[], None, false))
         .unwrap();
     let content = buffer_text(&terminal);
     assert!(!content.trim().is_empty(), "buffer should not be completely empty");
@@ -92,7 +92,7 @@ fn gain_sparkline_present_for_14_days() {
     let backend = TestBackend::new(100, 30);
     let mut terminal = Terminal::new(backend).unwrap();
     terminal
-        .draw(|frame| render_gain(frame, frame.area(), &report, &items, None))
+        .draw(|frame| render_gain(frame, frame.area(), &report, &items, None, false))
         .unwrap();
     let content = buffer_text(&terminal);
     assert!(
@@ -112,7 +112,7 @@ fn gain_shows_family_breakdown() {
     let backend = TestBackend::new(100, 30);
     let mut terminal = Terminal::new(backend).unwrap();
     terminal
-        .draw(|frame| render_gain(frame, frame.area(), &report, &items, None))
+        .draw(|frame| render_gain(frame, frame.area(), &report, &items, None, false))
         .unwrap();
     let content = buffer_text(&terminal);
     let lower = content.to_lowercase();
