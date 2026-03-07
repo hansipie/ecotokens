@@ -14,7 +14,7 @@ use crate::metrics::store::Interception;
 ///   - top:    summary stats (interceptions, tokens, savings %, cost USD)
 ///   - middle: one Gauge per command family, sorted by savings desc
 ///   - bottom: Sparkline of tokens saved over the last 14 days
-pub fn render_gain(frame: &mut Frame, area: Rect, report: &Report, items: &[Interception]) {
+pub fn render_gain(frame: &mut Frame, area: Rect, report: &Report, items: &[Interception], last_updated: Option<&str>) {
     let chunks = Layout::default()
         .direction(Direction::Vertical)
         .constraints([
@@ -24,14 +24,14 @@ pub fn render_gain(frame: &mut Frame, area: Rect, report: &Report, items: &[Inte
         ])
         .split(area);
 
-    render_stats(frame, chunks[0], report);
+    render_stats(frame, chunks[0], report, last_updated);
     render_families(frame, chunks[1], report);
     render_sparkline(frame, chunks[2], items);
 }
 
 // ── Stats panel ───────────────────────────────────────────────────────────────
 
-fn render_stats(frame: &mut Frame, area: Rect, report: &Report) {
+fn render_stats(frame: &mut Frame, area: Rect, report: &Report, last_updated: Option<&str>) {
     let saved = report.total_tokens_before.saturating_sub(report.total_tokens_after);
     let text = vec![
         Line::from(vec![
@@ -49,8 +49,12 @@ fn render_stats(frame: &mut Frame, area: Rect, report: &Report) {
         ]),
     ];
 
+    let title = match last_updated {
+        Some(ts) => format!(" ecotokens gain – mis à jour {ts} UTC "),
+        None => " ecotokens gain ".to_string(),
+    };
     let paragraph = Paragraph::new(text)
-        .block(Block::default().borders(Borders::ALL).title(" ecotokens gain "));
+        .block(Block::default().borders(Borders::ALL).title(title));
     frame.render_widget(paragraph, area);
 }
 
