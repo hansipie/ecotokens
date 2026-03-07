@@ -54,6 +54,12 @@ enum Commands {
     Config {
         #[arg(long)]
         json: bool,
+        /// Set embed provider: ollama, lmstudio, none
+        #[arg(long)]
+        embed_provider: Option<String>,
+        /// URL du provider d'embeddings (ex: http://localhost:11434)
+        #[arg(long)]
+        embed_url: Option<String>,
     },
     /// Index a directory for BM25 + symbolic search
     Index {
@@ -146,6 +152,12 @@ fn default_settings_path() -> PathBuf {
         .unwrap_or_else(|| PathBuf::from("."))
         .join(".claude")
         .join("settings.json")
+}
+
+fn default_claude_json_path() -> PathBuf {
+    dirs::home_dir()
+        .unwrap_or_else(|| PathBuf::from("."))
+        .join(".claude.json")
 }
 
 fn detect_family(command: &str) -> metrics::store::CommandFamily {
@@ -322,29 +334,95 @@ fn main() {
 
         Commands::Install { with_mcp } => {
             let path = default_settings_path();
-            match install::install_hook(&path, with_mcp) {
-                Ok(()) => println!("ecotokens hook installed → {}", path.display()),
+            let claude_json = default_claude_json_path();
+            match install::install_hook(&path, &claude_json, with_mcp) {
+                Ok(()) => {
+                    println!("ecotokens hook installed → {}", path.display());
+                    if with_mcp {
+                        println!("ecotokens MCP server registered → {}", claude_json.display());
+                    }
+                }
                 Err(e) => { eprintln!("install error: {e}"); std::process::exit(1); }
             }
         }
 
         Commands::Uninstall => {
             let path = default_settings_path();
-            match install::uninstall_hook(&path) {
-                Ok(()) => println!("ecotokens hook removed"),
+            let claude_json = default_claude_json_path();
+            let had_hook = install::is_hook_installed(&path);
+            let had_mcp = install::is_mcp_registered(&claude_json);
+            match install::uninstall_hook(&path, &claude_json) {
+                Ok(()) => {
+                    if had_hook {
+                        println!("ecotokens hook removed ← {}", path.display());
+                    }
+                    if had_mcp {
+                        println!("ecotokens MCP server unregistered ← {}", claude_json.display());
+                    }
+                    if !had_hook && !had_mcp {
+                        println!("ecotokens: nothing to uninstall");
+                    }
+                }
                 Err(e) => { eprintln!("uninstall error: {e}"); std::process::exit(1); }
             }
         }
 
-        Commands::Config { json } => {
-            let settings = config::Settings::load();
+        Commands::Config { json, embed_provider, embed_url } => {
+            use config::settings::EmbedProvider;
+            let mut settings = config::Settings::load();
+            let settings_path = default_settings_path();
+            let claude_json = default_claude_json_path();
+
+            // Mutation via --embed-provider
+            if let Some(ref provider_name) = embed_provider {
+                let default_url = match provider_name.as_str() {
+                    "ollama" => "http://localhost:11434",
+                    "lmstudio" => "http://localhost:1234",
+                    _ => "",
+                };
+                let url = embed_url.clone().unwrap_or_else(|| default_url.to_string());
+
+                settings.embed_provider = match provider_name.as_str() {
+                    "ollama" => EmbedProvider::Ollama { url },
+                    "lmstudio" => EmbedProvider::LmStudio { url },
+                    "none" => EmbedProvider::None,
+                    other => {
+                        eprintln!(
+                            "provider inconnu: '{}'. Valeurs valides: ollama, lmstudio, none",
+                            other
+                        );
+                        std::process::exit(1);
+                    }
+                };
+
+                match settings.save() {
+                    Ok(()) => eprintln!("embed_provider mis à jour"),
+                    Err(e) => { eprintln!("erreur sauvegarde: {e}"); std::process::exit(1); }
+                }
+            }
+
+            let provider_str = match &settings.embed_provider {
+                EmbedProvider::None => "none".to_string(),
+                EmbedProvider::Ollama { url } => format!("ollama ({})", url),
+                EmbedProvider::LmStudio { url } => format!("lmstudio ({})", url),
+            };
+
+            let hook_installed = install::is_hook_installed(&settings_path);
+            let mcp_registered = install::is_mcp_registered(&claude_json);
+
             if json {
-                println!("{}", serde_json::to_string_pretty(&settings).unwrap());
+                let mut v = serde_json::to_value(&settings).unwrap();
+                v["hook_installed"] = serde_json::Value::Bool(hook_installed);
+                v["mcp_registered"] = serde_json::Value::Bool(mcp_registered);
+                println!("{}", serde_json::to_string_pretty(&v).unwrap());
             } else {
+                println!("hook_installed : {}", hook_installed);
+                println!("mcp_registered : {}", mcp_registered);
                 println!("debug          : {}", settings.debug);
                 println!("threshold_lines: {}", settings.summary_threshold_lines);
                 println!("threshold_bytes: {}", settings.summary_threshold_bytes);
                 println!("exclusions     : {:?}", settings.exclusions);
+                println!("embed_provider : {}", provider_str);
             }
         }
 
@@ -382,6 +460,7 @@ fn main() {
                     path: target,
                     index_dir: idx_dir,
                     progress: Some(counter.clone()),
+                    embed_provider: config::Settings::load().embed_provider,
                 };
 
                 let _ = enable_raw_mode();
@@ -441,6 +520,7 @@ fn main() {
                 eprintln!("Indexing {}…", target.display());
                 let opts = search::index::IndexOptions {
                     reset, path: target, index_dir: idx_dir, progress: None,
+                    embed_provider: config::Settings::load().embed_provider,
                 };
                 match search::index::index_directory(opts) {
                     Ok(stats) => println!("Indexed {} files, {} chunks", stats.file_count, stats.chunk_count),
@@ -516,7 +596,8 @@ fn main() {
 
         Commands::Search { query, top_k, index_dir, json } => {
             let idx_dir = index_dir.unwrap_or_else(default_index_dir);
-            let opts = search::query::SearchOptions { query, top_k, index_dir: idx_dir };
+            let embed_provider = config::Settings::load().embed_provider;
+            let opts = search::query::SearchOptions { query, top_k, index_dir: idx_dir, embed_provider };
             match search::query::search_index(opts) {
                 Ok(results) => {
                     if json {
