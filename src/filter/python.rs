@@ -7,7 +7,7 @@ pub fn filter_python(command: &str, output: &str) -> String {
 
     if cmd.starts_with("pytest") || cmd.contains("pytest") {
         filter_pytest(output)
-    } else if cmd.starts_with("pip ") {
+    } else if cmd.starts_with("pip ") || cmd.starts_with("uv pip ") {
         filter_pip(output)
     } else if cmd.starts_with("ruff ") {
         filter_ruff(output)
@@ -19,23 +19,17 @@ pub fn filter_python(command: &str, output: &str) -> String {
 fn filter_pytest(output: &str) -> String {
     let lines: Vec<&str> = output.lines().collect();
 
-    // Always keep: FAILED, ERROR, summary line (e.g. "=== 1 failed, 2 passed in 0.12s ===")
-    // and the "FAILURES" section headers.
-    let failure_re = regex!(r"^(FAILURES|ERRORS)($|\s)");
-    let summary_re = regex!(r"^={3,}.+={3,}$");
+    // pytest section headers look like: "=== FAILURES ===" or "=== short test summary info ==="
+    // We detect them and track whether we're inside a failure/error section.
+    let section_re = regex!(r"^={3,}\s+(.+?)\s+={3,}$");
 
     let mut important = Vec::new();
     let mut in_failure_section = false;
 
     for line in &lines {
-        if failure_re.is_match(line) {
-            in_failure_section = true;
-            important.push(*line);
-            continue;
-        }
-
-        if summary_re.is_match(line) {
-            in_failure_section = false;
+        if let Some(caps) = section_re.captures(line) {
+            let title = caps.get(1).map_or("", |m| m.as_str()).to_uppercase();
+            in_failure_section = title.contains("FAILURES") || title.contains("ERRORS");
             important.push(*line);
             continue;
         }
@@ -43,7 +37,7 @@ fn filter_pytest(output: &str) -> String {
         if line.starts_with("E   ") || line.contains("FAILED") || line.contains("ERROR") {
             important.push(*line);
         } else if in_failure_section {
-            // Keep content of failure sections
+            // Keep all content inside failure/error sections (tracebacks, assertions, etc.)
             important.push(*line);
         }
     }
@@ -77,12 +71,23 @@ fn filter_pip(output: &str) -> String {
 }
 
 fn filter_ruff(output: &str) -> String {
-    // Ruff output is usually concise, but can be long if many errors.
-    // We keep all error lines but maybe summarize if too many.
     let lines: Vec<&str> = output.lines().collect();
     if lines.len() <= 100 {
         return output.to_string();
     }
 
-    filter_generic(output, 100, 51200)
+    // Keep structured diagnostic lines (file:line:col: CODE msg) and summary lines.
+    // This avoids head+tail which loses errors in the middle.
+    let diag_re = regex!(r"^\S.*:\d+:\d+: [A-Z]\d+ ");
+    let result: Vec<&str> = lines
+        .iter()
+        .copied()
+        .filter(|l| diag_re.is_match(l) || l.starts_with("Found ") || l.starts_with("error:"))
+        .collect();
+
+    if result.is_empty() {
+        return filter_generic(output, 100, 51200);
+    }
+
+    result.join("\n")
 }
