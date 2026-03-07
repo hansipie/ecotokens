@@ -10,11 +10,37 @@ use ratatui::{
 use crate::metrics::report::Report;
 use crate::metrics::store::Interception;
 
+#[derive(Clone, Copy, Default)]
+pub enum SparklineMode {
+    #[default]
+    Linear,
+    Log,
+    Capped,
+}
+
+impl SparklineMode {
+    pub fn next(self) -> Self {
+        match self {
+            SparklineMode::Linear => SparklineMode::Log,
+            SparklineMode::Log => SparklineMode::Capped,
+            SparklineMode::Capped => SparklineMode::Linear,
+        }
+    }
+
+    fn label(self) -> &'static str {
+        match self {
+            SparklineMode::Linear => "linear",
+            SparklineMode::Log => "log",
+            SparklineMode::Capped => "capped",
+        }
+    }
+}
+
 /// Render the gain dashboard:
 ///   - top:    summary stats (interceptions, tokens, savings %, cost USD)
 ///   - middle: one Gauge per command family, sorted by savings desc
 ///   - bottom: Sparkline of tokens saved over the last 14 days
-pub fn render_gain(frame: &mut Frame, area: Rect, report: &Report, items: &[Interception], last_updated: Option<&str>, by_project: bool) {
+pub fn render_gain(frame: &mut Frame, area: Rect, report: &Report, items: &[Interception], last_updated: Option<&str>, by_project: bool, sparkline_mode: SparklineMode) {
     let chunks = Layout::default()
         .direction(Direction::Vertical)
         .constraints([
@@ -30,7 +56,7 @@ pub fn render_gain(frame: &mut Frame, area: Rect, report: &Report, items: &[Inte
     } else {
         render_families(frame, chunks[1], report);
     }
-    render_sparkline(frame, chunks[2], items);
+    render_sparkline(frame, chunks[2], items, sparkline_mode);
 }
 
 // ── Stats panel ───────────────────────────────────────────────────────────────
@@ -164,15 +190,44 @@ fn render_projects(frame: &mut Frame, area: Rect, report: &Report) {
 
 // ── Sparkline (14 days) ───────────────────────────────────────────────────────
 
-fn render_sparkline(frame: &mut Frame, area: Rect, items: &[Interception]) {
-    let data = build_sparkline_data(items);
+fn render_sparkline(frame: &mut Frame, area: Rect, items: &[Interception], mode: SparklineMode) {
+    let raw = build_sparkline_data(items);
+    let data = match mode {
+        SparklineMode::Linear => raw,
+        SparklineMode::Log => log_scale(&raw),
+        SparklineMode::Capped => cap_scale(&raw),
+    };
 
+    let title = format!(" Savings (14 days) · {} [s] ", mode.label());
     let sparkline = Sparkline::default()
-        .block(Block::default().borders(Borders::ALL).title(" Savings (14 days) "))
+        .block(Block::default().borders(Borders::ALL).title(title))
         .style(Style::default().fg(Color::Green))
         .data(&data);
 
     frame.render_widget(sparkline, area);
+}
+
+fn log_scale(data: &[u64]) -> Vec<u64> {
+    let max = data.iter().copied().max().unwrap_or(0);
+    if max == 0 {
+        return vec![0; data.len()];
+    }
+    let log_max = ((max + 1) as f64).ln();
+    data.iter()
+        .map(|&v| (((v + 1) as f64).ln() / log_max * 1000.0) as u64)
+        .collect()
+}
+
+/// Plafonne au P90 des valeurs non-nulles pour éviter qu'un outlier écrase le reste.
+fn cap_scale(data: &[u64]) -> Vec<u64> {
+    let mut nonzero: Vec<u64> = data.iter().copied().filter(|&v| v > 0).collect();
+    if nonzero.is_empty() {
+        return vec![0; data.len()];
+    }
+    nonzero.sort_unstable();
+    let p90_idx = ((nonzero.len() as f64 * 0.9) as usize).min(nonzero.len() - 1);
+    let cap = nonzero[p90_idx].max(1);
+    data.iter().map(|&v| v.min(cap)).collect()
 }
 
 /// Bucket tokens_saved per day over the last 14 days.

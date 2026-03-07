@@ -294,10 +294,11 @@ fn main() {
                 let _ = std::io::stdout().execute(EnterAlternateScreen);
                 let backend = CrosstermBackend::new(std::io::stdout());
                 if let Ok(mut terminal) = Terminal::new(backend) {
+                    let mut sparkline_mode = tui::gain::SparklineMode::default();
                     loop {
                         let ts = chrono::Utc::now().format("%H:%M:%S").to_string();
                         let _ = terminal.draw(|f| {
-                            tui::gain::render_gain(f, f.area(), &report, &items, Some(&ts), by_project);
+                            tui::gain::render_gain(f, f.area(), &report, &items, Some(&ts), by_project, sparkline_mode);
                         });
                         if poll(std::time::Duration::from_secs(1)).unwrap_or(false) {
                             if let Ok(Event::Key(key)) = read() {
@@ -306,6 +307,9 @@ fn main() {
                                         && key.modifiers.contains(KeyModifiers::CONTROL))
                                 {
                                     break;
+                                }
+                                if key.code == KeyCode::Char('s') {
+                                    sparkline_mode = sparkline_mode.next();
                                 }
                             }
                         } else {
