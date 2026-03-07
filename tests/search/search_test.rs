@@ -18,7 +18,7 @@ fn build_fixture_index() -> (TempDir, TempDir) {
         src.path().join("README.md"),
         "# Project\n\n## Authentication\n\nThe system uses token-based auth.\n",
     ).unwrap();
-    let opts = IndexOptions { reset: false, path: src.path().to_path_buf(), index_dir: idx.path().to_path_buf() };
+    let opts = IndexOptions { reset: false, path: src.path().to_path_buf(), index_dir: idx.path().to_path_buf(), progress: None };
     index_directory(opts).unwrap();
     (src, idx)
 }

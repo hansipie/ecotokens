@@ -57,6 +57,7 @@ pub fn orchestrator() {
         reset: false,
         path: src.path().to_path_buf(),
         index_dir: idx.path().to_path_buf(),
+        progress: None,
     };
     index_directory(opts).expect("indexing should succeed");
 

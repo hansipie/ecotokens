@@ -1,5 +1,7 @@
 use serde::{Deserialize, Serialize};
 use std::path::{Path, PathBuf};
+use std::sync::atomic::{AtomicUsize, Ordering};
+use std::sync::Arc;
 use tantivy::schema::*;
 use tantivy::{doc, Index, IndexWriter};
 
@@ -11,6 +13,7 @@ pub struct IndexOptions {
     pub reset: bool,
     pub path: PathBuf,
     pub index_dir: PathBuf,
+    pub progress: Option<Arc<AtomicUsize>>,
 }
 
 #[derive(Debug, Clone, Serialize, Deserialize)]
@@ -114,6 +117,9 @@ pub fn index_directory(opts: IndexOptions) -> tantivy::Result<IndexStats> {
         }
 
         file_count += 1;
+        if let Some(p) = &opts.progress {
+            p.fetch_add(1, Ordering::Relaxed);
+        }
     }
 
     writer.commit()?;

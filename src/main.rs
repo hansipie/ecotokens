@@ -142,9 +142,26 @@ fn detect_family(command: &str) -> metrics::store::CommandFamily {
     let cmd = command.trim();
     if cmd.starts_with("git ") { CommandFamily::Git }
     else if cmd.starts_with("cargo ") { CommandFamily::Cargo }
+    else if is_cpp_command(cmd) { CommandFamily::Cpp }
     else if cmd.starts_with("python") || cmd.starts_with("pytest") || cmd.starts_with("pip ") || cmd.starts_with("ruff ") || cmd.starts_with("uv ") { CommandFamily::Python }
     else if cmd.starts_with("ls") || cmd.starts_with("find") || cmd.starts_with("tree") { CommandFamily::Fs }
     else { CommandFamily::Generic }
+}
+
+fn is_cpp_command(command: &str) -> bool {
+    use std::path::Path;
+
+    let Some(program) = command.split_whitespace().next() else {
+        return false;
+    };
+    let Some(program) = Path::new(program).file_name().and_then(|name| name.to_str()) else {
+        return false;
+    };
+
+    matches!(
+        program,
+        "gcc" | "g++" | "cc" | "c++" | "clang" | "clang++" | "clang-cl" | "make" | "cmake" | "ninja"
+    )
 }
 
 fn apply_filter(command: &str, output: &str) -> String {
@@ -156,6 +173,7 @@ fn apply_filter(command: &str, output: &str) -> String {
     match detect_family(command) {
         CommandFamily::Git => filter::git::filter_git(command, output),
         CommandFamily::Cargo => filter::cargo::filter_cargo(command, output),
+        CommandFamily::Cpp => filter::cpp::filter_cpp(command, output),
         CommandFamily::Python => filter::python::filter_python(command, output),
         CommandFamily::Fs => filter::fs::filter_fs(command, output),
         CommandFamily::Markdown => filter::markdown::filter_markdown(output),
@@ -317,23 +335,100 @@ fn main() {
             let cwd = std::env::current_dir().expect("cannot get current dir");
             let target = path.unwrap_or(cwd);
             let idx_dir = index_dir.unwrap_or_else(default_index_dir);
-            let opts = search::index::IndexOptions { reset, path: target, index_dir: idx_dir };
-            let total = std::fs::read_dir(&opts.path).map(|e| e.count()).unwrap_or(1) as u64;
+
             if std::io::IsTerminal::is_terminal(&std::io::stderr()) {
                 use ratatui::backend::CrosstermBackend;
+                use ratatui::crossterm::event::{read, Event, KeyCode, KeyModifiers};
+                use ratatui::crossterm::terminal::{
+                    disable_raw_mode, enable_raw_mode, EnterAlternateScreen, LeaveAlternateScreen,
+                };
+                use ratatui::crossterm::ExecutableCommand;
                 use ratatui::Terminal;
+                use std::sync::atomic::{AtomicUsize, Ordering};
+                use std::sync::Arc;
+
+                // Premier passage : compter les fichiers indexables
+                let total = {
+                    let walker = ignore::WalkBuilder::new(&target)
+                        .hidden(false)
+                        .git_ignore(true)
+                        .build();
+                    walker
+                        .filter_map(|e| e.ok())
+                        .filter(|e| e.path().is_file())
+                        .count() as u64
+                };
+
+                let counter = Arc::new(AtomicUsize::new(0));
+                let opts = search::index::IndexOptions {
+                    reset,
+                    path: target,
+                    index_dir: idx_dir,
+                    progress: Some(counter.clone()),
+                };
+
+                let _ = enable_raw_mode();
+                let _ = std::io::stderr().execute(EnterAlternateScreen);
                 let backend = CrosstermBackend::new(std::io::stderr());
-                if let Ok(mut terminal) = Terminal::new(backend) {
-                    let _ = terminal.draw(|f| {
-                        tui::progress::render_progress(f, f.area(), 0, total, "Indexing…");
-                    });
+
+                let handle = std::thread::spawn(move || search::index::index_directory(opts));
+
+                let result = {
+                    let mut terminal_opt = Terminal::new(backend).ok();
+                    loop {
+                        let done = counter.load(Ordering::Relaxed) as u64;
+                        if let Some(ref mut terminal) = terminal_opt {
+                            let _ = terminal.draw(|f| {
+                                tui::progress::render_progress(
+                                    f, f.area(), done, total.max(1), "Indexing…",
+                                );
+                            });
+                        }
+                        if handle.is_finished() {
+                            break;
+                        }
+                        std::thread::sleep(std::time::Duration::from_millis(50));
+                    }
+                    if let Some(ref mut terminal) = terminal_opt {
+                        let _ = terminal.draw(|f| {
+                            tui::progress::render_progress(
+                                f, f.area(), total, total.max(1), "Indexing…",
+                            );
+                        });
+                    }
+                    let result = handle.join().expect("indexing thread panicked");
+                    // Attendre q/Esc/Ctrl-C avant de fermer
+                    loop {
+                        if let Ok(Event::Key(key)) = read() {
+                            if matches!(
+                                key.code,
+                                KeyCode::Char('q') | KeyCode::Char('Q') | KeyCode::Esc
+                            ) || (key.code == KeyCode::Char('c')
+                                && key.modifiers.contains(KeyModifiers::CONTROL))
+                            {
+                                break;
+                            }
+                        }
+                    }
+                    result
+                };
+
+                let _ = disable_raw_mode();
+                let _ = std::io::stderr().execute(LeaveAlternateScreen);
+
+                match result {
+                    Ok(stats) => println!("Indexed {} files, {} chunks", stats.file_count, stats.chunk_count),
+                    Err(e) => { eprintln!("index error: {e}"); std::process::exit(1); }
                 }
             } else {
-                eprintln!("Indexing {}…", opts.path.display());
-            }
-            match search::index::index_directory(opts) {
-                Ok(stats) => println!("Indexed {} files, {} chunks", stats.file_count, stats.chunk_count),
-                Err(e) => { eprintln!("index error: {e}"); std::process::exit(1); }
+                eprintln!("Indexing {}…", target.display());
+                let opts = search::index::IndexOptions {
+                    reset, path: target, index_dir: idx_dir, progress: None,
+                };
+                match search::index::index_directory(opts) {
+                    Ok(stats) => println!("Indexed {} files, {} chunks", stats.file_count, stats.chunk_count),
+                    Err(e) => { eprintln!("index error: {e}"); std::process::exit(1); }
+                }
             }
         }
 
@@ -345,13 +440,44 @@ fn main() {
                         println!("{}", serde_json::to_string_pretty(&symbols).unwrap());
                     } else if std::io::IsTerminal::is_terminal(&std::io::stdout()) {
                         use ratatui::backend::CrosstermBackend;
+                        use ratatui::crossterm::event::{read, Event, KeyCode, KeyModifiers};
+                        use ratatui::crossterm::terminal::{
+                            disable_raw_mode, enable_raw_mode, EnterAlternateScreen, LeaveAlternateScreen,
+                        };
+                        use ratatui::crossterm::ExecutableCommand;
                         use ratatui::Terminal;
+
+                        let _ = enable_raw_mode();
+                        let _ = std::io::stdout().execute(EnterAlternateScreen);
                         let backend = CrosstermBackend::new(std::io::stdout());
                         if let Ok(mut terminal) = Terminal::new(backend) {
-                            let _ = terminal.draw(|f| {
-                                tui::outline::render_outline(f, f.area(), &symbols, 0);
-                            });
+                            let mut selected = 0usize;
+                            let max = symbols.len().saturating_sub(1);
+                            loop {
+                                let _ = terminal.draw(|f| {
+                                    tui::outline::render_outline(f, f.area(), &symbols, selected);
+                                });
+                                if let Ok(Event::Key(key)) = read() {
+                                    match key.code {
+                                        KeyCode::Down | KeyCode::Char('j') => {
+                                            selected = (selected + 1).min(max);
+                                        }
+                                        KeyCode::Up | KeyCode::Char('k') => {
+                                            selected = selected.saturating_sub(1);
+                                        }
+                                        KeyCode::Char('q') | KeyCode::Char('Q') | KeyCode::Esc => break,
+                                        KeyCode::Char('c')
+                                            if key.modifiers.contains(KeyModifiers::CONTROL) =>
+                                        {
+                                            break;
+                                        }
+                                        _ => {}
+                                    }
+                                }
+                            }
                         }
+                        let _ = disable_raw_mode();
+                        let _ = std::io::stdout().execute(LeaveAlternateScreen);
                     } else {
                         for s in &symbols {
                             println!("{}:{} {} {}", s.file_path, s.line_start, s.kind, s.name);
@@ -399,13 +525,38 @@ fn main() {
                                 println!("{}", serde_json::to_string_pretty(&edges).unwrap());
                             } else if std::io::IsTerminal::is_terminal(&std::io::stdout()) {
                                 use ratatui::backend::CrosstermBackend;
+                                use ratatui::crossterm::event::{read, Event, KeyCode, KeyModifiers};
+                                use ratatui::crossterm::terminal::{
+                                    disable_raw_mode, enable_raw_mode, EnterAlternateScreen,
+                                    LeaveAlternateScreen,
+                                };
+                                use ratatui::crossterm::ExecutableCommand;
                                 use ratatui::Terminal;
+
+                                let _ = enable_raw_mode();
+                                let _ = std::io::stdout().execute(EnterAlternateScreen);
                                 let backend = CrosstermBackend::new(std::io::stdout());
                                 if let Ok(mut terminal) = Terminal::new(backend) {
-                                    let _ = terminal.draw(|f| {
-                                        tui::trace::render_trace(f, f.area(), &edges, &symbol, "callers");
-                                    });
+                                    loop {
+                                        let _ = terminal.draw(|f| {
+                                            tui::trace::render_trace(
+                                                f, f.area(), &edges, &symbol, "callers",
+                                            );
+                                        });
+                                        if let Ok(Event::Key(key)) = read() {
+                                            if matches!(
+                                                key.code,
+                                                KeyCode::Char('q') | KeyCode::Char('Q') | KeyCode::Esc
+                                            ) || (key.code == KeyCode::Char('c')
+                                                && key.modifiers.contains(KeyModifiers::CONTROL))
+                                            {
+                                                break;
+                                            }
+                                        }
+                                    }
                                 }
+                                let _ = disable_raw_mode();
+                                let _ = std::io::stdout().execute(LeaveAlternateScreen);
                             } else {
                                 for e in &edges {
                                     println!("{} {}:{}", e.name, e.file_path, e.line);
@@ -423,13 +574,38 @@ fn main() {
                                 println!("{}", serde_json::to_string_pretty(&edges).unwrap());
                             } else if std::io::IsTerminal::is_terminal(&std::io::stdout()) {
                                 use ratatui::backend::CrosstermBackend;
+                                use ratatui::crossterm::event::{read, Event, KeyCode, KeyModifiers};
+                                use ratatui::crossterm::terminal::{
+                                    disable_raw_mode, enable_raw_mode, EnterAlternateScreen,
+                                    LeaveAlternateScreen,
+                                };
+                                use ratatui::crossterm::ExecutableCommand;
                                 use ratatui::Terminal;
+
+                                let _ = enable_raw_mode();
+                                let _ = std::io::stdout().execute(EnterAlternateScreen);
                                 let backend = CrosstermBackend::new(std::io::stdout());
                                 if let Ok(mut terminal) = Terminal::new(backend) {
-                                    let _ = terminal.draw(|f| {
-                                        tui::trace::render_trace(f, f.area(), &edges, &symbol, "callees");
-                                    });
+                                    loop {
+                                        let _ = terminal.draw(|f| {
+                                            tui::trace::render_trace(
+                                                f, f.area(), &edges, &symbol, "callees",
+                                            );
+                                        });
+                                        if let Ok(Event::Key(key)) = read() {
+                                            if matches!(
+                                                key.code,
+                                                KeyCode::Char('q') | KeyCode::Char('Q') | KeyCode::Esc
+                                            ) || (key.code == KeyCode::Char('c')
+                                                && key.modifiers.contains(KeyModifiers::CONTROL))
+                                            {
+                                                break;
+                                            }
+                                        }
+                                    }
                                 }
+                                let _ = disable_raw_mode();
+                                let _ = std::io::stdout().execute(LeaveAlternateScreen);
                             } else {
                                 for e in &edges {
                                     println!("{} {}:{}", e.name, e.file_path, e.line);
