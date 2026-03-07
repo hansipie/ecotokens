@@ -238,6 +238,35 @@ fn main() {
             let report = aggregate(&items, p, model.as_deref().unwrap_or("sonnet"));
             if json {
                 println!("{}", serde_json::to_string_pretty(&report).unwrap());
+            } else if std::io::IsTerminal::is_terminal(&std::io::stdout()) {
+                use ratatui::backend::CrosstermBackend;
+                use ratatui::crossterm::event::{read, Event, KeyCode, KeyModifiers};
+                use ratatui::crossterm::terminal::{
+                    disable_raw_mode, enable_raw_mode, EnterAlternateScreen, LeaveAlternateScreen,
+                };
+                use ratatui::crossterm::ExecutableCommand;
+                use ratatui::Terminal;
+
+                let _ = enable_raw_mode();
+                let _ = std::io::stdout().execute(EnterAlternateScreen);
+                let backend = CrosstermBackend::new(std::io::stdout());
+                if let Ok(mut terminal) = Terminal::new(backend) {
+                    let _ = terminal.draw(|f| {
+                        tui::gain::render_gain(f, f.area(), &report, &items);
+                    });
+                    loop {
+                        if let Ok(Event::Key(key)) = read() {
+                            if matches!(key.code, KeyCode::Char('q') | KeyCode::Char('Q') | KeyCode::Esc)
+                                || (key.code == KeyCode::Char('c')
+                                    && key.modifiers.contains(KeyModifiers::CONTROL))
+                            {
+                                break;
+                            }
+                        }
+                    }
+                }
+                let _ = disable_raw_mode();
+                let _ = std::io::stdout().execute(LeaveAlternateScreen);
             } else {
                 println!("=== ecotokens gain ({period}) ===");
                 println!("Total commands : {}", report.total_interceptions);

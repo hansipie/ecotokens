@@ -148,3 +148,7 @@ path = "tests/integration/mcp_test.rs"
 [[test]]
 name = "trace_tui_test"
 path = "tests/tui/trace_test.rs"
+
+[[test]]
+name = "gain_tui_test"
+path = "tests/tui/gain_test.rs"

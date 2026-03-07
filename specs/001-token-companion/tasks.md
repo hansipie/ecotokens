@@ -125,11 +125,11 @@ doivent être écrits et ÉCHOUER avant toute implémentation.
 
 - [X] T034c [P] [US2] Tests unitaires TTY-detect dans `tests/tui/tui_test.rs` : stdout non-TTY → retourne texte plat, flag `--json` → JSON sans TUI, flag `--no-tui` → texte plat même sur TTY — DOIT ÉCHOUER avant T034d
 - [X] T034d [US2] Créer `src/tui/mod.rs` : fonction `is_tui_enabled(json: bool, no_tui: bool) -> bool` + TTY-detect via `std::io::IsTerminal` jusqu'à ce que T034c passe
-- [ ] T034et [P] [US2] Tests TUI gain dans `tests/tui/gain_test.rs` :
+- [X] T034et [P] [US2] Tests TUI gain dans `tests/tui/gain_test.rs` :
   rendu avec TestBackend sur données fixtures → buffer contient "Savings", "Cost avoided",
   sparkline présente sur 14 jours, fallback texte sans panic si data vide
   — DOIT ÉCHOUER avant T034e
-- [ ] T034e [US2] Implémenter `src/tui/gain.rs` : dashboard ratatui avec tableau stats, barres par famille (Block + Gauge), sparkline économies 14 jours, ligne coût USD — jusqu'à ce que `ecotokens gain` en TTY affiche le dashboard
+- [X] T034e [US2] Implémenter `src/tui/gain.rs` : dashboard ratatui avec tableau stats, barres par famille (Block + Gauge), sparkline économies 14 jours, ligne coût USD — jusqu'à ce que `ecotokens gain` en TTY affiche le dashboard
 
 **Checkpoint**: User Stories 1 ET 2 fonctionnelles — `ecotokens gain` affiche le dashboard TUI sur TTY, texte plat en pipe/--json
 
