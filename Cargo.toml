@@ -33,6 +33,9 @@ tree-sitter-javascript = "0.23"
 rmcp = { version = "1", features = ["server", "transport-io"] }
 tokio = { version = "1", features = ["rt", "macros", "io-util"] }
 
+# P3 daemon — file watcher
+notify = "6"
+
 # Optional
 tiktoken-rs = { version = "0.5", optional = true }
 reqwest = { version = "0.12", features = ["json", "blocking"], optional = true }
@@ -76,6 +79,10 @@ path = "tests/filter/markdown_test.rs"
 [[test]]
 name = "python_test"
 path = "tests/filter/python_test.rs"
+
+[[test]]
+name = "cpp_test"
+path = "tests/filter/cpp_test.rs"
 
 [[test]]
 name = "config_file_test"
@@ -156,3 +163,15 @@ path = "tests/tui/trace_test.rs"
 [[test]]
 name = "gain_tui_test"
 path = "tests/tui/gain_test.rs"
+
+[[test]]
+name = "watcher_test"
+path = "tests/search/watcher_test.rs"
+
+[[test]]
+name = "daemon_test"
+path = "tests/integration/daemon_test.rs"
+
+[[test]]
+name = "watch_tui_test"
+path = "tests/tui/watch_test.rs"

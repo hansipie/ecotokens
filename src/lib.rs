@@ -1,4 +1,5 @@
 pub mod config;
+pub mod daemon;
 pub mod filter;
 pub mod hook;
 pub mod install;

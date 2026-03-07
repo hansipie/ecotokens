@@ -24,6 +24,11 @@ ecotokens gain
 
 C'est tout — `ecotokens` est maintenant actif dans toutes vos sessions Claude Code.
 
+**Temps d'installation (SC-002)** :
+- `cargo install --path .` : ~16 secondes (build from source)
+- `ecotokens install` (hook) : < 1 seconde
+- Objectif SC-002 (< 5 min) : ✅ validé
+
 ## Développement (contributeurs)
 
 ```bash
@@ -62,6 +67,20 @@ Pour exclure une commande du filtrage :
 ```bash
 ecotokens config --exclude "cat *"
 ```
+
+## TUI interactive
+
+Les commandes suivantes ouvrent une interface terminal interactive (TTY requis) :
+
+| Commande | Description | Contrôles |
+|----------|-------------|-----------|
+| `ecotokens outline src/` | Arbre navigable des symboles | ↑↓ ou j/k pour naviguer, q/Esc pour quitter |
+| `ecotokens trace callers <sym>` | Graphe des callers d'un symbole | q/Esc pour quitter |
+| `ecotokens index` | Barre de progression animée | q/Esc après 100% |
+| `ecotokens gain` | Dashboard auto-rafraîchi | Mise à jour toutes les secondes, q/Esc pour quitter |
+
+En dehors d'un TTY (script, pipe, `--json`), toutes les commandes retombent automatiquement
+sur une sortie texte plat sans interaction.
 
 ## Architecture en un coup d'œil
 

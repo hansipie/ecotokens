@@ -2,6 +2,7 @@ use clap::{Parser, Subcommand};
 use std::path::PathBuf;
 
 mod config;
+mod daemon;
 mod filter;
 mod hook;
 mod install;
@@ -93,6 +94,16 @@ enum Commands {
     Trace {
         #[command(subcommand)]
         action: TraceAction,
+    },
+    /// Watch a directory and keep the index up to date automatically
+    Watch {
+        #[arg(long)]
+        path: Option<PathBuf>,
+        #[arg(long)]
+        index_dir: Option<PathBuf>,
+        /// Run in background (no TUI, log events to stdout)
+        #[arg(long)]
+        daemon: bool,
     },
     /// Start MCP server (JSON-RPC over stdio)
     Mcp {
@@ -622,6 +633,78 @@ fn main() {
                     }
                 }
             }
+        }
+
+        Commands::Watch { path, index_dir, daemon } => {
+            let cwd = std::env::current_dir().expect("cannot get current dir");
+            let watch_path = path.unwrap_or(cwd);
+            let idx_dir = index_dir.unwrap_or_else(default_index_dir);
+
+            let (event_tx, event_rx) = std::sync::mpsc::channel::<daemon::watcher::WatchEvent>();
+            let (stop_tx, stop_rx) = std::sync::mpsc::channel::<()>();
+
+            let watch_path_clone = watch_path.clone();
+            let idx_dir_clone = idx_dir.clone();
+            let watcher_handle = std::thread::spawn(move || {
+                daemon::watcher::watch_directory(&watch_path_clone, &idx_dir_clone, event_tx, stop_rx)
+            });
+
+            let watch_path_str = watch_path.display().to_string();
+
+            if daemon || !std::io::IsTerminal::is_terminal(&std::io::stdout()) {
+                // Mode non-interactif : écrire les événements sur stdout
+                eprintln!("ecotokens watch: surveillance de {} (Ctrl-C pour arrêter)", watch_path.display());
+                while let Ok(e) = event_rx.recv() {
+                    println!("[{}] {} {}", e.timestamp, e.path.display(), e.status);
+                }
+            } else {
+                // Mode TUI interactif
+                use ratatui::backend::CrosstermBackend;
+                use ratatui::crossterm::event::{poll, read, Event, KeyCode, KeyModifiers};
+                use ratatui::crossterm::terminal::{
+                    disable_raw_mode, enable_raw_mode, EnterAlternateScreen, LeaveAlternateScreen,
+                };
+                use ratatui::crossterm::ExecutableCommand;
+                use ratatui::Terminal;
+
+                let _ = enable_raw_mode();
+                let _ = std::io::stdout().execute(EnterAlternateScreen);
+                let backend = CrosstermBackend::new(std::io::stdout());
+
+                if let Ok(mut terminal) = Terminal::new(backend) {
+                    let mut events: Vec<daemon::watcher::WatchEvent> = Vec::new();
+
+                    loop {
+                        // Drainer les nouveaux événements
+                        while let Ok(e) = event_rx.try_recv() {
+                            events.push(e);
+                        }
+
+                        let _ = terminal.draw(|f| {
+                            tui::watch::render_watch(f, f.area(), &events, &watch_path_str);
+                        });
+
+                        if poll(std::time::Duration::from_millis(100)).unwrap_or(false) {
+                            if let Ok(Event::Key(key)) = read() {
+                                if matches!(
+                                    key.code,
+                                    KeyCode::Char('q') | KeyCode::Char('Q') | KeyCode::Esc
+                                ) || (key.code == KeyCode::Char('c')
+                                    && key.modifiers.contains(KeyModifiers::CONTROL))
+                                {
+                                    break;
+                                }
+                            }
+                        }
+                    }
+                }
+
+                let _ = disable_raw_mode();
+                let _ = std::io::stdout().execute(LeaveAlternateScreen);
+            }
+
+            let _ = stop_tx.send(());
+            let _ = watcher_handle.join();
         }
 
         Commands::Mcp { index_dir } => {
