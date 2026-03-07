@@ -1,4 +1,5 @@
 use ecotokens::metrics::store::{append_to, read_from, CommandFamily, FilterMode, Interception};
+use serde_json;
 use tempfile::TempDir;
 
 fn metrics_file(dir: &TempDir) -> std::path::PathBuf {
@@ -15,6 +16,8 @@ fn make_interception(tokens_before: u32, tokens_after: u32, mode: FilterMode) ->
         mode,
         false,
         10,
+        None,
+        None,
     )
 }
 
@@ -76,4 +79,32 @@ fn savings_pct_calculated_correctly_in_filtered_mode() {
     let item = make_interception(100, 40, FilterMode::Filtered);
     let expected = 60.0f32;
     assert!((item.savings_pct - expected).abs() < 0.01, "savings should be ~60%");
+}
+
+#[test]
+fn old_jsonl_without_content_fields_deserializes_ok() {
+    let line = r#"{"id":"abc","timestamp":"2026-01-01T00:00:00+00:00","command":"git status","command_family":"git","git_root":null,"tokens_before":100,"tokens_after":40,"savings_pct":60.0,"mode":"filtered","redacted":false,"duration_ms":10}"#;
+    let item: Interception = serde_json::from_str(line).unwrap();
+    assert_eq!(item.content_before, None);
+    assert_eq!(item.content_after, None);
+}
+
+#[test]
+fn content_is_stored_and_truncated() {
+    let long = "x".repeat(5000);
+    let item = Interception::new(
+        "cmd".to_string(),
+        CommandFamily::Git,
+        None,
+        100,
+        40,
+        FilterMode::Filtered,
+        false,
+        10,
+        Some(long.clone()),
+        Some(long),
+    );
+    let before = item.content_before.unwrap();
+    assert!(before.len() < 5000, "content should be truncated");
+    assert!(before.contains("[truncated]"));
 }

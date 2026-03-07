@@ -3,6 +3,17 @@ use serde::{Deserialize, Serialize};
 use std::path::PathBuf;
 use uuid::Uuid;
 
+const CONTENT_MAX_CHARS: usize = 4096;
+
+fn truncate_content(s: String) -> String {
+    if s.chars().count() <= CONTENT_MAX_CHARS {
+        s
+    } else {
+        let t: String = s.chars().take(CONTENT_MAX_CHARS).collect();
+        t + "\n…[truncated]"
+    }
+}
+
 #[derive(Debug, Clone, Serialize, Deserialize, PartialEq)]
 #[serde(rename_all = "snake_case")]
 pub enum CommandFamily {
@@ -37,6 +48,10 @@ pub struct Interception {
     pub mode: FilterMode,
     pub redacted: bool,
     pub duration_ms: u32,
+    #[serde(default)]
+    pub content_before: Option<String>,
+    #[serde(default)]
+    pub content_after: Option<String>,
 }
 
 impl Interception {
@@ -50,6 +65,8 @@ impl Interception {
         mode: FilterMode,
         redacted: bool,
         duration_ms: u32,
+        content_before: Option<String>,
+        content_after: Option<String>,
     ) -> Self {
         let savings_pct = if mode == FilterMode::Passthrough || tokens_before == 0 {
             0.0
@@ -68,6 +85,8 @@ impl Interception {
             mode,
             redacted,
             duration_ms,
+            content_before: content_before.map(truncate_content),
+            content_after: content_after.map(truncate_content),
         }
     }
 }

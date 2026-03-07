@@ -56,6 +56,8 @@ fn gain_report_with_large_store_is_fast() {
             FilterMode::Filtered,
             false,
             10,
+            None,
+            None,
         );
         append_to(&store, &rec).unwrap();
     }

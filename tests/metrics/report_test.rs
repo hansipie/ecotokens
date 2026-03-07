@@ -18,6 +18,8 @@ fn make_interception_ago(seconds_ago: i64, family: CommandFamily, tokens_before:
         mode: if tokens_after < tokens_before { FilterMode::Filtered } else { FilterMode::Passthrough },
         redacted: false,
         duration_ms: 5,
+        content_before: None,
+        content_after: None,
     }
 }
 

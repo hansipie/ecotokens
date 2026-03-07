@@ -62,13 +62,14 @@ pub fn install_hook(settings_path: &Path, claude_json_path: &Path, with_mcp: boo
 
     if with_mcp {
         let mcp_entry = serde_json::json!({
-            "command": "ecotokens mcp",
+            "command": "ecotokens",
+            "args": ["mcp"],
             "type": "stdio"
         });
         let mut cv = read_settings(claude_json_path);
         let servers = cv["mcpServers"].as_object().cloned().unwrap_or_default();
         let mut new_servers = servers;
-        new_servers.entry("ecotokens").or_insert(mcp_entry);
+        new_servers.insert("ecotokens".to_string(), mcp_entry);
         cv["mcpServers"] = serde_json::Value::Object(new_servers);
         write_settings(claude_json_path, &cv)?;
     }

@@ -246,9 +246,7 @@ fn main() {
                 eprintln!("[ecotokens debug] command={command} tokens_before={tokens_before} tokens_after={tokens_after}");
             }
 
-            print!("{filtered}");
-
-            // Record metrics
+            // Record metrics before print! consumes filtered
             if let Some(path) = metrics::store::metrics_path() {
                 let mode = if tokens_after < tokens_before {
                     metrics::store::FilterMode::Filtered
@@ -264,9 +262,13 @@ fn main() {
                 let rec = metrics::store::Interception::new(
                     command, family, git_root,
                     tokens_before, tokens_after, mode, redacted, duration_ms,
+                    Some(masked),
+                    Some(filtered.clone()),
                 );
                 let _ = metrics::store::append_to(&path, &rec);
             }
+
+            print!("{filtered}");
         }
 
         Commands::Gain { period, by_project, json, model } => {
@@ -295,10 +297,16 @@ fn main() {
                 let backend = CrosstermBackend::new(std::io::stdout());
                 if let Ok(mut terminal) = Terminal::new(backend) {
                     let mut sparkline_mode = tui::gain::SparklineMode::default();
+                    let mut selected_family: Option<usize> = None;
                     loop {
                         let ts = chrono::Utc::now().format("%H:%M:%S").to_string();
+                        let family_count = report.by_family.len();
                         let _ = terminal.draw(|f| {
-                            tui::gain::render_gain(f, f.area(), &report, &items, Some(&ts), by_project, sparkline_mode);
+                            tui::gain::render_gain(
+                                f, f.area(), &report, &items,
+                                Some(&ts), by_project, sparkline_mode,
+                                if by_project { None } else { selected_family },
+                            );
                         });
                         if poll(std::time::Duration::from_secs(1)).unwrap_or(false) {
                             if let Ok(Event::Key(key)) = read() {
@@ -310,6 +318,23 @@ fn main() {
                                 }
                                 if key.code == KeyCode::Char('s') {
                                     sparkline_mode = sparkline_mode.next();
+                                }
+                                if !by_project && family_count > 0 {
+                                    match key.code {
+                                        KeyCode::Down | KeyCode::Char('j') => {
+                                            selected_family = Some(match selected_family {
+                                                None => 0,
+                                                Some(i) => (i + 1) % family_count,
+                                            });
+                                        }
+                                        KeyCode::Up | KeyCode::Char('k') => {
+                                            selected_family = Some(match selected_family {
+                                                None => family_count - 1,
+                                                Some(i) => if i == 0 { family_count - 1 } else { i - 1 },
+                                            });
+                                        }
+                                        _ => {}
+                                    }
                                 }
                             }
                         } else {
