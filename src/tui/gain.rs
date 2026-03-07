@@ -6,6 +6,7 @@ use ratatui::{
     widgets::{Block, Borders, Gauge, Paragraph, Sparkline, Wrap},
     Frame,
 };
+use similar::{ChangeTag, TextDiff};
 
 use crate::metrics::report::Report;
 use crate::metrics::store::Interception;
@@ -16,6 +17,40 @@ pub enum SparklineMode {
     Linear,
     Log,
     Capped,
+}
+
+#[derive(Clone, Copy, Default, PartialEq, Eq)]
+pub enum DetailMode {
+    #[default]
+    Split,
+    Diff,
+    Log,
+}
+
+#[derive(Clone, Copy, Default, PartialEq, Eq)]
+pub enum GainMode {
+    #[default]
+    Family,
+    Project,
+}
+
+impl GainMode {
+    pub fn toggle(self) -> Self {
+        match self {
+            GainMode::Family  => GainMode::Project,
+            GainMode::Project => GainMode::Family,
+        }
+    }
+}
+
+impl DetailMode {
+    pub fn toggle(self) -> Self {
+        match self {
+            DetailMode::Split => DetailMode::Diff,
+            DetailMode::Diff => DetailMode::Log,
+            DetailMode::Log => DetailMode::Split,
+        }
+    }
 }
 
 impl SparklineMode {
@@ -39,32 +74,53 @@ impl SparklineMode {
 /// Render the gain dashboard:
 ///   - top:    summary stats (interceptions, tokens, savings %, cost USD)
 ///   - middle: one Gauge per command family, sorted by savings desc
-///   - detail: last interception content for selected family
+///   - detail: last interception content for selected family (split or diff)
 ///   - bottom: Sparkline of tokens saved over the last 14 days
 #[allow(clippy::too_many_arguments)]
-pub fn render_gain(frame: &mut Frame, area: Rect, report: &Report, items: &[Interception], last_updated: Option<&str>, by_project: bool, sparkline_mode: SparklineMode, selected_family: Option<usize>) {
-    let chunks = Layout::default()
+pub fn render_gain(frame: &mut Frame, area: Rect, report: &Report, items: &[Interception], last_updated: Option<&str>, gain_mode: GainMode, sparkline_mode: SparklineMode, selected_family: Option<usize>, detail_mode: DetailMode, selected_project: Option<usize>) {
+    // Outer layout: stats | pool(family+detail) | sparkline
+    let outer = Layout::default()
         .direction(Direction::Vertical)
         .constraints([
             Constraint::Length(4), // stats
-            Constraint::Min(3),    // family / project gauges
-            Constraint::Length(6), // detail panel
+            Constraint::Min(7),    // family + detail pool
             Constraint::Length(4), // sparkline
         ])
         .split(area);
 
-    render_stats(frame, chunks[0], report, last_updated);
-    if by_project {
-        render_projects(frame, chunks[1], report);
-        render_detail(frame, chunks[2], None, items);
-    } else {
-        let family_names = render_families(frame, chunks[1], report, selected_family);
-        let sel_name = selected_family
-            .and_then(|i| family_names.get(i))
-            .map(String::as_str);
-        render_detail(frame, chunks[2], sel_name, items);
+    render_stats(frame, outer[0], report, last_updated);
+
+    if gain_mode == GainMode::Project {
+        let pool = Layout::default()
+            .direction(Direction::Vertical)
+            .constraints([Constraint::Percentage(50), Constraint::Percentage(50)])
+            .split(outer[1]);
+        let project_names = render_projects(frame, pool[0], report, selected_project);
+        let sel_proj = selected_project.and_then(|i| project_names.get(i)).map(String::as_str);
+        render_project_log_panel(frame, pool[1], sel_proj, items);
+        render_sparkline(frame, outer[2], items, sparkline_mode);
+        return;
     }
-    render_sparkline(frame, chunks[3], items, sparkline_mode);
+
+    // GainMode::Family — pool split family/detail
+    let pool = if detail_mode == DetailMode::Diff || detail_mode == DetailMode::Log {
+        Layout::default()
+            .direction(Direction::Vertical)
+            .constraints([Constraint::Percentage(50), Constraint::Percentage(50)])
+            .split(outer[1])
+    } else {
+        Layout::default()
+            .direction(Direction::Vertical)
+            .constraints([Constraint::Min(3), Constraint::Length(6)])
+            .split(outer[1])
+    };
+
+    let family_names = render_families(frame, pool[0], report, selected_family);
+    let sel_name = selected_family
+        .and_then(|i| family_names.get(i))
+        .map(String::as_str);
+    render_detail(frame, pool[1], sel_name, items, detail_mode);
+    render_sparkline(frame, outer[2], items, sparkline_mode);
 }
 
 // ── Stats panel ───────────────────────────────────────────────────────────────
@@ -88,8 +144,8 @@ fn render_stats(frame: &mut Frame, area: Rect, report: &Report, last_updated: Op
     ];
 
     let title = match last_updated {
-        Some(ts) => format!(" ecotokens gain – mis à jour {ts} UTC "),
-        None => " ecotokens gain ".to_string(),
+        Some(ts) => format!(" ecotokens gain – mis à jour {ts} UTC  [q] quit "),
+        None => " ecotokens gain  [q] quit ".to_string(),
     };
     let paragraph = Paragraph::new(text)
         .block(Block::default().borders(Borders::ALL).title(title));
@@ -99,7 +155,7 @@ fn render_stats(frame: &mut Frame, area: Rect, report: &Report, last_updated: Op
 // ── Family gauges ─────────────────────────────────────────────────────────────
 
 fn render_families(frame: &mut Frame, area: Rect, report: &Report, selected: Option<usize>) -> Vec<String> {
-    let block = Block::default().borders(Borders::ALL).title(" By family ");
+    let block = Block::default().borders(Borders::ALL).title(" By family  [↑↓/jk] nav  [b] projects ");
 
     if report.by_family.is_empty() {
         let paragraph = Paragraph::new("No data yet.").block(block);
@@ -149,13 +205,13 @@ fn render_families(frame: &mut Frame, area: Rect, report: &Report, selected: Opt
 
 // ── Project gauges ────────────────────────────────────────────────────────────
 
-fn render_projects(frame: &mut Frame, area: Rect, report: &Report) {
-    let block = Block::default().borders(Borders::ALL).title(" By project ");
+fn render_projects(frame: &mut Frame, area: Rect, report: &Report, selected: Option<usize>) -> Vec<String> {
+    let block = Block::default().borders(Borders::ALL).title(" By project  [↑↓/jk] nav  [b] families ");
 
     if report.by_project.is_empty() {
         let paragraph = Paragraph::new("No data yet.").block(block);
         frame.render_widget(paragraph, area);
-        return;
+        return vec![];
     }
 
     let mut projects: Vec<(&String, f32)> = report
@@ -187,34 +243,91 @@ fn render_projects(frame: &mut Frame, area: Rect, report: &Report) {
         if i >= rows.len() {
             break;
         }
-        // Affiche uniquement le dernier segment du chemin pour garder le titre court
-        let label = std::path::Path::new(name)
+        let is_sel = selected == Some(i);
+        let color = if is_sel { Color::Green } else { Color::Yellow };
+        let modifier = if is_sel { Modifier::BOLD } else { Modifier::empty() };
+        let prefix = if is_sel { "▶ " } else { "  " };
+        let label = std::path::Path::new(name.as_str())
             .file_name()
             .and_then(|n| n.to_str())
-            .unwrap_or(name);
+            .unwrap_or(name.as_str());
         let ratio = (*pct as f64 / 100.0).clamp(0.0, 1.0);
         let gauge = Gauge::default()
-            .gauge_style(Style::default().fg(Color::Yellow))
+            .gauge_style(Style::default().fg(color).add_modifier(modifier))
             .label(format!("{pct:.1}%"))
             .ratio(ratio)
-            .block(Block::default().title(format!(" {label} ")));
+            .block(Block::default().title(format!(" {prefix}{label} ")));
         frame.render_widget(gauge, rows[i]);
     }
+
+    projects.iter().map(|(name, _)| name.to_string()).collect()
 }
 
-// ── Detail panel ──────────────────────────────────────────────────────────────
-
-fn render_detail(frame: &mut Frame, area: Rect, family_name: Option<&str>, items: &[Interception]) {
-    let Some(name) = family_name else {
-        let block = Block::default().borders(Borders::ALL).title(" Détail ");
+fn render_project_log_panel(frame: &mut Frame, area: Rect, project_name: Option<&str>, items: &[Interception]) {
+    let Some(name) = project_name else {
+        let block = Block::default().borders(Borders::ALL).title(" Historique projet ");
         let p = Paragraph::new(Span::styled(
-            " ↑↓ / j k : sélectionner une famille",
+            " ↑↓ / j k : sélectionner un projet",
             Style::default().fg(Color::DarkGray),
         ))
         .block(block);
         frame.render_widget(p, area);
         return;
     };
+
+    let label = std::path::Path::new(name)
+        .file_name()
+        .and_then(|n| n.to_str())
+        .unwrap_or(name);
+
+    let history: Vec<&Interception> = items
+        .iter()
+        .filter(|i| i.git_root.as_deref() == Some(name))
+        .rev()
+        .take(20)
+        .collect();
+    let n = history.len();
+
+    let block = Block::default()
+        .borders(Borders::ALL)
+        .title(format!(" Historique projet : {label} · {n}/20 "));
+    let inner = block.inner(area);
+    frame.render_widget(block, area);
+
+    let lines: Vec<Line> = history
+        .iter()
+        .map(|item| {
+            let ts = item.timestamp.get(..16).unwrap_or(&item.timestamp);
+            let cmd: String = item.command.chars().take(30).collect();
+            let text = format!(
+                "{ts:<16}  {cmd:<30}  {:>6} → {:>6}  -{:.1}%",
+                item.tokens_before, item.tokens_after, item.savings_pct
+            );
+            Line::from(Span::styled(text, Style::default().fg(Color::Green)))
+        })
+        .collect();
+
+    frame.render_widget(Paragraph::new(lines), inner);
+}
+
+// ── Detail panel ──────────────────────────────────────────────────────────────
+
+fn render_detail(frame: &mut Frame, area: Rect, family_name: Option<&str>, items: &[Interception], detail_mode: DetailMode) {
+    let Some(name) = family_name else {
+        let block = Block::default().borders(Borders::ALL).title(" Détail ");
+        let p = Paragraph::new(Span::styled(
+            " ↑↓ / j k : sélectionner une famille  [d] diff/log  [b] projects",
+            Style::default().fg(Color::DarkGray),
+        ))
+        .block(block);
+        frame.render_widget(p, area);
+        return;
+    };
+
+    if detail_mode == DetailMode::Log {
+        render_log_panel(frame, area, name, items);
+        return;
+    }
 
     // Find last interception for this family (items are in chronological order)
     let last = items.iter().rev().find(|i| {
@@ -244,11 +357,19 @@ fn render_detail(frame: &mut Frame, area: Rect, family_name: Option<&str>, items
         return;
     }
 
+    if detail_mode == DetailMode::Diff {
+        render_diff_panel(frame, area, name, item);
+    } else {
+        render_split_panel(frame, area, name, item);
+    }
+}
+
+fn render_split_panel(frame: &mut Frame, area: Rect, name: &str, item: &Interception) {
     let cmd_short: String = item.command.chars().take(40).collect();
     let ts_short = item.timestamp.get(..16).unwrap_or(&item.timestamp);
     let block = Block::default()
         .borders(Borders::ALL)
-        .title(format!(" Détail : {name} · {cmd_short} · {ts_short} "));
+        .title(format!(" Détail : {name} · {cmd_short} · {ts_short}  [d] diff "));
     let inner = block.inner(area);
     frame.render_widget(block, area);
 
@@ -288,6 +409,107 @@ fn render_detail(frame: &mut Frame, area: Rect, family_name: Option<&str>, items
         Paragraph::new(after_lines).wrap(Wrap { trim: false }),
         halves[1],
     );
+}
+
+fn render_diff_panel(frame: &mut Frame, area: Rect, name: &str, item: &Interception) {
+    let cmd_short: String = item.command.chars().take(40).collect();
+    let ts_short = item.timestamp.get(..16).unwrap_or(&item.timestamp);
+    let block = Block::default()
+        .borders(Borders::ALL)
+        .title(format!(
+            " Diff : {name} · {cmd_short} · {}→{} tok (-{:.0}%) · {ts_short}  [d] log ",
+            item.tokens_before, item.tokens_after, item.savings_pct,
+        ));
+    let inner = block.inner(area);
+    frame.render_widget(block, area);
+
+    let before_text = item.content_before.as_deref().unwrap_or("");
+    let after_text = item.content_after.as_deref().unwrap_or("");
+
+    let diff = TextDiff::from_lines(before_text, after_text);
+
+    let mut lines: Vec<Line> = Vec::new();
+    for group in diff.grouped_ops(3) {
+        // hunk header
+        let old_range = group.first().and_then(|op| diff.iter_changes(op).next());
+        let _ = old_range; // just for structure; build @@ line from op bounds
+        let first = &group[0];
+        let last = &group[group.len() - 1];
+        let old_start = first.old_range().start + 1;
+        let new_start = first.new_range().start + 1;
+        let old_len: usize = group.iter().map(|op| op.old_range().len()).sum();
+        let new_len: usize = group.iter().map(|op| op.new_range().len()).sum();
+        let _ = last;
+        lines.push(Line::from(Span::styled(
+            format!("@@ -{old_start},{old_len} +{new_start},{new_len} @@"),
+            Style::default().fg(Color::Cyan).add_modifier(Modifier::BOLD),
+        )));
+
+        for op in &group {
+            for change in diff.iter_changes(op) {
+                let (prefix, color) = match change.tag() {
+                    ChangeTag::Delete => ("-", Color::Red),
+                    ChangeTag::Insert => ("+", Color::Green),
+                    ChangeTag::Equal => (" ", Color::DarkGray),
+                };
+                let value = change.value().trim_end_matches('\n');
+                lines.push(Line::from(Span::styled(
+                    format!("{prefix}{value}"),
+                    Style::default().fg(color),
+                )));
+            }
+        }
+    }
+
+    if lines.is_empty() {
+        lines.push(Line::from(Span::styled(
+            "(aucune différence)",
+            Style::default().fg(Color::DarkGray),
+        )));
+    }
+
+    frame.render_widget(
+        Paragraph::new(lines).wrap(Wrap { trim: false }),
+        inner,
+    );
+}
+
+fn render_log_panel(frame: &mut Frame, area: Rect, name: &str, items: &[Interception]) {
+    let family_items: Vec<&Interception> = items
+        .iter()
+        .filter(|i| {
+            serde_json::to_value(&i.command_family)
+                .ok()
+                .and_then(|v| v.as_str().map(|s| s == name))
+                .unwrap_or(false)
+        })
+        .collect();
+
+    let history: Vec<&Interception> = family_items.iter().rev().take(15).copied().collect();
+    let n = history.len();
+
+    let block = Block::default()
+        .borders(Borders::ALL)
+        .title(format!(" Historique : {name} · {n}/15  [d] split "));
+    let inner = block.inner(area);
+    frame.render_widget(block, area);
+
+    let lines: Vec<Line> = history
+        .iter()
+        .map(|item| {
+            let ts = item.timestamp.get(..16).unwrap_or(&item.timestamp);
+            let cmd: String = item.command.chars().take(30).collect();
+            let saved = item.tokens_before.saturating_sub(item.tokens_after);
+            let text = format!(
+                "{ts:<16}  {cmd:<30}  {:>6} → {:>6}  -{:.1}%",
+                item.tokens_before, item.tokens_after, item.savings_pct
+            );
+            let _ = saved;
+            Line::from(Span::styled(text, Style::default().fg(Color::Green)))
+        })
+        .collect();
+
+    frame.render_widget(Paragraph::new(lines), inner);
 }
 
 // ── Sparkline (14 days) ───────────────────────────────────────────────────────

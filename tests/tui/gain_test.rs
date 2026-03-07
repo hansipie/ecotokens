@@ -1,7 +1,7 @@
 use chrono::Utc;
 use ecotokens::metrics::report::{aggregate, Period};
 use ecotokens::metrics::store::{CommandFamily, FilterMode, Interception};
-use ecotokens::tui::gain::render_gain;
+use ecotokens::tui::gain::{render_gain, DetailMode, GainMode};
 use ratatui::backend::TestBackend;
 use ratatui::Terminal;
 
@@ -42,7 +42,7 @@ fn gain_renders_savings_label() {
     let backend = TestBackend::new(100, 25);
     let mut terminal = Terminal::new(backend).unwrap();
     terminal
-        .draw(|frame| render_gain(frame, frame.area(), &report, &items, None, false, Default::default(), None))
+        .draw(|frame| render_gain(frame, frame.area(), &report, &items, None, GainMode::Family, Default::default(), None, Default::default(), None))
         .unwrap();
     let content = buffer_text(&terminal);
     assert!(
@@ -58,7 +58,7 @@ fn gain_renders_cost_avoided_label() {
     let backend = TestBackend::new(100, 25);
     let mut terminal = Terminal::new(backend).unwrap();
     terminal
-        .draw(|frame| render_gain(frame, frame.area(), &report, &items, None, false, Default::default(), None))
+        .draw(|frame| render_gain(frame, frame.area(), &report, &items, None, GainMode::Family, Default::default(), None, Default::default(), None))
         .unwrap();
     let content = buffer_text(&terminal);
     assert!(
@@ -73,7 +73,7 @@ fn gain_renders_without_panic_on_empty_data() {
     let backend = TestBackend::new(100, 25);
     let mut terminal = Terminal::new(backend).unwrap();
     terminal
-        .draw(|frame| render_gain(frame, frame.area(), &report, &[], None, false, Default::default(), None))
+        .draw(|frame| render_gain(frame, frame.area(), &report, &[], None, GainMode::Family, Default::default(), None, Default::default(), None))
         .unwrap();
     let content = buffer_text(&terminal);
     assert!(!content.trim().is_empty(), "buffer should not be completely empty");
@@ -94,7 +94,7 @@ fn gain_sparkline_present_for_14_days() {
     let backend = TestBackend::new(100, 30);
     let mut terminal = Terminal::new(backend).unwrap();
     terminal
-        .draw(|frame| render_gain(frame, frame.area(), &report, &items, None, false, Default::default(), None))
+        .draw(|frame| render_gain(frame, frame.area(), &report, &items, None, GainMode::Family, Default::default(), None, Default::default(), None))
         .unwrap();
     let content = buffer_text(&terminal);
     assert!(
@@ -114,7 +114,7 @@ fn gain_shows_family_breakdown() {
     let backend = TestBackend::new(100, 30);
     let mut terminal = Terminal::new(backend).unwrap();
     terminal
-        .draw(|frame| render_gain(frame, frame.area(), &report, &items, None, false, Default::default(), None))
+        .draw(|frame| render_gain(frame, frame.area(), &report, &items, None, GainMode::Family, Default::default(), None, Default::default(), None))
         .unwrap();
     let content = buffer_text(&terminal);
     let lower = content.to_lowercase();
@@ -131,7 +131,7 @@ fn gain_detail_no_content_shows_fallback() {
     let backend = TestBackend::new(120, 35);
     let mut terminal = Terminal::new(backend).unwrap();
     terminal
-        .draw(|frame| render_gain(frame, frame.area(), &report, &items, None, false, Default::default(), Some(0)))
+        .draw(|frame| render_gain(frame, frame.area(), &report, &items, None, GainMode::Family, Default::default(), Some(0), Default::default(), None))
         .unwrap();
     let content = buffer_text(&terminal);
     assert!(!content.trim().is_empty(), "buffer should not be empty");
@@ -148,12 +148,63 @@ fn gain_detail_with_content_renders_text() {
     let backend = TestBackend::new(120, 35);
     let mut terminal = Terminal::new(backend).unwrap();
     terminal
-        .draw(|frame| render_gain(frame, frame.area(), &report, &items, None, false, Default::default(), Some(0)))
+        .draw(|frame| render_gain(frame, frame.area(), &report, &items, None, GainMode::Family, Default::default(), Some(0), Default::default(), None))
         .unwrap();
     let content = buffer_text(&terminal);
     assert!(
         content.contains("diff") || content.contains("summary") || content.contains("foo"),
         "detail panel should render content text: {content:?}"
+    );
+}
+
+#[test]
+fn gain_diff_mode_renders_diff_markers() {
+    let mut item = make_interception(1000, 400, CommandFamily::Git);
+    item.content_before = Some("line one\nline two\nline three\n".to_string());
+    item.content_after = Some("line one\nline TWO\nline three\n".to_string());
+    let items = vec![item];
+    let report = aggregate(&items, Period::All, "sonnet");
+    let backend = TestBackend::new(120, 40);
+    let mut terminal = Terminal::new(backend).unwrap();
+    terminal
+        .draw(|frame| render_gain(frame, frame.area(), &report, &items, None, GainMode::Family, Default::default(), Some(0), DetailMode::Diff, None))
+        .unwrap();
+    let content = buffer_text(&terminal);
+    // In diff mode the panel title should contain "Diff"
+    assert!(
+        content.contains("Diff"),
+        "diff mode should show 'Diff' in panel title: {content:?}"
+    );
+}
+
+#[test]
+fn gain_log_mode_renders_history() {
+    let items: Vec<Interception> = (0..5)
+        .map(|_| make_interception(1000, 400, CommandFamily::Git))
+        .collect();
+    let report = aggregate(&items, Period::All, "sonnet");
+    let backend = TestBackend::new(120, 40);
+    let mut terminal = Terminal::new(backend).unwrap();
+    terminal
+        .draw(|frame| {
+            render_gain(
+                frame,
+                frame.area(),
+                &report,
+                &items,
+                None,
+                GainMode::Family,
+                Default::default(),
+                Some(0),
+                DetailMode::Log,
+                None,
+            )
+        })
+        .unwrap();
+    let content = buffer_text(&terminal);
+    assert!(
+        content.contains("Historique"),
+        "log mode should show 'Historique' in panel title: {content:?}"
     );
 }
 
@@ -165,6 +216,41 @@ fn gain_selected_ignored_in_by_project_mode() {
     let mut terminal = Terminal::new(backend).unwrap();
     // Must not panic with selected_family=Some(0) in by_project mode
     terminal
-        .draw(|frame| render_gain(frame, frame.area(), &report, &items, None, true, Default::default(), Some(0)))
+        .draw(|frame| render_gain(frame, frame.area(), &report, &items, None, GainMode::Project, Default::default(), Some(0), Default::default(), None))
         .unwrap();
+}
+
+#[test]
+fn gain_project_log_mode_renders_history() {
+    let items: Vec<Interception> = (0..5)
+        .map(|_| {
+            let mut item = make_interception(1000, 400, CommandFamily::Git);
+            item.git_root = Some("/home/user/proj".to_string());
+            item
+        })
+        .collect();
+    let report = aggregate(&items, Period::All, "sonnet");
+    let backend = TestBackend::new(120, 40);
+    let mut terminal = Terminal::new(backend).unwrap();
+    terminal
+        .draw(|frame| {
+            render_gain(
+                frame,
+                frame.area(),
+                &report,
+                &items,
+                None,
+                GainMode::Project,
+                Default::default(),
+                None,
+                Default::default(),
+                Some(0),
+            )
+        })
+        .unwrap();
+    let content = buffer_text(&terminal);
+    assert!(
+        content.contains("Historique"),
+        "project log mode should show 'Historique' in panel title: {content:?}"
+    );
 }

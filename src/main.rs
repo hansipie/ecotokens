@@ -37,8 +37,6 @@ enum Commands {
         #[arg(long, default_value = "all")]
         period: String,
         #[arg(long)]
-        by_project: bool,
-        #[arg(long)]
         json: bool,
         #[arg(long)]
         model: Option<String>,
@@ -271,7 +269,7 @@ fn main() {
             print!("{filtered}");
         }
 
-        Commands::Gain { period, by_project, json, model } => {
+        Commands::Gain { period, json, model } => {
             use metrics::report::{aggregate, Period};
             use metrics::store::read_from;
             let path = match metrics::store::metrics_path() {
@@ -296,16 +294,22 @@ fn main() {
                 let _ = std::io::stdout().execute(EnterAlternateScreen);
                 let backend = CrosstermBackend::new(std::io::stdout());
                 if let Ok(mut terminal) = Terminal::new(backend) {
+                    let mut gain_mode = tui::gain::GainMode::default();
                     let mut sparkline_mode = tui::gain::SparklineMode::default();
+                    let mut detail_mode = tui::gain::DetailMode::default();
                     let mut selected_family: Option<usize> = None;
+                    let mut selected_project: Option<usize> = None;
                     loop {
                         let ts = chrono::Utc::now().format("%H:%M:%S").to_string();
                         let family_count = report.by_family.len();
+                        let project_count = report.by_project.len();
                         let _ = terminal.draw(|f| {
                             tui::gain::render_gain(
                                 f, f.area(), &report, &items,
-                                Some(&ts), by_project, sparkline_mode,
-                                if by_project { None } else { selected_family },
+                                Some(&ts), gain_mode, sparkline_mode,
+                                selected_family,
+                                detail_mode,
+                                selected_project,
                             );
                         });
                         if poll(std::time::Duration::from_secs(1)).unwrap_or(false) {
@@ -316,10 +320,16 @@ fn main() {
                                 {
                                     break;
                                 }
+                                if key.code == KeyCode::Char('b') {
+                                    gain_mode = gain_mode.toggle();
+                                }
                                 if key.code == KeyCode::Char('s') {
                                     sparkline_mode = sparkline_mode.next();
                                 }
-                                if !by_project && family_count > 0 {
+                                if key.code == KeyCode::Char('d') && gain_mode == tui::gain::GainMode::Family {
+                                    detail_mode = detail_mode.toggle();
+                                }
+                                if gain_mode == tui::gain::GainMode::Family && family_count > 0 {
                                     match key.code {
                                         KeyCode::Down | KeyCode::Char('j') => {
                                             selected_family = Some(match selected_family {
@@ -331,6 +341,23 @@ fn main() {
                                             selected_family = Some(match selected_family {
                                                 None => family_count - 1,
                                                 Some(i) => if i == 0 { family_count - 1 } else { i - 1 },
+                                            });
+                                        }
+                                        _ => {}
+                                    }
+                                }
+                                if gain_mode == tui::gain::GainMode::Project && project_count > 0 {
+                                    match key.code {
+                                        KeyCode::Down | KeyCode::Char('j') => {
+                                            selected_project = Some(match selected_project {
+                                                None => 0,
+                                                Some(i) => (i + 1) % project_count,
+                                            });
+                                        }
+                                        KeyCode::Up | KeyCode::Char('k') => {
+                                            selected_project = Some(match selected_project {
+                                                None => project_count - 1,
+                                                Some(i) => if i == 0 { project_count - 1 } else { i - 1 },
                                             });
                                         }
                                         _ => {}
@@ -352,12 +379,6 @@ fn main() {
                 println!("Tokens after   : {}", report.total_tokens_after);
                 println!("Savings        : {:.1}%", report.total_savings_pct);
                 println!("Cost avoided   : ${:.4} USD", report.cost_avoided_usd);
-                if by_project {
-                    println!("\nBy project:");
-                    for (k, v) in &report.by_project {
-                        println!("  {k}: {} cmds", v.count);
-                    }
-                }
             }
         }
 
