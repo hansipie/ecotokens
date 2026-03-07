@@ -8,7 +8,7 @@ use ratatui::Frame;
 /// `label` appears as the gauge title.
 pub fn render_progress(frame: &mut Frame, area: Rect, done: u64, total: u64, label: &str) {
     let ratio = if total == 0 {
-        1.0
+        0.0
     } else {
         (done as f64 / total as f64).clamp(0.0, 1.0)
     };

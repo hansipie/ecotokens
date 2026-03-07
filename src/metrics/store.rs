@@ -8,6 +8,7 @@ use uuid::Uuid;
 pub enum CommandFamily {
     Git,
     Cargo,
+    Cpp,
     Fs,
     Markdown,
     Python,

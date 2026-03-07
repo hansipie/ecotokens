@@ -165,6 +165,10 @@ name = "gain_tui_test"
 path = "tests/tui/gain_test.rs"
 
 [[test]]
+name = "embed_test"
+path = "tests/search/embed_test.rs"
+
+[[test]]
 name = "watcher_test"
 path = "tests/search/watcher_test.rs"
 

@@ -1,3 +1,4 @@
+pub mod embed;
 pub mod index;
 pub mod outline;
 pub mod query;

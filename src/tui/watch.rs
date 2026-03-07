@@ -21,7 +21,7 @@ pub fn render_watch(frame: &mut Frame, area: Rect, events: &[WatchEvent], watch_
         .block(
             Block::default()
                 .borders(Borders::ALL)
-                .title("ecotokens watch — q/Esc pour quitter"),
+                .title(" ecotokens watch — q/Esc pour quitter"),
         )
         .style(Style::default().fg(Color::Green));
     frame.render_widget(header, chunks[0]);
@@ -29,7 +29,7 @@ pub fn render_watch(frame: &mut Frame, area: Rect, events: &[WatchEvent], watch_
     // Liste des événements
     if events.is_empty() {
         let empty = Paragraph::new("Aucun événement — en attente de modifications…")
-            .block(Block::default().borders(Borders::ALL).title("Événements"))
+            .block(Block::default().borders(Borders::ALL).title(" Événements"))
             .style(Style::default().fg(Color::DarkGray));
         frame.render_widget(empty, chunks[1]);
         return;
@@ -69,7 +69,7 @@ pub fn render_watch(frame: &mut Frame, area: Rect, events: &[WatchEvent], watch_
     let list = List::new(items).block(
         Block::default()
             .borders(Borders::ALL)
-            .title(format!("Événements ({})", events.len())),
+            .title(format!(" Événements ({})", events.len())),
     );
     frame.render_widget(list, chunks[1]);
 }

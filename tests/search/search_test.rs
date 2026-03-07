@@ -18,7 +18,7 @@ fn build_fixture_index() -> (TempDir, TempDir) {
         src.path().join("README.md"),
         "# Project\n\n## Authentication\n\nThe system uses token-based auth.\n",
     ).unwrap();
-    let opts = IndexOptions { reset: false, path: src.path().to_path_buf(), index_dir: idx.path().to_path_buf(), progress: None };
+    let opts = IndexOptions { reset: false, path: src.path().to_path_buf(), index_dir: idx.path().to_path_buf(), progress: None, embed_provider: ecotokens::config::settings::EmbedProvider::None };
     index_directory(opts).unwrap();
     (src, idx)
 }
@@ -26,7 +26,7 @@ fn build_fixture_index() -> (TempDir, TempDir) {
 #[test]
 fn query_returns_relevant_file_in_top_results() {
     let (_src, idx) = build_fixture_index();
-    let opts = SearchOptions { query: "authentication".to_string(), top_k: 3, index_dir: idx.path().to_path_buf() };
+    let opts = SearchOptions { query: "authentication".to_string(), top_k: 3, index_dir: idx.path().to_path_buf(), embed_provider: ecotokens::config::settings::EmbedProvider::None };
     let results = search_index(opts).unwrap();
     assert!(!results.is_empty(), "should return results");
     let found_auth = results.iter().any(|r| r.file_path.contains("auth") || r.snippet.contains("auth"));
@@ -36,7 +36,7 @@ fn query_returns_relevant_file_in_top_results() {
 #[test]
 fn unindexed_directory_returns_error() {
     let idx = TempDir::new().unwrap();
-    let opts = SearchOptions { query: "anything".to_string(), top_k: 3, index_dir: idx.path().to_path_buf() };
+    let opts = SearchOptions { query: "anything".to_string(), top_k: 3, index_dir: idx.path().to_path_buf(), embed_provider: ecotokens::config::settings::EmbedProvider::None };
     let result = search_index(opts);
     assert!(result.is_err() || result.unwrap().is_empty(), "unindexed dir should return error or empty");
 }
@@ -44,7 +44,7 @@ fn unindexed_directory_returns_error() {
 #[test]
 fn results_include_file_path_and_snippet() {
     let (_src, idx) = build_fixture_index();
-    let opts = SearchOptions { query: "database connection".to_string(), top_k: 3, index_dir: idx.path().to_path_buf() };
+    let opts = SearchOptions { query: "database connection".to_string(), top_k: 3, index_dir: idx.path().to_path_buf(), embed_provider: ecotokens::config::settings::EmbedProvider::None };
     let results = search_index(opts).unwrap();
     if !results.is_empty() {
         assert!(!results[0].file_path.is_empty(), "result should have file_path");

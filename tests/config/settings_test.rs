@@ -1,3 +1,4 @@
+use ecotokens::config::settings::EmbedProvider;
 use ecotokens::config::Settings;
 
 #[test]
@@ -67,4 +68,50 @@ fn deserialization_with_missing_fields_uses_defaults() {
     assert_eq!(s.exclusions, vec!["ls"]);
     assert_eq!(s.summary_threshold_lines, 500);
     assert!(s.masking_enabled);
+}
+
+// ── T072t — Tests embed_provider (CLI --embed-provider) ───────────────────────
+
+#[test]
+fn embed_provider_none_by_default() {
+    let s = Settings::default();
+    assert_eq!(s.embed_provider, EmbedProvider::None);
+}
+
+#[test]
+fn embed_provider_ollama_roundtrip() {
+    let mut s = Settings::default();
+    s.embed_provider = EmbedProvider::Ollama {
+        url: "http://localhost:11434".to_string(),
+    };
+    let json = serde_json::to_string(&s).unwrap();
+    let s2: Settings = serde_json::from_str(&json).unwrap();
+    assert_eq!(s2.embed_provider, EmbedProvider::Ollama { url: "http://localhost:11434".to_string() });
+}
+
+#[test]
+fn embed_provider_lmstudio_roundtrip() {
+    let mut s = Settings::default();
+    s.embed_provider = EmbedProvider::LmStudio {
+        url: "http://localhost:1234".to_string(),
+    };
+    let json = serde_json::to_string(&s).unwrap();
+    let s2: Settings = serde_json::from_str(&json).unwrap();
+    assert_eq!(s2.embed_provider, EmbedProvider::LmStudio { url: "http://localhost:1234".to_string() });
+}
+
+#[test]
+fn embed_provider_none_roundtrip() {
+    let mut s = Settings::default();
+    s.embed_provider = EmbedProvider::None;
+    let json = serde_json::to_string(&s).unwrap();
+    let s2: Settings = serde_json::from_str(&json).unwrap();
+    assert_eq!(s2.embed_provider, EmbedProvider::None);
+}
+
+#[test]
+fn embed_provider_missing_in_json_defaults_to_none() {
+    let json = r#"{"exclusions": []}"#;
+    let s: Settings = serde_json::from_str(json).unwrap();
+    assert_eq!(s.embed_provider, EmbedProvider::None);
 }

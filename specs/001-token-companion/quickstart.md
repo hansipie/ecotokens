@@ -209,6 +209,32 @@ ecotokens mcp
 Les outils MCP lisent l'index local (`~/.config/ecotokens/index/`) — **aucune
 connexion réseau requise**.
 
+## Providers d'embeddings (précision sémantique)
+
+Par défaut, `ecotokens search` utilise BM25 (recherche lexicale). Pour activer la
+recherche sémantique via embeddings, configurez un provider local :
+
+```bash
+# Ollama (nécessite modèle nomic-embed-text téléchargé)
+ecotokens config --embed-provider ollama --embed-url http://localhost:11434
+
+# LM Studio (format OpenAI-compatible, modèle nomic-embed-text-v1.5)
+ecotokens config --embed-provider lmstudio --embed-url http://localhost:1234
+
+# Désactiver les embeddings
+ecotokens config --embed-provider none
+
+# Vérifier la configuration courante
+ecotokens config
+```
+
+Une fois configuré, relancez `ecotokens index` pour calculer et stocker les embeddings.
+Les résultats de `ecotokens search` seront re-scorés (50% BM25 + 50% cosine similarity).
+
+> **Note** : Les embeddings nécessitent la feature `embeddings` à la compilation :
+> `cargo build --release --features embeddings`
+> Le binaire standard (sans cette feature) reste < 20 MB et utilise BM25 seul.
+
 ## Variables d'environnement
 
 | Variable | Description |

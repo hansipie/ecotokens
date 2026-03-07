@@ -1,5 +1,5 @@
 use ratatui::layout::Rect;
-use ratatui::style::{Color, Style};
+use ratatui::style::{Color, Modifier, Style};
 use ratatui::widgets::{Block, Borders, List, ListItem, Row, Table};
 use ratatui::Frame;
 
@@ -38,15 +38,21 @@ pub fn render_trace(
 
     let widths = [
         ratatui::layout::Constraint::Percentage(30),
-        ratatui::layout::Constraint::Percentage(50),
-        ratatui::layout::Constraint::Percentage(20),
+        ratatui::layout::Constraint::Percentage(55),
+        ratatui::layout::Constraint::Percentage(15),
     ];
 
     let table = Table::new(rows, widths)
         .header(
             Row::new(vec!["Name", "File", "Line"])
-                .style(Style::default().fg(Color::Cyan)),
+                .style(
+                    Style::default()
+                        .fg(Color::Cyan)
+                        .add_modifier(Modifier::BOLD),
+                )
+                .bottom_margin(1),
         )
+        .column_spacing(2)
         .block(block);
 
     frame.render_widget(table, area);

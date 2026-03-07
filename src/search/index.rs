@@ -1,10 +1,12 @@
 use serde::{Deserialize, Serialize};
+use std::collections::HashMap;
 use std::path::{Path, PathBuf};
 use std::sync::atomic::{AtomicUsize, Ordering};
 use std::sync::Arc;
 use tantivy::schema::*;
 use tantivy::{doc, Index, IndexWriter};
 
+use super::embed::{embed_text, save_embeddings};
 use super::symbols::{parse_symbols, write_symbols};
 use super::text_docs::index_text_doc;
 
@@ -14,6 +16,8 @@ pub struct IndexOptions {
     pub path: PathBuf,
     pub index_dir: PathBuf,
     pub progress: Option<Arc<AtomicUsize>>,
+    /// Provider d'embeddings (None = BM25 seul)
+    pub embed_provider: crate::config::settings::EmbedProvider,
 }
 
 #[derive(Debug, Clone, Serialize, Deserialize)]
@@ -46,6 +50,8 @@ pub fn open_or_create_index(index_dir: &Path, reset: bool) -> tantivy::Result<In
 }
 
 /// Index all text files in `path` using BM25 (tantivy).
+/// Si `opts.embed_provider` est configuré, calcule et stocke les embeddings
+/// de chaque chunk dans `{index_dir}/embeddings.json`.
 pub fn index_directory(opts: IndexOptions) -> tantivy::Result<IndexStats> {
     let index = open_or_create_index(&opts.index_dir, opts.reset)?;
     let (_, file_path_field, content_field, kind_field, line_start_field, _symbol_id_field) = build_schema();
@@ -59,6 +65,7 @@ pub fn index_directory(opts: IndexOptions) -> tantivy::Result<IndexStats> {
 
     let mut file_count = 0u32;
     let mut chunk_count = 0u32;
+    let mut embeddings: HashMap<String, Vec<f32>> = HashMap::new();
 
     let walker = ignore::WalkBuilder::new(&opts.path)
         .hidden(false)
@@ -95,11 +102,17 @@ pub fn index_directory(opts: IndexOptions) -> tantivy::Result<IndexStats> {
             let line_start = chunk_idx as u64 * 50;
             writer.add_document(doc!(
                 file_path_field => rel_path.clone(),
-                content_field => chunk_text,
+                content_field => chunk_text.clone(),
                 kind_field => "bm25",
                 line_start_field => line_start,
             ))?;
             chunk_count += 1;
+
+            // Embedding optionnel (best-effort, sans bloquer l'indexation BM25)
+            if let Some(vec) = embed_text(&chunk_text, &opts.embed_provider) {
+                let key = format!("{}:{}", rel_path, chunk_idx);
+                embeddings.insert(key, vec);
+            }
         }
         // Symbolic indexing (tree-sitter for code, regex for docs)
         let ext = path.extension().and_then(|e| e.to_str()).unwrap_or("");
@@ -123,6 +136,12 @@ pub fn index_directory(opts: IndexOptions) -> tantivy::Result<IndexStats> {
     }
 
     writer.commit()?;
+
+    // Sauvegarder les embeddings s'il y en a
+    if !embeddings.is_empty() {
+        let _ = save_embeddings(&opts.index_dir, &embeddings);
+    }
+
     Ok(IndexStats { file_count, chunk_count })
 }
 

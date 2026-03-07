@@ -1,7 +1,7 @@
 use ratatui::layout::Rect;
 use ratatui::style::{Color, Modifier, Style};
 use ratatui::text::{Line, Span};
-use ratatui::widgets::{Block, Borders, List, ListItem};
+use ratatui::widgets::{Block, Borders, List, ListItem, ListState};
 use ratatui::Frame;
 
 use crate::search::symbols::Symbol;
@@ -21,18 +21,10 @@ pub fn render_outline(frame: &mut Frame, area: Rect, symbols: &[Symbol], selecte
 
     let items: Vec<ListItem> = symbols
         .iter()
-        .enumerate()
-        .map(|(i, s)| {
-            let base = if i == selected {
-                Style::default()
-                    .bg(Color::Blue)
-                    .add_modifier(Modifier::BOLD)
-            } else {
-                Style::default()
-            };
+        .map(|s| {
             let line = Line::from(vec![
                 Span::styled(format!("{:<8}", s.kind), Style::default().fg(Color::Cyan)),
-                Span::styled(format!("{} ", s.name), base),
+                Span::raw(format!("{} ", s.name)),
                 Span::styled(
                     format!("{}:{}", s.file_path, s.line_start),
                     Style::default().fg(Color::DarkGray),
@@ -42,6 +34,18 @@ pub fn render_outline(frame: &mut Frame, area: Rect, symbols: &[Symbol], selecte
         })
         .collect();
 
-    let list = List::new(items).block(block);
-    frame.render_widget(list, area);
+    // highlight_style is applied by ratatui to the entire selected row,
+    // which avoids the partial-highlight issue of manual per-span styling.
+    let list = List::new(items)
+        .block(block)
+        .highlight_style(
+            Style::default()
+                .bg(Color::Blue)
+                .add_modifier(Modifier::BOLD),
+        )
+        .highlight_symbol("> ");
+
+    // ListState drives automatic scrolling so the selected item stays visible.
+    let mut state = ListState::default().with_selected(Some(selected));
+    frame.render_stateful_widget(list, area, &mut state);
 }

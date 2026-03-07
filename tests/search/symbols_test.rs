@@ -97,7 +97,7 @@ fn lookup_valid_id_returns_source_snippet() {
     assert!(!symbols.is_empty(), "parse_symbols should find fn compute");
 
     // Index the symbols so lookup_symbol can find them
-    let opts = IndexOptions { reset: false, path: dir.path().to_path_buf(), index_dir: idx.path().to_path_buf(), progress: None };
+    let opts = IndexOptions { reset: false, path: dir.path().to_path_buf(), index_dir: idx.path().to_path_buf(), progress: None, embed_provider: ecotokens::config::settings::EmbedProvider::None };
     let index = open_or_create_index(&opts.index_dir, opts.reset).unwrap();
     let mut writer = index.writer(15_000_000).unwrap();
     write_symbols(&symbols, &mut writer).unwrap();

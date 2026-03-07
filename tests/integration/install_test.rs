@@ -1,4 +1,4 @@
-use ecotokens::install::{install_hook, uninstall_hook, InstallResult};
+use ecotokens::install::{install_hook, uninstall_hook};
 use std::process::Command;
 use tempfile::TempDir;
 
@@ -8,12 +8,17 @@ fn temp_claude_settings(dir: &TempDir) -> std::path::PathBuf {
     path
 }
 
+fn temp_claude_json(dir: &TempDir) -> std::path::PathBuf {
+    dir.path().join(".claude.json")
+}
+
 #[test]
 fn install_writes_hook_to_settings() {
     let dir = TempDir::new().unwrap();
     let settings_path = temp_claude_settings(&dir);
+    let claude_json = temp_claude_json(&dir);
 
-    let result = install_hook(&settings_path, false);
+    let result = install_hook(&settings_path, &claude_json, false);
     assert!(result.is_ok(), "install should succeed: {result:?}");
 
     let content = std::fs::read_to_string(&settings_path).unwrap();
@@ -28,9 +33,10 @@ fn install_writes_hook_to_settings() {
 fn install_is_idempotent() {
     let dir = TempDir::new().unwrap();
     let settings_path = temp_claude_settings(&dir);
+    let claude_json = temp_claude_json(&dir);
 
-    install_hook(&settings_path, false).unwrap();
-    install_hook(&settings_path, false).unwrap();
+    install_hook(&settings_path, &claude_json, false).unwrap();
+    install_hook(&settings_path, &claude_json, false).unwrap();
 
     let content = std::fs::read_to_string(&settings_path).unwrap();
     let v: serde_json::Value = serde_json::from_str(&content).unwrap();
@@ -46,6 +52,7 @@ fn install_is_idempotent() {
 fn uninstall_removes_only_ecotokens_entry() {
     let dir = TempDir::new().unwrap();
     let settings_path = temp_claude_settings(&dir);
+    let claude_json = temp_claude_json(&dir);
 
     // Pre-populate with another hook + ecotokens
     let initial = serde_json::json!({
@@ -60,8 +67,8 @@ fn uninstall_removes_only_ecotokens_entry() {
     });
     std::fs::write(&settings_path, serde_json::to_string_pretty(&initial).unwrap()).unwrap();
 
-    install_hook(&settings_path, false).unwrap();
-    uninstall_hook(&settings_path).unwrap();
+    install_hook(&settings_path, &claude_json, false).unwrap();
+    uninstall_hook(&settings_path, &claude_json).unwrap();
 
     let content = std::fs::read_to_string(&settings_path).unwrap();
     let v: serde_json::Value = serde_json::from_str(&content).unwrap();
@@ -74,8 +81,9 @@ fn uninstall_removes_only_ecotokens_entry() {
 fn uninstall_when_no_hook_is_ok() {
     let dir = TempDir::new().unwrap();
     let settings_path = temp_claude_settings(&dir);
-    // File doesn't exist yet
-    let result = uninstall_hook(&settings_path);
+    let claude_json = temp_claude_json(&dir);
+    // Files don't exist yet
+    let result = uninstall_hook(&settings_path, &claude_json);
     assert!(result.is_ok(), "uninstall on missing file should be Ok");
 }
 
@@ -83,7 +91,8 @@ fn uninstall_when_no_hook_is_ok() {
 fn config_dir_created_on_install() {
     let dir = TempDir::new().unwrap();
     let settings_path = temp_claude_settings(&dir);
-    install_hook(&settings_path, false).unwrap();
+    let claude_json = temp_claude_json(&dir);
+    install_hook(&settings_path, &claude_json, false).unwrap();
     assert!(settings_path.exists(), "settings.json should exist after install");
 }
 
@@ -93,19 +102,31 @@ fn config_dir_created_on_install() {
 fn install_with_mcp_adds_mcp_entry() {
     let dir = TempDir::new().unwrap();
     let settings_path = temp_claude_settings(&dir);
+    let claude_json = temp_claude_json(&dir);
 
-    install_hook(&settings_path, true).unwrap();
+    install_hook(&settings_path, &claude_json, true).unwrap();
 
-    let content = std::fs::read_to_string(&settings_path).unwrap();
-    let v: serde_json::Value = serde_json::from_str(&content).unwrap();
+    // MCP must be in ~/.claude.json, NOT in settings.json
+    let cv: serde_json::Value = serde_json::from_str(
+        &std::fs::read_to_string(&claude_json).unwrap()
+    ).unwrap();
     assert!(
-        v["mcpServers"]["ecotokens"].is_object(),
-        "mcpServers.ecotokens should be present after --with-mcp"
+        cv["mcpServers"]["ecotokens"].is_object(),
+        "mcpServers.ecotokens should be in ~/.claude.json after --with-mcp"
     );
     assert_eq!(
-        v["mcpServers"]["ecotokens"]["command"].as_str().unwrap_or(""),
+        cv["mcpServers"]["ecotokens"]["command"].as_str().unwrap_or(""),
         "ecotokens mcp",
         "MCP command should be 'ecotokens mcp'"
+    );
+
+    // settings.json must NOT contain mcpServers
+    let sv: serde_json::Value = serde_json::from_str(
+        &std::fs::read_to_string(&settings_path).unwrap()
+    ).unwrap();
+    assert!(
+        sv["mcpServers"].is_null() || !sv["mcpServers"].as_object().map_or(false, |m| m.contains_key("ecotokens")),
+        "mcpServers.ecotokens should NOT be in settings.json"
     );
 }
 
@@ -113,13 +134,15 @@ fn install_with_mcp_adds_mcp_entry() {
 fn install_with_mcp_is_idempotent() {
     let dir = TempDir::new().unwrap();
     let settings_path = temp_claude_settings(&dir);
+    let claude_json = temp_claude_json(&dir);
 
-    install_hook(&settings_path, true).unwrap();
-    install_hook(&settings_path, true).unwrap();
+    install_hook(&settings_path, &claude_json, true).unwrap();
+    install_hook(&settings_path, &claude_json, true).unwrap();
 
-    let content = std::fs::read_to_string(&settings_path).unwrap();
-    let v: serde_json::Value = serde_json::from_str(&content).unwrap();
-    let servers = v["mcpServers"].as_object().unwrap();
+    let cv: serde_json::Value = serde_json::from_str(
+        &std::fs::read_to_string(&claude_json).unwrap()
+    ).unwrap();
+    let servers = cv["mcpServers"].as_object().unwrap();
     let ecotokens_count = servers.keys().filter(|k| k.as_str() == "ecotokens").count();
     assert_eq!(ecotokens_count, 1, "should not duplicate MCP entry");
 }
@@ -128,6 +151,7 @@ fn install_with_mcp_is_idempotent() {
 fn install_with_mcp_preserves_existing_hooks() {
     let dir = TempDir::new().unwrap();
     let settings_path = temp_claude_settings(&dir);
+    let claude_json = temp_claude_json(&dir);
 
     // Pre-populate with another hook
     let initial = serde_json::json!({
@@ -140,27 +164,85 @@ fn install_with_mcp_preserves_existing_hooks() {
     });
     std::fs::write(&settings_path, serde_json::to_string_pretty(&initial).unwrap()).unwrap();
 
-    install_hook(&settings_path, true).unwrap();
+    install_hook(&settings_path, &claude_json, true).unwrap();
 
-    let content = std::fs::read_to_string(&settings_path).unwrap();
-    let v: serde_json::Value = serde_json::from_str(&content).unwrap();
-    let hooks = v["hooks"]["PreToolUse"].as_array().unwrap();
-    assert!(hooks.len() >= 2, "both hooks should be present");
-    assert!(v["mcpServers"]["ecotokens"].is_object(), "MCP entry should be present");
+    let sv: serde_json::Value = serde_json::from_str(
+        &std::fs::read_to_string(&settings_path).unwrap()
+    ).unwrap();
+    let hooks = sv["hooks"]["PreToolUse"].as_array().unwrap();
+    assert!(hooks.len() >= 2, "both hooks should be present in settings.json");
+
+    let cv: serde_json::Value = serde_json::from_str(
+        &std::fs::read_to_string(&claude_json).unwrap()
+    ).unwrap();
+    assert!(cv["mcpServers"]["ecotokens"].is_object(), "MCP entry should be in ~/.claude.json");
 }
 
 #[test]
 fn install_without_mcp_does_not_add_mcp_entry() {
     let dir = TempDir::new().unwrap();
     let settings_path = temp_claude_settings(&dir);
+    let claude_json = temp_claude_json(&dir);
 
-    install_hook(&settings_path, false).unwrap();
+    install_hook(&settings_path, &claude_json, false).unwrap();
 
-    let content = std::fs::read_to_string(&settings_path).unwrap();
-    let v: serde_json::Value = serde_json::from_str(&content).unwrap();
     assert!(
-        v["mcpServers"].is_null() || !v["mcpServers"].as_object().map_or(false, |m| m.contains_key("ecotokens")),
-        "mcpServers.ecotokens should NOT be present without --with-mcp"
+        !claude_json.exists()
+            || {
+                let cv: serde_json::Value = serde_json::from_str(
+                    &std::fs::read_to_string(&claude_json).unwrap_or_default()
+                ).unwrap_or(serde_json::json!({}));
+                !cv["mcpServers"].as_object().map_or(false, |m| m.contains_key("ecotokens"))
+            },
+        "mcpServers.ecotokens should NOT be written without --with-mcp"
+    );
+}
+
+#[test]
+fn uninstall_removes_mcp_entry_from_claude_json() {
+    let dir = TempDir::new().unwrap();
+    let settings_path = temp_claude_settings(&dir);
+    let claude_json = temp_claude_json(&dir);
+
+    install_hook(&settings_path, &claude_json, true).unwrap();
+    uninstall_hook(&settings_path, &claude_json).unwrap();
+
+    let cv: serde_json::Value = serde_json::from_str(
+        &std::fs::read_to_string(&claude_json).unwrap()
+    ).unwrap();
+    assert!(
+        !cv["mcpServers"].as_object().map_or(false, |m| m.contains_key("ecotokens")),
+        "mcpServers.ecotokens should be removed from ~/.claude.json after uninstall"
+    );
+}
+
+#[test]
+fn uninstall_preserves_other_mcp_entries() {
+    let dir = TempDir::new().unwrap();
+    let settings_path = temp_claude_settings(&dir);
+    let claude_json = temp_claude_json(&dir);
+
+    // Pre-populate ~/.claude.json with another MCP server
+    let initial = serde_json::json!({
+        "mcpServers": {
+            "other-tool": { "command": "other-tool mcp", "type": "stdio" }
+        }
+    });
+    std::fs::write(&claude_json, serde_json::to_string_pretty(&initial).unwrap()).unwrap();
+
+    install_hook(&settings_path, &claude_json, true).unwrap();
+    uninstall_hook(&settings_path, &claude_json).unwrap();
+
+    let cv: serde_json::Value = serde_json::from_str(
+        &std::fs::read_to_string(&claude_json).unwrap()
+    ).unwrap();
+    assert!(
+        cv["mcpServers"]["other-tool"].is_object(),
+        "other MCP server should still be present after uninstall"
+    );
+    assert!(
+        !cv["mcpServers"].as_object().map_or(false, |m| m.contains_key("ecotokens")),
+        "ecotokens MCP entry should be gone"
     );
 }
 

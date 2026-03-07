@@ -33,6 +33,7 @@ impl EcotokensServer {
             query: params.query,
             top_k: params.top_k.unwrap_or(5),
             index_dir: self.index_dir.clone(),
+            embed_provider: crate::config::Settings::load().embed_provider,
         };
         match crate::search::query::search_index(opts) {
             Ok(results) => serde_json::to_string_pretty(&results).unwrap_or_default(),
