@@ -142,6 +142,7 @@ fn detect_family(command: &str) -> metrics::store::CommandFamily {
     let cmd = command.trim();
     if cmd.starts_with("git ") { CommandFamily::Git }
     else if cmd.starts_with("cargo ") { CommandFamily::Cargo }
+    else if cmd.starts_with("python") || cmd.starts_with("pytest") || cmd.starts_with("pip ") || cmd.starts_with("ruff ") || cmd.starts_with("uv ") { CommandFamily::Python }
     else if cmd.starts_with("ls") || cmd.starts_with("find") || cmd.starts_with("tree") { CommandFamily::Fs }
     else { CommandFamily::Generic }
 }
@@ -155,6 +156,7 @@ fn apply_filter(command: &str, output: &str) -> String {
     match detect_family(command) {
         CommandFamily::Git => filter::git::filter_git(command, output),
         CommandFamily::Cargo => filter::cargo::filter_cargo(command, output),
+        CommandFamily::Python => filter::python::filter_python(command, output),
         CommandFamily::Fs => filter::fs::filter_fs(command, output),
         CommandFamily::Markdown => filter::markdown::filter_markdown(output),
         CommandFamily::ConfigFile => filter::config_file::filter_config_file(output, ext),

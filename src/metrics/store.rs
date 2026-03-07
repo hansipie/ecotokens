@@ -10,6 +10,7 @@ pub enum CommandFamily {
     Cargo,
     Fs,
     Markdown,
+    Python,
     ConfigFile,
     Generic,
 }

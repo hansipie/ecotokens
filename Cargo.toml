@@ -74,6 +74,10 @@ name = "markdown_test"
 path = "tests/filter/markdown_test.rs"
 
 [[test]]
+name = "python_test"
+path = "tests/filter/python_test.rs"
+
+[[test]]
 name = "config_file_test"
 path = "tests/filter/config_file_test.rs"
 
