@@ -4,6 +4,10 @@ version = "0.1.0"
 edition = "2021"
 description = "Token-saving companion for Claude Code"
 license = "MIT"
+repository = "https://github.com/hansipie/ecotokens"
+homepage = "https://github.com/hansipie/ecotokens"
+keywords = ["claude", "tokens", "cli", "productivity", "ai"]
+categories = ["command-line-utilities", "development-tools"]
 
 [features]
 exact-tokens = ["tiktoken-rs"]
