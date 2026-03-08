@@ -27,13 +27,12 @@ impl EcotokensServer {
     fn resolve_run_cwd(&self, cwd: Option<&str>) -> Result<PathBuf, String> {
         if let Some(cwd) = cwd {
             let path = PathBuf::from(cwd);
-            if !path.exists() {
-                return Err(format!("cwd does not exist: {cwd}"));
-            }
-            if !path.is_dir() {
+            let canonical = std::fs::canonicalize(&path)
+                .map_err(|e| format!("cwd does not exist or is not accessible: {cwd}: {e}"))?;
+            if !canonical.is_dir() {
                 return Err(format!("cwd is not a directory: {cwd}"));
             }
-            return Ok(path);
+            return Ok(canonical);
         }
 
         if let Ok(ws_root) = std::env::var("ECOTOKENS_WORKSPACE_ROOT") {
@@ -127,7 +126,7 @@ impl EcotokensServer {
         let output = std::process::Command::new("bash")
             .arg("-lc")
             .arg(command)
-            .current_dir(cwd)
+            .current_dir(&cwd)
             .output();
         let raw = match output {
             Ok(o) => {
@@ -139,7 +138,7 @@ impl EcotokensServer {
         };
         let duration_ms = start.elapsed().as_millis() as u32;
         let (filtered, _before, _after) =
-            crate::filter::run_filter_pipeline(command, &raw, duration_ms);
+            crate::filter::run_filter_pipeline_with_cwd(command, &raw, duration_ms, Some(&cwd));
         filtered
     }
 }

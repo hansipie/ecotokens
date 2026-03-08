@@ -64,6 +64,17 @@ pub fn apply_filter(command: &str, output: &str) -> String {
 /// Run the full filter pipeline: masking → family filter → token counting → metrics recording.
 /// Returns `(filtered_output, tokens_before, tokens_after)`.
 pub fn run_filter_pipeline(command: &str, raw: &str, duration_ms: u32) -> (String, u32, u32) {
+    run_filter_pipeline_with_cwd(command, raw, duration_ms, None)
+}
+
+/// Run the full filter pipeline with an optional working directory for git_root detection.
+/// Returns `(filtered_output, tokens_before, tokens_after)`.
+pub fn run_filter_pipeline_with_cwd(
+    command: &str,
+    raw: &str,
+    duration_ms: u32,
+    cwd: Option<&std::path::Path>,
+) -> (String, u32, u32) {
     let (masked, redacted) = crate::masking::mask(raw);
     let filtered = apply_filter(command, &masked);
     let tokens_before = crate::tokens::estimate_tokens(raw) as u32;
@@ -76,8 +87,12 @@ pub fn run_filter_pipeline(command: &str, raw: &str, duration_ms: u32) -> (Strin
             crate::metrics::store::FilterMode::Passthrough
         };
         let family = detect_family(command);
-        let git_root = std::process::Command::new("git")
-            .args(["rev-parse", "--show-toplevel"])
+        let mut git_cmd = std::process::Command::new("git");
+        git_cmd.args(["rev-parse", "--show-toplevel"]);
+        if let Some(dir) = cwd {
+            git_cmd.current_dir(dir);
+        }
+        let git_root = git_cmd
             .output()
             .ok()
             .map(|o| String::from_utf8_lossy(&o.stdout).trim().to_string());
