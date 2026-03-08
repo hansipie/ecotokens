@@ -256,3 +256,78 @@ fn gain_project_log_mode_renders_history() {
         "project log mode should show 'Historique' in panel title: {content:?}"
     );
 }
+
+#[test]
+fn gain_project_history_panel_refreshes_between_draws() {
+    let mut item1 = make_interception(1000, 400, CommandFamily::Git);
+    item1.git_root = Some("/home/user/proj-refresh".to_string());
+    item1.command = "git status".to_string();
+
+    let mut item2 = make_interception(1000, 300, CommandFamily::Git);
+    item2.git_root = Some("/home/user/proj-refresh".to_string());
+    item2.command = "git log -n 1".to_string();
+
+    let items_first = vec![item1.clone()];
+    let report_first = aggregate(&items_first, Period::All, "sonnet");
+
+    let backend = TestBackend::new(140, 40);
+    let mut terminal = Terminal::new(backend).unwrap();
+
+    terminal
+        .draw(|frame| {
+            render_gain(
+                frame,
+                frame.area(),
+                &report_first,
+                &items_first,
+                None,
+                GainMode::Project,
+                Default::default(),
+                None,
+                Default::default(),
+                Some(0),
+                None,
+            )
+        })
+        .unwrap();
+
+    let first_content = buffer_text(&terminal);
+    assert!(
+        first_content.contains("1/20"),
+        "first draw should show one history entry, got: {first_content:?}"
+    );
+    assert!(
+        first_content.contains("git status"),
+        "first draw should include first command, got: {first_content:?}"
+    );
+
+    let items_second = vec![item1, item2];
+    let report_second = aggregate(&items_second, Period::All, "sonnet");
+    terminal
+        .draw(|frame| {
+            render_gain(
+                frame,
+                frame.area(),
+                &report_second,
+                &items_second,
+                None,
+                GainMode::Project,
+                Default::default(),
+                None,
+                Default::default(),
+                Some(0),
+                None,
+            )
+        })
+        .unwrap();
+
+    let second_content = buffer_text(&terminal);
+    assert!(
+        second_content.contains("2/20"),
+        "second draw should show refreshed history count, got: {second_content:?}"
+    );
+    assert!(
+        second_content.contains("git log -n 1") || second_content.contains("git log"),
+        "second draw should include newest command, got: {second_content:?}"
+    );
+}

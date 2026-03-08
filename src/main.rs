@@ -237,7 +237,14 @@ fn main() {
                     let mut selected_family: Option<usize> = None;
                     let mut selected_project: Option<usize> = None;
                     let mut project_filter: Option<String> = None;
+                    let mut last_reload = std::time::Instant::now();
                     loop {
+                        // Recharger les données toutes les 2 secondes, même si des événements arrivent
+                        if last_reload.elapsed() >= std::time::Duration::from_secs(2) {
+                            items = read_from(&path).unwrap_or_default();
+                            report = aggregate(&items, p.clone(), model.as_deref().unwrap_or("sonnet"));
+                            last_reload = std::time::Instant::now();
+                        }
                         let ts = chrono::Utc::now().format("%H:%M:%S").to_string();
                         let family_count = match project_filter.as_deref() {
                             Some(proj) => tui::gain::sorted_family_keys_for_project(&items, proj).len(),
@@ -254,7 +261,7 @@ fn main() {
                                 project_filter.as_deref(),
                             );
                         });
-                        if poll(std::time::Duration::from_secs(1)).unwrap_or(false) {
+                        if poll(std::time::Duration::from_millis(100)).unwrap_or(false) {
                             if let Ok(Event::Key(key)) = read() {
                                 if matches!(key.code, KeyCode::Char('q') | KeyCode::Char('Q') | KeyCode::Esc)
                                     || (key.code == KeyCode::Char('c')
@@ -327,9 +334,6 @@ fn main() {
                                     }
                                 }
                             }
-                        } else {
-                            items = read_from(&path).unwrap_or_default();
-                            report = aggregate(&items, p.clone(), model.as_deref().unwrap_or("sonnet"));
                         }
                     }
                 }

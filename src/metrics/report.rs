@@ -127,7 +127,11 @@ pub fn aggregate(items: &[Interception], period: Period, model: &str) -> Report 
     let mut by_project: HashMap<String, ProjectStats> = HashMap::new();
     for item in &filtered {
         if let Some(root) = &item.git_root {
-            let entry = by_project.entry(root.clone()).or_insert(ProjectStats {
+            let root = root.trim();
+            if root.is_empty() {
+                continue;
+            }
+            let entry = by_project.entry(root.to_string()).or_insert(ProjectStats {
                 count: 0,
                 tokens_before: 0,
                 tokens_after: 0,

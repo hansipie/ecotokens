@@ -90,4 +90,8 @@ pub struct RunParams {
         description = "The shell command to execute (e.g. 'git log --oneline -20', 'cargo test')"
     )]
     pub command: String,
+    #[schemars(
+        description = "Optional working directory for the command (absolute or relative path)"
+    )]
+    pub cwd: Option<String>,
 }

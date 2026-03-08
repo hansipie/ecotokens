@@ -77,6 +77,25 @@ fn by_project_groups_by_git_root() {
 }
 
 #[test]
+fn by_project_ignores_blank_git_root() {
+    let mut items = make_items();
+    let mut empty_root = make_interception_ago(5, CommandFamily::Git, 1200, 600);
+    empty_root.git_root = Some("   ".to_string());
+    items.push(empty_root);
+
+    let report = aggregate(&items, Period::All, "claude-sonnet-4-6");
+    assert!(
+        !report.by_project.contains_key(""),
+        "blank git_root should not create unnamed project"
+    );
+    assert_eq!(
+        report.by_project.len(),
+        1,
+        "only /repo should be present in by_project"
+    );
+}
+
+#[test]
 fn cost_avoided_usd_positive_for_savings() {
     let items = make_items();
     let report = aggregate(&items, Period::All, "claude-sonnet-4-6");

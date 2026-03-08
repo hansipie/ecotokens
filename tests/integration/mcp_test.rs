@@ -290,6 +290,60 @@ fn mcp_tool_run_executes_and_filters_command() {
 }
 
 #[test]
+fn mcp_tool_run_honors_cwd_parameter() {
+    let src = TempDir::new().unwrap();
+    let idx = TempDir::new().unwrap();
+
+    fs::write(src.path().join("hello.txt"), "hi").unwrap();
+
+    let status = Command::new(ecotokens_bin())
+        .args([
+            "index",
+            "--path",
+            &src.path().to_string_lossy(),
+            "--index-dir",
+            &idx.path().to_string_lossy(),
+        ])
+        .status()
+        .expect("ecotokens index should run");
+    assert!(status.success(), "ecotokens index failed");
+
+    let mut child = spawn_mcp(&idx);
+    let mut stdin = child.stdin.take().unwrap();
+    let mut stdout = BufReader::new(child.stdout.take().unwrap());
+
+    let _ = send_jsonrpc(&mut stdin, &mut stdout, &init_request());
+    let notif = serde_json::to_string(&initialized_notification()).unwrap();
+    writeln!(stdin, "{notif}").unwrap();
+    stdin.flush().unwrap();
+
+    let call = serde_json::json!({
+        "jsonrpc": "2.0", "id": 3,
+        "method": "tools/call",
+        "params": {
+            "name": "ecotokens_run",
+            "arguments": {
+                "command": "ls hello.txt",
+                "cwd": src.path().to_string_lossy()
+            }
+        }
+    });
+    let resp = send_jsonrpc(&mut stdin, &mut stdout, &call);
+    assert!(
+        resp.get("result").is_some(),
+        "ecotokens_run with cwd should return result, got: {resp}"
+    );
+    let content = resp["result"]["content"][0]["text"].as_str().unwrap_or("");
+    assert!(
+        content.contains("hello.txt"),
+        "output should be produced from provided cwd, got: {content}"
+    );
+
+    drop(stdin);
+    let _ = child.kill();
+}
+
+#[test]
 fn mcp_unknown_tool_returns_error() {
     let (_src, idx) = setup_indexed_fixture();
     let mut child = spawn_mcp(&idx);

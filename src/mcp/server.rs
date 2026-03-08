@@ -23,6 +23,34 @@ impl EcotokensServer {
             tool_router: Self::tool_router(),
         }
     }
+
+    fn resolve_run_cwd(&self, cwd: Option<&str>) -> Result<PathBuf, String> {
+        if let Some(cwd) = cwd {
+            let path = PathBuf::from(cwd);
+            if !path.exists() {
+                return Err(format!("cwd does not exist: {cwd}"));
+            }
+            if !path.is_dir() {
+                return Err(format!("cwd is not a directory: {cwd}"));
+            }
+            return Ok(path);
+        }
+
+        if let Ok(ws_root) = std::env::var("ECOTOKENS_WORKSPACE_ROOT") {
+            let path = PathBuf::from(ws_root);
+            if path.is_dir() {
+                return Ok(path);
+            }
+        }
+
+        if let Ok(path) = std::env::current_dir() {
+            if path.is_dir() {
+                return Ok(path);
+            }
+        }
+
+        Err("unable to resolve a valid working directory".to_string())
+    }
 }
 
 #[tool_router]
@@ -85,13 +113,22 @@ impl EcotokensServer {
         Output is automatically filtered and compressed to save context tokens, \
         and token savings are recorded in the metrics store.")]
     fn ecotokens_run(&self, Parameters(params): Parameters<RunParams>) -> String {
-        let command = &params.command;
-        let args: Vec<&str> = command.split_whitespace().collect();
-        if args.is_empty() {
+        let command = params.command.trim();
+        if command.is_empty() {
             return "{\"error\": \"empty command\"}".to_string();
         }
+
+        let cwd = match self.resolve_run_cwd(params.cwd.as_deref()) {
+            Ok(path) => path,
+            Err(e) => return format!("{{\"error\": \"{e}\"}}"),
+        };
+
         let start = std::time::Instant::now();
-        let output = std::process::Command::new(args[0]).args(&args[1..]).output();
+        let output = std::process::Command::new("bash")
+            .arg("-lc")
+            .arg(command)
+            .current_dir(cwd)
+            .output();
         let raw = match output {
             Ok(o) => {
                 let stdout = String::from_utf8_lossy(&o.stdout).into_owned();

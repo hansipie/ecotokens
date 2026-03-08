@@ -71,6 +71,23 @@ impl SparklineMode {
     }
 }
 
+fn project_label(name: &str) -> String {
+    let trimmed = name.trim();
+    if trimmed.is_empty() {
+        return "(unknown project)".to_string();
+    }
+    let base = std::path::Path::new(trimmed)
+        .file_name()
+        .and_then(|n| n.to_str())
+        .unwrap_or(trimmed)
+        .trim();
+    if base.is_empty() {
+        trimmed.to_string()
+    } else {
+        base.to_string()
+    }
+}
+
 /// Retourne les noms de familles (triés par savings desc) présents dans un projet donné.
 pub fn sorted_family_keys_for_project(items: &[Interception], project: &str) -> Vec<String> {
     use std::collections::HashMap;
@@ -180,10 +197,7 @@ fn render_stats(frame: &mut Frame, area: Rect, report: &Report, last_updated: Op
 
 fn render_families(frame: &mut Frame, area: Rect, report: &Report, items: &[Interception], selected: Option<usize>, project_filter: Option<&str>) -> Vec<String> {
     let title = if let Some(proj) = project_filter {
-        let basename = std::path::Path::new(proj)
-            .file_name()
-            .and_then(|n| n.to_str())
-            .unwrap_or(proj);
+        let basename = project_label(proj);
         format!(" By family  ·  projet: {basename}  [↑↓/jk] nav  [b] projets ")
     } else {
         " By family  ·  global  [↑↓/jk] nav  [b] projects ".to_string()
@@ -311,10 +325,7 @@ fn render_projects(frame: &mut Frame, area: Rect, report: &Report, selected: Opt
         let color = if is_sel { Color::Green } else { Color::Yellow };
         let modifier = if is_sel { Modifier::BOLD } else { Modifier::empty() };
         let prefix = if is_sel { "▶ " } else { "  " };
-        let label = std::path::Path::new(name.as_str())
-            .file_name()
-            .and_then(|n| n.to_str())
-            .unwrap_or(name.as_str());
+        let label = project_label(name.as_str());
         let ratio = (*pct as f64 / 100.0).clamp(0.0, 1.0);
         let gauge = Gauge::default()
             .gauge_style(Style::default().fg(color).add_modifier(modifier))
@@ -339,10 +350,7 @@ fn render_project_log_panel(frame: &mut Frame, area: Rect, project_name: Option<
         return;
     };
 
-    let label = std::path::Path::new(name)
-        .file_name()
-        .and_then(|n| n.to_str())
-        .unwrap_or(name);
+    let label = project_label(name);
 
     let history: Vec<&Interception> = items
         .iter()
