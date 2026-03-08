@@ -1,35 +1,55 @@
 # ecotokens
 
-Token-saving companion for [Claude Code](https://claude.ai/code). ecotokens intercepts tool outputs before they reach the model, filters the noise, and records how many tokens you saved.
+Token-saving companion for [Claude Code](https://claude.ai/code) and [GitHub Copilot](https://github.com/features/copilot) (VS Code). ecotokens intercepts tool outputs before they reach the model, filters the noise, and records how many tokens you saved.
 
 ## How it works
 
-ecotokens installs as a `PreToolUse` hook in Claude Code. When Claude runs a shell command, ecotokens:
+ecotokens works in two complementary modes:
+
+**Hook mode (Claude Code only)** — installs as a `PreToolUse` hook. When Claude runs a shell command, ecotokens:
 
 1. Runs the command and captures its output
 2. Applies a family-specific filter (git, cargo, python, …)
 3. Returns the compressed output to Claude
 4. Records the before/after token counts in a local metrics store
 
-The result: Claude sees a clean, concise output — and you keep your context window.
+**MCP server mode (Claude Code + GitHub Copilot in VS Code)** — exposes five tools the model can call directly: codebase search, symbol lookup, call graph tracing, and `ecotokens_run` (runs any shell command and returns token-optimized output).
+
+The result: the model sees clean, concise output — and you keep your context window.
 
 ## Installation
 
+### Claude Code
+
 ```bash
 cargo install --path .
-ecotokens install
+ecotokens install                # hook only
+ecotokens install --with-mcp     # hook + MCP server (search, outline, trace, run)
 ```
 
-To also register the MCP server (enables `search`, `outline`, `trace` from Claude Code):
+### GitHub Copilot (VS Code)
+
+Requires VS Code ≥ 1.99 with the GitHub Copilot extension.
 
 ```bash
-ecotokens install --with-mcp
+cargo install --path .
+ecotokens install --target vscode
 ```
 
-To uninstall:
+This writes the MCP server entry into `~/.config/Code/User/settings.json`. Copilot in Agent mode will then have access to all five ecotokens tools.
+
+### Both at once
 
 ```bash
-ecotokens uninstall
+ecotokens install --target all --with-mcp
+```
+
+### Uninstall
+
+```bash
+ecotokens uninstall                   # Claude Code
+ecotokens uninstall --target vscode   # VS Code
+ecotokens uninstall --target all      # both
 ```
 
 ## Commands
@@ -83,12 +103,13 @@ Interactive TUI showing token savings per command family and per project, with a
 
 ## MCP server
 
-When installed with `--with-mcp`, ecotokens exposes four tools to Claude Code:
+When registered (via `--with-mcp` for Claude Code, or `--target vscode` for Copilot), ecotokens exposes five tools:
 
 - **`ecotokens_search`** — semantic search over the indexed codebase
 - **`ecotokens_outline`** — list symbols in a file or directory
 - **`ecotokens_symbol`** — retrieve a symbol's source by stable ID
 - **`ecotokens_trace_callers`** / **`ecotokens_trace_callees`** — call graph tracing
+- **`ecotokens_run`** — execute a shell command and return token-optimized output (filters noise, records savings)
 
 ## Embeddings (optional)
 
@@ -108,7 +129,7 @@ ecotokens config --embed-provider none
 ## Requirements
 
 - Rust ≥ 1.75 (stable)
-- Claude Code with hook support
+- Claude Code with hook support, and/or VS Code ≥ 1.99 with GitHub Copilot
 
 ## License
 
