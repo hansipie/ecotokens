@@ -116,7 +116,7 @@ pub fn index_directory(opts: IndexOptions) -> tantivy::Result<IndexStats> {
         }
         // Symbolic indexing (tree-sitter for code, regex for docs)
         let ext = path.extension().and_then(|e| e.to_str()).unwrap_or("");
-        let symbols = match ext {
+        let mut symbols = match ext {
             "rs" | "py" | "js" | "ts" | "jsx" | "tsx" => {
                 parse_symbols(path).unwrap_or_default()
             }
@@ -125,6 +125,17 @@ pub fn index_directory(opts: IndexOptions) -> tantivy::Result<IndexStats> {
             }
             _ => vec![],
         };
+        // Fix up IDs and file_path: parse_symbols uses just the filename, but we
+        // need the full project-relative path so that lookup_symbol IDs match.
+        let filename = path.file_name().and_then(|n| n.to_str()).unwrap_or("");
+        for sym in &mut symbols {
+            if sym.file_path == filename {
+                if let Some(suffix) = sym.id.strip_prefix(&format!("{filename}::")) {
+                    sym.id = format!("{rel_path}::{suffix}");
+                }
+                sym.file_path = rel_path.clone();
+            }
+        }
         if !symbols.is_empty() {
             let _ = write_symbols(&symbols, &mut writer); // best-effort
         }

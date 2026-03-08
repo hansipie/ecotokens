@@ -1,9 +1,15 @@
+# Build artifacts
 /target/
-Cargo.lock
-*.rs.bk
 *.rlib
-.env*
-*.log
+
+# Editor / IDE
 .idea/
 .vscode/
+
+# Profiling & debugging
 *.prof*
+*.rs.bk
+
+# Environnement & logs
+.env*
+*.log
