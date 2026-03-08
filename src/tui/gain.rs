@@ -71,13 +71,30 @@ impl SparklineMode {
     }
 }
 
+/// Retourne les noms de familles (triés par savings desc) présents dans un projet donné.
+pub fn sorted_family_keys_for_project(items: &[Interception], project: &str) -> Vec<String> {
+    use std::collections::HashMap;
+    let mut map: HashMap<String, f32> = HashMap::new();
+    for item in items.iter().filter(|i| i.git_root.as_deref() == Some(project)) {
+        if let Some(family) = serde_json::to_value(&item.command_family)
+            .ok()
+            .and_then(|v| v.as_str().map(|s| s.to_string()))
+        {
+            map.entry(family).or_insert(item.savings_pct);
+        }
+    }
+    let mut families: Vec<(String, f32)> = map.into_iter().collect();
+    families.sort_by(|a, b| b.1.partial_cmp(&a.1).unwrap_or(std::cmp::Ordering::Equal));
+    families.into_iter().map(|(k, _)| k).collect()
+}
+
 /// Render the gain dashboard:
 ///   - top:    summary stats (interceptions, tokens, savings %, cost USD)
 ///   - middle: one Gauge per command family, sorted by savings desc
 ///   - detail: last interception content for selected family (split or diff)
 ///   - bottom: Sparkline of tokens saved over the last 14 days
 #[allow(clippy::too_many_arguments)]
-pub fn render_gain(frame: &mut Frame, area: Rect, report: &Report, items: &[Interception], last_updated: Option<&str>, gain_mode: GainMode, sparkline_mode: SparklineMode, selected_family: Option<usize>, detail_mode: DetailMode, selected_project: Option<usize>) {
+pub fn render_gain(frame: &mut Frame, area: Rect, report: &Report, items: &[Interception], last_updated: Option<&str>, gain_mode: GainMode, sparkline_mode: SparklineMode, selected_family: Option<usize>, detail_mode: DetailMode, selected_project: Option<usize>, project_filter: Option<&str>) {
     // Outer layout: stats | pool(family+detail) | sparkline
     let outer = Layout::default()
         .direction(Direction::Vertical)
@@ -115,11 +132,18 @@ pub fn render_gain(frame: &mut Frame, area: Rect, report: &Report, items: &[Inte
             .split(outer[1])
     };
 
-    let family_names = render_families(frame, pool[0], report, selected_family);
+    let filtered_items: Vec<Interception>;
+    let display_items: &[Interception] = if let Some(proj) = project_filter {
+        filtered_items = items.iter().filter(|i| i.git_root.as_deref() == Some(proj)).cloned().collect();
+        &filtered_items
+    } else {
+        items
+    };
+    let family_names = render_families(frame, pool[0], report, display_items, selected_family, project_filter);
     let sel_name = selected_family
         .and_then(|i| family_names.get(i))
         .map(String::as_str);
-    render_detail(frame, pool[1], sel_name, items, detail_mode);
+    render_detail(frame, pool[1], sel_name, display_items, detail_mode);
     render_sparkline(frame, outer[2], items, sparkline_mode);
 }
 
@@ -154,22 +178,62 @@ fn render_stats(frame: &mut Frame, area: Rect, report: &Report, last_updated: Op
 
 // ── Family gauges ─────────────────────────────────────────────────────────────
 
-fn render_families(frame: &mut Frame, area: Rect, report: &Report, selected: Option<usize>) -> Vec<String> {
-    let block = Block::default().borders(Borders::ALL).title(" By family  [↑↓/jk] nav  [b] projects ");
+fn render_families(frame: &mut Frame, area: Rect, report: &Report, items: &[Interception], selected: Option<usize>, project_filter: Option<&str>) -> Vec<String> {
+    let title = if let Some(proj) = project_filter {
+        let basename = std::path::Path::new(proj)
+            .file_name()
+            .and_then(|n| n.to_str())
+            .unwrap_or(proj);
+        format!(" By family  ·  projet: {basename}  [↑↓/jk] nav  [b] projets ")
+    } else {
+        " By family  ·  global  [↑↓/jk] nav  [b] projects ".to_string()
+    };
+    let block = Block::default().borders(Borders::ALL).title(title);
 
-    if report.by_family.is_empty() {
+    // Build family list depending on filter
+    let families_owned: Vec<(String, f32)>;
+    let families: Vec<(&str, f32)> = if let Some(proj) = project_filter {
+        use std::collections::HashMap;
+        let mut map: HashMap<String, (f32, u64)> = HashMap::new();
+        for item in items.iter().filter(|i| i.git_root.as_deref() == Some(proj)) {
+            if let Some(family) = serde_json::to_value(&item.command_family)
+                .ok()
+                .and_then(|v| v.as_str().map(|s| s.to_string()))
+            {
+                let entry = map.entry(family).or_insert((0.0, 0));
+                entry.0 += item.savings_pct;
+                entry.1 += 1;
+            }
+        }
+        let mut sorted: Vec<(String, f32)> = map
+            .into_iter()
+            .map(|(k, (sum, n))| (k, if n > 0 { sum / n as f32 } else { 0.0 }))
+            .collect();
+        sorted.sort_by(|a, b| b.1.partial_cmp(&a.1).unwrap_or(std::cmp::Ordering::Equal));
+        families_owned = sorted;
+        families_owned.iter().map(|(k, v)| (k.as_str(), *v)).collect()
+    } else {
+        if report.by_family.is_empty() {
+            let paragraph = Paragraph::new("No data yet.").block(block);
+            frame.render_widget(paragraph, area);
+            return vec![];
+        }
+        // Sort families by savings_pct descending
+        let mut sorted: Vec<(&String, f32)> = report
+            .by_family
+            .iter()
+            .map(|(k, v)| (k, v.savings_pct))
+            .collect();
+        sorted.sort_by(|a, b| b.1.partial_cmp(&a.1).unwrap_or(std::cmp::Ordering::Equal));
+        families_owned = sorted.into_iter().map(|(k, v)| (k.clone(), v)).collect();
+        families_owned.iter().map(|(k, v)| (k.as_str(), *v)).collect()
+    };
+
+    if families.is_empty() {
         let paragraph = Paragraph::new("No data yet.").block(block);
         frame.render_widget(paragraph, area);
         return vec![];
     }
-
-    // Sort families by savings_pct descending
-    let mut families: Vec<(&String, f32)> = report
-        .by_family
-        .iter()
-        .map(|(k, v)| (k, v.savings_pct))
-        .collect();
-    families.sort_by(|a, b| b.1.partial_cmp(&a.1).unwrap_or(std::cmp::Ordering::Equal));
 
     // One row per family
     let n = families.len() as u16;

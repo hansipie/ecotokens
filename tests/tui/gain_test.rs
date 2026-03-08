@@ -42,7 +42,7 @@ fn gain_renders_savings_label() {
     let backend = TestBackend::new(100, 25);
     let mut terminal = Terminal::new(backend).unwrap();
     terminal
-        .draw(|frame| render_gain(frame, frame.area(), &report, &items, None, GainMode::Family, Default::default(), None, Default::default(), None))
+        .draw(|frame| render_gain(frame, frame.area(), &report, &items, None, GainMode::Family, Default::default(), None, Default::default(), None, None))
         .unwrap();
     let content = buffer_text(&terminal);
     assert!(
@@ -58,7 +58,7 @@ fn gain_renders_cost_avoided_label() {
     let backend = TestBackend::new(100, 25);
     let mut terminal = Terminal::new(backend).unwrap();
     terminal
-        .draw(|frame| render_gain(frame, frame.area(), &report, &items, None, GainMode::Family, Default::default(), None, Default::default(), None))
+        .draw(|frame| render_gain(frame, frame.area(), &report, &items, None, GainMode::Family, Default::default(), None, Default::default(), None, None))
         .unwrap();
     let content = buffer_text(&terminal);
     assert!(
@@ -73,7 +73,7 @@ fn gain_renders_without_panic_on_empty_data() {
     let backend = TestBackend::new(100, 25);
     let mut terminal = Terminal::new(backend).unwrap();
     terminal
-        .draw(|frame| render_gain(frame, frame.area(), &report, &[], None, GainMode::Family, Default::default(), None, Default::default(), None))
+        .draw(|frame| render_gain(frame, frame.area(), &report, &[], None, GainMode::Family, Default::default(), None, Default::default(), None, None))
         .unwrap();
     let content = buffer_text(&terminal);
     assert!(!content.trim().is_empty(), "buffer should not be completely empty");
@@ -94,7 +94,7 @@ fn gain_sparkline_present_for_14_days() {
     let backend = TestBackend::new(100, 30);
     let mut terminal = Terminal::new(backend).unwrap();
     terminal
-        .draw(|frame| render_gain(frame, frame.area(), &report, &items, None, GainMode::Family, Default::default(), None, Default::default(), None))
+        .draw(|frame| render_gain(frame, frame.area(), &report, &items, None, GainMode::Family, Default::default(), None, Default::default(), None, None))
         .unwrap();
     let content = buffer_text(&terminal);
     assert!(
@@ -114,7 +114,7 @@ fn gain_shows_family_breakdown() {
     let backend = TestBackend::new(100, 30);
     let mut terminal = Terminal::new(backend).unwrap();
     terminal
-        .draw(|frame| render_gain(frame, frame.area(), &report, &items, None, GainMode::Family, Default::default(), None, Default::default(), None))
+        .draw(|frame| render_gain(frame, frame.area(), &report, &items, None, GainMode::Family, Default::default(), None, Default::default(), None, None))
         .unwrap();
     let content = buffer_text(&terminal);
     let lower = content.to_lowercase();
@@ -131,7 +131,7 @@ fn gain_detail_no_content_shows_fallback() {
     let backend = TestBackend::new(120, 35);
     let mut terminal = Terminal::new(backend).unwrap();
     terminal
-        .draw(|frame| render_gain(frame, frame.area(), &report, &items, None, GainMode::Family, Default::default(), Some(0), Default::default(), None))
+        .draw(|frame| render_gain(frame, frame.area(), &report, &items, None, GainMode::Family, Default::default(), Some(0), Default::default(), None, None))
         .unwrap();
     let content = buffer_text(&terminal);
     assert!(!content.trim().is_empty(), "buffer should not be empty");
@@ -148,7 +148,7 @@ fn gain_detail_with_content_renders_text() {
     let backend = TestBackend::new(120, 35);
     let mut terminal = Terminal::new(backend).unwrap();
     terminal
-        .draw(|frame| render_gain(frame, frame.area(), &report, &items, None, GainMode::Family, Default::default(), Some(0), Default::default(), None))
+        .draw(|frame| render_gain(frame, frame.area(), &report, &items, None, GainMode::Family, Default::default(), Some(0), Default::default(), None, None))
         .unwrap();
     let content = buffer_text(&terminal);
     assert!(
@@ -167,7 +167,7 @@ fn gain_diff_mode_renders_diff_markers() {
     let backend = TestBackend::new(120, 40);
     let mut terminal = Terminal::new(backend).unwrap();
     terminal
-        .draw(|frame| render_gain(frame, frame.area(), &report, &items, None, GainMode::Family, Default::default(), Some(0), DetailMode::Diff, None))
+        .draw(|frame| render_gain(frame, frame.area(), &report, &items, None, GainMode::Family, Default::default(), Some(0), DetailMode::Diff, None, None))
         .unwrap();
     let content = buffer_text(&terminal);
     // In diff mode the panel title should contain "Diff"
@@ -198,6 +198,7 @@ fn gain_log_mode_renders_history() {
                 Some(0),
                 DetailMode::Log,
                 None,
+                None,
             )
         })
         .unwrap();
@@ -216,7 +217,7 @@ fn gain_selected_ignored_in_by_project_mode() {
     let mut terminal = Terminal::new(backend).unwrap();
     // Must not panic with selected_family=Some(0) in by_project mode
     terminal
-        .draw(|frame| render_gain(frame, frame.area(), &report, &items, None, GainMode::Project, Default::default(), Some(0), Default::default(), None))
+        .draw(|frame| render_gain(frame, frame.area(), &report, &items, None, GainMode::Project, Default::default(), Some(0), Default::default(), None, None))
         .unwrap();
 }
 
@@ -245,6 +246,7 @@ fn gain_project_log_mode_renders_history() {
                 None,
                 Default::default(),
                 Some(0),
+                None,
             )
         })
         .unwrap();

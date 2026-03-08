@@ -299,9 +299,13 @@ fn main() {
                     let mut detail_mode = tui::gain::DetailMode::default();
                     let mut selected_family: Option<usize> = None;
                     let mut selected_project: Option<usize> = None;
+                    let mut project_filter: Option<String> = None;
                     loop {
                         let ts = chrono::Utc::now().format("%H:%M:%S").to_string();
-                        let family_count = report.by_family.len();
+                        let family_count = match project_filter.as_deref() {
+                            Some(proj) => tui::gain::sorted_family_keys_for_project(&items, proj).len(),
+                            None => report.by_family.len(),
+                        };
                         let project_count = report.by_project.len();
                         let _ = terminal.draw(|f| {
                             tui::gain::render_gain(
@@ -310,6 +314,7 @@ fn main() {
                                 selected_family,
                                 detail_mode,
                                 selected_project,
+                                project_filter.as_deref(),
                             );
                         });
                         if poll(std::time::Duration::from_secs(1)).unwrap_or(false) {
@@ -321,6 +326,7 @@ fn main() {
                                     break;
                                 }
                                 if key.code == KeyCode::Char('b') {
+                                    project_filter = None;
                                     gain_mode = gain_mode.toggle();
                                 }
                                 if key.code == KeyCode::Char('s') {
@@ -361,6 +367,26 @@ fn main() {
                                             });
                                         }
                                         _ => {}
+                                    }
+                                }
+                                if gain_mode == tui::gain::GainMode::Project
+                                    && key.code == KeyCode::Enter
+                                    && project_count > 0
+                                {
+                                    if let Some(idx) = selected_project {
+                                        let mut projects: Vec<(&String, f32)> = report.by_project.iter()
+                                            .map(|(k, v)| {
+                                                let pct = if v.tokens_before == 0 { 0.0f32 }
+                                                    else { ((1.0 - v.tokens_after as f64 / v.tokens_before as f64) * 100.0) as f32 };
+                                                (k, pct)
+                                            })
+                                            .collect();
+                                        projects.sort_by(|a, b| b.1.partial_cmp(&a.1).unwrap_or(std::cmp::Ordering::Equal));
+                                        if let Some((name, _)) = projects.get(idx) {
+                                            project_filter = Some(name.to_string());
+                                            gain_mode = tui::gain::GainMode::Family;
+                                            selected_family = None;
+                                        }
                                     }
                                 }
                             }
