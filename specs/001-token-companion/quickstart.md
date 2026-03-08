@@ -54,18 +54,13 @@ Le hook est actif automatiquement. Utilisez Claude Code normalement.
 Pour consulter les économies :
 ```bash
 ecotokens gain
-ecotokens gain --period week --by-command
+ecotokens gain --period week
 ecotokens gain --json
 ```
 
 Pour diagnostiquer une interception :
 ```bash
 ecotokens filter --debug -- git status
-```
-
-Pour exclure une commande du filtrage :
-```bash
-ecotokens config --exclude "cat *"
 ```
 
 ## TUI interactive

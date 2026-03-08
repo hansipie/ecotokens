@@ -264,10 +264,10 @@ répond aux tools MCP depuis Claude Code
 
 - [X] T040 [P] Tests d'intégration end-to-end dans `tests/integration/end_to_end_test.rs` : scénario complet install → filter → gain → uninstall sans erreur
 - [X] T041 [P] Vérification conformité constitution dans `tests/integration/constitution_test.rs` : toutes les sous-commandes supportent `--json`, erreurs sur stderr, codes de retour corrects, exécution pipeline complet via `ecotokens filter` sans connexion réseau → aucun syscall réseau (valide FR-009, vérifiable via mock ou interception d'erreur DNS)
-- [ ] T042 Build release statique musl : `cargo build --release --target x86_64-unknown-linux-musl`, vérifier taille binaire < 20 MB
-- [ ] T043 [P] Mettre à jour `quickstart.md` avec les commandes réelles vérifiées
+- [X] T042 Build release statique musl : `cargo build --release --target x86_64-unknown-linux-musl`, vérifier taille binaire < 20 MB
+- [X] T043 [P] Mettre à jour `quickstart.md` avec les commandes réelles vérifiées
 - [X] T044 [P] `cargo clippy -- -D warnings` : zéro warning en mode strict
-- [ ] T045 Valider SC-001 : mesurer économies réelles sur `git status`, `git diff`, `cargo test` — documenter baseline dans `research.md`
+- [X] T045 Valider SC-001 : mesurer économies réelles sur `git status`, `git diff`, `cargo test` — documenter baseline dans `research.md`
 - [X] T045b [P] Benchmark latence interception dans `tests/integration/perf_test.rs` :
   intercepter 100 commandes git/cargo sur fixtures → calculer P90 duration_ms,
   vérifier P90 ≤ 50ms — valide SC-003
@@ -276,7 +276,7 @@ répond aux tools MCP depuis Claude Code
 - [X] T045d [P] Test fallback silencieux dans `tests/integration/fault_test.rs` :
   simuler panique dans le pipeline de filtrage, vérifier que la commande originale
   est transmise à Claude sans erreur visible — valide SC-006
-- [ ] T045e Valider SC-002 manuellement : chronométrer `cargo install` + `ecotokens install`
+- [X] T045e Valider SC-002 manuellement : chronométrer `cargo install` + `ecotokens install`
   sur machine fraîche → documenter le résultat dans quickstart.md
 
 ---
