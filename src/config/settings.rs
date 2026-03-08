@@ -35,6 +35,11 @@ fn default_model_pricing() -> HashMap<String, ModelPrice> {
         "claude-opus-4-6".into(),
         ModelPrice { input_usd_per_1m: 15.00, output_usd_per_1m: 75.00 },
     );
+    // Subscription-based: no per-token cost, token savings still tracked
+    m.insert(
+        "github-copilot".into(),
+        ModelPrice { input_usd_per_1m: 0.0, output_usd_per_1m: 0.0 },
+    );
     m
 }
 

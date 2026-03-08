@@ -78,6 +78,33 @@ impl EcotokensServer {
             Err(e) => format!("{{\"error\": \"{e}\"}}")
         }
     }
+
+    #[tool(description = "Execute a shell command and return token-optimized output. \
+        Use this instead of the terminal for commands that may produce large output \
+        (e.g. 'git log', 'cargo test', 'find . -type f'). \
+        Output is automatically filtered and compressed to save context tokens, \
+        and token savings are recorded in the metrics store.")]
+    fn ecotokens_run(&self, Parameters(params): Parameters<RunParams>) -> String {
+        let command = &params.command;
+        let args: Vec<&str> = command.split_whitespace().collect();
+        if args.is_empty() {
+            return "{\"error\": \"empty command\"}".to_string();
+        }
+        let start = std::time::Instant::now();
+        let output = std::process::Command::new(args[0]).args(&args[1..]).output();
+        let raw = match output {
+            Ok(o) => {
+                let stdout = String::from_utf8_lossy(&o.stdout).into_owned();
+                let stderr = String::from_utf8_lossy(&o.stderr).into_owned();
+                if stderr.is_empty() { stdout } else { format!("{stdout}{stderr}") }
+            }
+            Err(e) => return format!("{{\"error\": \"failed to run command: {e}\"}}"),
+        };
+        let duration_ms = start.elapsed().as_millis() as u32;
+        let (filtered, _before, _after) =
+            crate::filter::run_filter_pipeline(command, &raw, duration_ms);
+        filtered
+    }
 }
 
 #[tool_handler(router = self.tool_router)]
@@ -86,7 +113,12 @@ impl ServerHandler for EcotokensServer {
         let server_info = Implementation::new("ecotokens", env!("CARGO_PKG_VERSION"));
         ServerInfo::new(ServerCapabilities::builder().enable_tools().build())
             .with_server_info(server_info)
-            .with_instructions("ecotokens: token-saving companion for Claude Code — search, outline, symbol lookup, and call graph tracing")
+            .with_instructions(
+                "ecotokens: token-saving companion for Claude Code and GitHub Copilot. \
+                Tools: search (BM25 codebase search), outline (list symbols), \
+                symbol (source by ID), trace callers/callees (call graph), \
+                run (execute shell commands with token-optimized output).",
+            )
     }
 }
 

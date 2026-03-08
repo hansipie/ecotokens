@@ -83,3 +83,11 @@ pub struct TraceCalleesParams {
     #[serde(default, deserialize_with = "de_opt_u32")]
     pub depth: Option<u32>,
 }
+
+#[derive(Debug, Deserialize, schemars::JsonSchema)]
+pub struct RunParams {
+    #[schemars(
+        description = "The shell command to execute (e.g. 'git log --oneline -20', 'cargo test')"
+    )]
+    pub command: String,
+}

@@ -1,4 +1,4 @@
-use ecotokens::metrics::report::{aggregate, Period, Report};
+use ecotokens::metrics::report::{aggregate, Period};
 use ecotokens::metrics::store::{CommandFamily, FilterMode, Interception};
 use chrono::Utc;
 
@@ -95,7 +95,7 @@ fn json_output_is_valid() {
 
 #[test]
 fn history_ordered_by_date_descending() {
-    let mut items = make_items();
+    let items = make_items();
     // history is the raw items; report creation doesn't reorder, but aggregate produces from items
     let report = aggregate(&items, Period::All, "claude-sonnet-4-6");
     // simply verify the report has the correct count — ordering is the consumer's responsibility

@@ -1,4 +1,7 @@
-use ecotokens::install::{install_hook, uninstall_hook};
+use ecotokens::install::{
+    install_hook, install_vscode_mcp, is_vscode_mcp_registered, uninstall_hook,
+    uninstall_vscode_mcp,
+};
 use std::process::Command;
 use tempfile::TempDir;
 
@@ -244,6 +247,131 @@ fn uninstall_preserves_other_mcp_entries() {
         !cv["mcpServers"].as_object().map_or(false, |m| m.contains_key("ecotokens")),
         "ecotokens MCP entry should be gone"
     );
+}
+
+// ── VS Code MCP installation ──────────────────────────────────────────────────
+
+fn temp_vscode_settings(dir: &TempDir) -> std::path::PathBuf {
+    let path = dir.path().join("Code").join("User").join("settings.json");
+    std::fs::create_dir_all(path.parent().unwrap()).unwrap();
+    path
+}
+
+#[test]
+fn vscode_install_writes_mcp_entry() {
+    let dir = TempDir::new().unwrap();
+    let vscode_path = temp_vscode_settings(&dir);
+
+    install_vscode_mcp(&vscode_path).expect("install_vscode_mcp should succeed");
+
+    let content = std::fs::read_to_string(&vscode_path).unwrap();
+    let v: serde_json::Value = serde_json::from_str(&content).unwrap();
+    assert!(
+        v["mcp"]["servers"]["ecotokens"].is_object(),
+        "mcp.servers.ecotokens should be present: {v}"
+    );
+    assert_eq!(
+        v["mcp"]["servers"]["ecotokens"]["command"].as_str().unwrap_or(""),
+        "ecotokens",
+        "command should be 'ecotokens'"
+    );
+    assert_eq!(
+        v["mcp"]["servers"]["ecotokens"]["args"][0].as_str().unwrap_or(""),
+        "mcp",
+        "first arg should be 'mcp'"
+    );
+}
+
+#[test]
+fn vscode_install_is_idempotent() {
+    let dir = TempDir::new().unwrap();
+    let vscode_path = temp_vscode_settings(&dir);
+
+    install_vscode_mcp(&vscode_path).unwrap();
+    install_vscode_mcp(&vscode_path).unwrap();
+
+    let v: serde_json::Value =
+        serde_json::from_str(&std::fs::read_to_string(&vscode_path).unwrap()).unwrap();
+    let count = v["mcp"]["servers"]
+        .as_object()
+        .map(|m| m.keys().filter(|k| k.as_str() == "ecotokens").count())
+        .unwrap_or(0);
+    assert_eq!(count, 1, "should not duplicate the MCP entry");
+}
+
+#[test]
+fn vscode_install_preserves_existing_settings() {
+    let dir = TempDir::new().unwrap();
+    let vscode_path = temp_vscode_settings(&dir);
+
+    // Pre-populate with unrelated setting
+    let initial = serde_json::json!({
+        "editor.fontSize": 14,
+        "mcp": {
+            "servers": {
+                "other-tool": { "type": "stdio", "command": "other-tool", "args": ["mcp"] }
+            }
+        }
+    });
+    std::fs::write(&vscode_path, serde_json::to_string_pretty(&initial).unwrap()).unwrap();
+
+    install_vscode_mcp(&vscode_path).unwrap();
+
+    let v: serde_json::Value =
+        serde_json::from_str(&std::fs::read_to_string(&vscode_path).unwrap()).unwrap();
+    assert!(v["mcp"]["servers"]["ecotokens"].is_object(), "ecotokens should be added");
+    assert!(v["mcp"]["servers"]["other-tool"].is_object(), "other-tool should be preserved");
+    assert_eq!(v["editor.fontSize"].as_u64().unwrap_or(0), 14, "unrelated settings preserved");
+}
+
+#[test]
+fn vscode_uninstall_removes_mcp_entry() {
+    let dir = TempDir::new().unwrap();
+    let vscode_path = temp_vscode_settings(&dir);
+
+    install_vscode_mcp(&vscode_path).unwrap();
+    assert!(is_vscode_mcp_registered(&vscode_path), "should be registered after install");
+
+    uninstall_vscode_mcp(&vscode_path).unwrap();
+    assert!(!is_vscode_mcp_registered(&vscode_path), "should not be registered after uninstall");
+}
+
+#[test]
+fn vscode_uninstall_preserves_other_mcp_entries() {
+    let dir = TempDir::new().unwrap();
+    let vscode_path = temp_vscode_settings(&dir);
+
+    let initial = serde_json::json!({
+        "mcp": {
+            "servers": {
+                "other-tool": { "type": "stdio", "command": "other-tool", "args": ["mcp"] }
+            }
+        }
+    });
+    std::fs::write(&vscode_path, serde_json::to_string_pretty(&initial).unwrap()).unwrap();
+
+    install_vscode_mcp(&vscode_path).unwrap();
+    uninstall_vscode_mcp(&vscode_path).unwrap();
+
+    let v: serde_json::Value =
+        serde_json::from_str(&std::fs::read_to_string(&vscode_path).unwrap()).unwrap();
+    assert!(
+        v["mcp"]["servers"]["other-tool"].is_object(),
+        "other-tool should still be present after uninstall"
+    );
+    assert!(
+        !v["mcp"]["servers"].as_object().map_or(false, |m| m.contains_key("ecotokens")),
+        "ecotokens entry should be gone"
+    );
+}
+
+#[test]
+fn vscode_uninstall_when_file_missing_is_ok() {
+    let dir = TempDir::new().unwrap();
+    let vscode_path = temp_vscode_settings(&dir);
+    // File does not exist
+    let result = uninstall_vscode_mcp(&vscode_path);
+    assert!(result.is_ok(), "uninstall on missing file should be Ok");
 }
 
 // ── T039t — ecotokens index CLI ───────────────────────────────────────────────

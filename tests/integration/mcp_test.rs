@@ -255,6 +255,41 @@ fn mcp_tool_trace_callees_returns_edges() {
 }
 
 #[test]
+fn mcp_tool_run_executes_and_filters_command() {
+    let (_src, idx) = setup_indexed_fixture();
+    let mut child = spawn_mcp(&idx);
+    let mut stdin = child.stdin.take().unwrap();
+    let mut stdout = BufReader::new(child.stdout.take().unwrap());
+
+    let _ = send_jsonrpc(&mut stdin, &mut stdout, &init_request());
+    let notif = serde_json::to_string(&initialized_notification()).unwrap();
+    writeln!(stdin, "{notif}").unwrap();
+    stdin.flush().unwrap();
+
+    let call = serde_json::json!({
+        "jsonrpc": "2.0", "id": 2,
+        "method": "tools/call",
+        "params": {
+            "name": "ecotokens_run",
+            "arguments": { "command": "echo hello ecotokens" }
+        }
+    });
+    let resp = send_jsonrpc(&mut stdin, &mut stdout, &call);
+    assert!(
+        resp.get("result").is_some(),
+        "ecotokens_run should return result, got: {resp}"
+    );
+    let content = resp["result"]["content"][0]["text"].as_str().unwrap_or("");
+    assert!(
+        content.contains("hello ecotokens"),
+        "filtered output should contain command output, got: {content}"
+    );
+
+    drop(stdin);
+    let _ = child.kill();
+}
+
+#[test]
 fn mcp_unknown_tool_returns_error() {
     let (_src, idx) = setup_indexed_fixture();
     let mut child = spawn_mcp(&idx);

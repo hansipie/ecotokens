@@ -54,6 +54,7 @@ fn default_pricing_usd_per_1m(model: &str) -> f64 {
     match model {
         "claude-haiku-4-5" => 0.80,
         "claude-opus-4-6" => 15.00,
+        "github-copilot" => 0.0,
         _ => 3.00, // sonnet default
     }
 }

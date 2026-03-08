@@ -1,8 +1,100 @@
 pub mod cargo;
-pub mod cpp;
 pub mod config_file;
+pub mod cpp;
 pub mod fs;
 pub mod generic;
 pub mod git;
 pub mod markdown;
 pub mod python;
+
+use crate::metrics::store::CommandFamily;
+
+fn is_cpp_command(command: &str) -> bool {
+    use std::path::Path;
+    let Some(program) = command.split_whitespace().next() else { return false; };
+    let Some(program) = Path::new(program).file_name().and_then(|n| n.to_str()) else {
+        return false;
+    };
+    matches!(
+        program,
+        "gcc" | "g++" | "cc" | "c++" | "clang" | "clang++" | "clang-cl" | "make" | "cmake"
+            | "ninja"
+    )
+}
+
+pub fn detect_family(command: &str) -> CommandFamily {
+    let cmd = command.trim();
+    if cmd.starts_with("git ") {
+        CommandFamily::Git
+    } else if cmd.starts_with("cargo ") {
+        CommandFamily::Cargo
+    } else if is_cpp_command(cmd) {
+        CommandFamily::Cpp
+    } else if cmd.starts_with("python")
+        || cmd.starts_with("pytest")
+        || cmd.starts_with("pip ")
+        || cmd.starts_with("ruff ")
+        || cmd.starts_with("uv ")
+    {
+        CommandFamily::Python
+    } else if cmd.starts_with("ls") || cmd.starts_with("find") || cmd.starts_with("tree") {
+        CommandFamily::Fs
+    } else {
+        CommandFamily::Generic
+    }
+}
+
+pub fn apply_filter(command: &str, output: &str) -> String {
+    let ext = std::path::Path::new(command)
+        .extension()
+        .and_then(|e| e.to_str())
+        .unwrap_or("");
+    match detect_family(command) {
+        CommandFamily::Git => git::filter_git(command, output),
+        CommandFamily::Cargo => cargo::filter_cargo(command, output),
+        CommandFamily::Cpp => cpp::filter_cpp(command, output),
+        CommandFamily::Python => python::filter_python(command, output),
+        CommandFamily::Fs => fs::filter_fs(command, output),
+        CommandFamily::Markdown => markdown::filter_markdown(output),
+        CommandFamily::ConfigFile => config_file::filter_config_file(output, ext),
+        _ => generic::filter_generic(output, 200, 51200),
+    }
+}
+
+/// Run the full filter pipeline: masking → family filter → token counting → metrics recording.
+/// Returns `(filtered_output, tokens_before, tokens_after)`.
+pub fn run_filter_pipeline(command: &str, raw: &str, duration_ms: u32) -> (String, u32, u32) {
+    let (masked, redacted) = crate::masking::mask(raw);
+    let filtered = apply_filter(command, &masked);
+    let tokens_before = crate::tokens::estimate_tokens(raw) as u32;
+    let tokens_after = crate::tokens::estimate_tokens(&filtered) as u32;
+
+    if let Some(path) = crate::metrics::store::metrics_path() {
+        let mode = if tokens_after < tokens_before {
+            crate::metrics::store::FilterMode::Filtered
+        } else {
+            crate::metrics::store::FilterMode::Passthrough
+        };
+        let family = detect_family(command);
+        let git_root = std::process::Command::new("git")
+            .args(["rev-parse", "--show-toplevel"])
+            .output()
+            .ok()
+            .map(|o| String::from_utf8_lossy(&o.stdout).trim().to_string());
+        let rec = crate::metrics::store::Interception::new(
+            command.to_string(),
+            family,
+            git_root,
+            tokens_before,
+            tokens_after,
+            mode,
+            redacted,
+            duration_ms,
+            Some(masked),
+            Some(filtered.clone()),
+        );
+        let _ = crate::metrics::store::append_to(&path, &rec);
+    }
+
+    (filtered, tokens_before, tokens_after)
+}

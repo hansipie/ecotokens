@@ -4,6 +4,7 @@ pub type InstallResult = std::io::Result<()>;
 
 const HOOK_COMMAND: &str = "ecotokens hook";
 const HOOK_MATCHER: &str = "Bash";
+const VSCODE_MCP_KEY: &str = "ecotokens";
 
 fn read_settings(path: &Path) -> serde_json::Value {
     if path.exists() {
@@ -136,4 +137,52 @@ pub fn uninstall_hook(settings_path: &Path, claude_json_path: &Path) -> InstallR
     }
 
     Ok(())
+}
+
+/// Return the default path to VS Code's user settings.json (cross-platform).
+pub fn default_vscode_settings_path() -> Option<std::path::PathBuf> {
+    dirs::config_dir().map(|d| d.join("Code").join("User").join("settings.json"))
+}
+
+/// Register the ecotokens MCP server in VS Code's user settings.json (idempotent).
+pub fn install_vscode_mcp(vscode_settings_path: &Path) -> InstallResult {
+    let mut v = read_settings(vscode_settings_path);
+
+    let servers = v["mcp"]["servers"].as_object().cloned().unwrap_or_default();
+    if servers.contains_key(VSCODE_MCP_KEY) {
+        return Ok(());
+    }
+
+    let mut new_servers = servers;
+    new_servers.insert(
+        VSCODE_MCP_KEY.to_string(),
+        serde_json::json!({
+            "type": "stdio",
+            "command": "ecotokens",
+            "args": ["mcp"]
+        }),
+    );
+    v["mcp"]["servers"] = serde_json::Value::Object(new_servers);
+    write_settings(vscode_settings_path, &v)
+}
+
+/// Remove the ecotokens MCP entry from VS Code's user settings.json (idempotent).
+pub fn uninstall_vscode_mcp(vscode_settings_path: &Path) -> InstallResult {
+    if !vscode_settings_path.exists() {
+        return Ok(());
+    }
+    let mut v = read_settings(vscode_settings_path);
+    if let Some(servers) = v["mcp"]["servers"].as_object_mut() {
+        servers.remove(VSCODE_MCP_KEY);
+    }
+    write_settings(vscode_settings_path, &v)
+}
+
+/// Check if the ecotokens MCP server is registered in VS Code's user settings.json.
+pub fn is_vscode_mcp_registered(vscode_settings_path: &Path) -> bool {
+    let v = read_settings(vscode_settings_path);
+    v["mcp"]["servers"]
+        .as_object()
+        .map(|m| m.contains_key(VSCODE_MCP_KEY))
+        .unwrap_or(false)
 }

@@ -45,9 +45,16 @@ enum Commands {
     Install {
         #[arg(long)]
         with_mcp: bool,
+        /// Target AI tool to install for: claude (default), vscode, all
+        #[arg(long, default_value = "claude")]
+        target: String,
     },
     /// Remove ecotokens hook from ~/.claude/settings.json
-    Uninstall,
+    Uninstall {
+        /// Target to uninstall from: claude (default), vscode, all
+        #[arg(long, default_value = "claude")]
+        target: String,
+    },
     /// Show or update configuration
     Config {
         #[arg(long)]
@@ -158,51 +165,6 @@ fn default_claude_json_path() -> PathBuf {
         .join(".claude.json")
 }
 
-fn detect_family(command: &str) -> metrics::store::CommandFamily {
-    use metrics::store::CommandFamily;
-    let cmd = command.trim();
-    if cmd.starts_with("git ") { CommandFamily::Git }
-    else if cmd.starts_with("cargo ") { CommandFamily::Cargo }
-    else if is_cpp_command(cmd) { CommandFamily::Cpp }
-    else if cmd.starts_with("python") || cmd.starts_with("pytest") || cmd.starts_with("pip ") || cmd.starts_with("ruff ") || cmd.starts_with("uv ") { CommandFamily::Python }
-    else if cmd.starts_with("ls") || cmd.starts_with("find") || cmd.starts_with("tree") { CommandFamily::Fs }
-    else { CommandFamily::Generic }
-}
-
-fn is_cpp_command(command: &str) -> bool {
-    use std::path::Path;
-
-    let Some(program) = command.split_whitespace().next() else {
-        return false;
-    };
-    let Some(program) = Path::new(program).file_name().and_then(|name| name.to_str()) else {
-        return false;
-    };
-
-    matches!(
-        program,
-        "gcc" | "g++" | "cc" | "c++" | "clang" | "clang++" | "clang-cl" | "make" | "cmake" | "ninja"
-    )
-}
-
-fn apply_filter(command: &str, output: &str) -> String {
-    use metrics::store::CommandFamily;
-    let ext = std::path::Path::new(command)
-        .extension()
-        .and_then(|e| e.to_str())
-        .unwrap_or("");
-    match detect_family(command) {
-        CommandFamily::Git => filter::git::filter_git(command, output),
-        CommandFamily::Cargo => filter::cargo::filter_cargo(command, output),
-        CommandFamily::Cpp => filter::cpp::filter_cpp(command, output),
-        CommandFamily::Python => filter::python::filter_python(command, output),
-        CommandFamily::Fs => filter::fs::filter_fs(command, output),
-        CommandFamily::Markdown => filter::markdown::filter_markdown(output),
-        CommandFamily::ConfigFile => filter::config_file::filter_config_file(output, ext),
-        _ => filter::generic::filter_generic(output, 200, 51200),
-    }
-}
-
 fn main() {
     let cli = Cli::parse();
     match cli.command {
@@ -233,37 +195,12 @@ fn main() {
                 }
             };
 
-            let (masked, redacted) = masking::mask(&raw);
-            let filtered = apply_filter(&command, &masked);
-
             let duration_ms = start.elapsed().as_millis() as u32;
-            let tokens_before = tokens::estimate_tokens(&raw) as u32;
-            let tokens_after = tokens::estimate_tokens(&filtered) as u32;
+            let (filtered, tokens_before, tokens_after) =
+                filter::run_filter_pipeline(&command, &raw, duration_ms);
 
             if debug {
                 eprintln!("[ecotokens debug] command={command} tokens_before={tokens_before} tokens_after={tokens_after}");
-            }
-
-            // Record metrics before print! consumes filtered
-            if let Some(path) = metrics::store::metrics_path() {
-                let mode = if tokens_after < tokens_before {
-                    metrics::store::FilterMode::Filtered
-                } else {
-                    metrics::store::FilterMode::Passthrough
-                };
-                let family = detect_family(&command);
-                let git_root = std::process::Command::new("git")
-                    .args(["rev-parse", "--show-toplevel"])
-                    .output()
-                    .ok()
-                    .map(|o| String::from_utf8_lossy(&o.stdout).trim().to_string());
-                let rec = metrics::store::Interception::new(
-                    command, family, git_root,
-                    tokens_before, tokens_after, mode, redacted, duration_ms,
-                    Some(masked),
-                    Some(filtered.clone()),
-                );
-                let _ = metrics::store::append_to(&path, &rec);
             }
 
             print!("{filtered}");
@@ -404,42 +341,84 @@ fn main() {
                 println!("Tokens before  : {}", report.total_tokens_before);
                 println!("Tokens after   : {}", report.total_tokens_after);
                 println!("Savings        : {:.1}%", report.total_savings_pct);
-                println!("Cost avoided   : ${:.4} USD", report.cost_avoided_usd);
+                if report.cost_avoided_usd > 0.0 {
+                    println!("Cost avoided   : ${:.4} USD", report.cost_avoided_usd);
+                }
             }
         }
 
-        Commands::Install { with_mcp } => {
-            let path = default_settings_path();
+        Commands::Install { with_mcp, target } => {
+            let claude_path = default_settings_path();
             let claude_json = default_claude_json_path();
-            match install::install_hook(&path, &claude_json, with_mcp) {
-                Ok(()) => {
-                    println!("ecotokens hook installed → {}", path.display());
-                    if with_mcp {
-                        println!("ecotokens MCP server registered → {}", claude_json.display());
+            let vscode_path = install::default_vscode_settings_path();
+
+            let install_claude = matches!(target.as_str(), "claude" | "all");
+            let install_vscode = matches!(target.as_str(), "vscode" | "all");
+
+            if install_claude {
+                match install::install_hook(&claude_path, &claude_json, with_mcp) {
+                    Ok(()) => {
+                        println!("ecotokens hook installed → {}", claude_path.display());
+                        if with_mcp {
+                            println!("ecotokens MCP server registered → {}", claude_json.display());
+                        }
+                    }
+                    Err(e) => { eprintln!("install error (claude): {e}"); std::process::exit(1); }
+                }
+            }
+
+            if install_vscode {
+                match vscode_path {
+                    Some(ref p) => match install::install_vscode_mcp(p) {
+                        Ok(()) => println!("ecotokens MCP server registered (VS Code) → {}", p.display()),
+                        Err(e) => { eprintln!("install error (vscode): {e}"); std::process::exit(1); }
+                    },
+                    None => {
+                        eprintln!("cannot determine VS Code settings path on this system");
+                        std::process::exit(1);
                     }
                 }
-                Err(e) => { eprintln!("install error: {e}"); std::process::exit(1); }
             }
         }
 
-        Commands::Uninstall => {
-            let path = default_settings_path();
+        Commands::Uninstall { target } => {
+            let claude_path = default_settings_path();
             let claude_json = default_claude_json_path();
-            let had_hook = install::is_hook_installed(&path);
-            let had_mcp = install::is_mcp_registered(&claude_json);
-            match install::uninstall_hook(&path, &claude_json) {
-                Ok(()) => {
-                    if had_hook {
-                        println!("ecotokens hook removed ← {}", path.display());
+            let vscode_path = install::default_vscode_settings_path();
+
+            let uninstall_claude = matches!(target.as_str(), "claude" | "all");
+            let uninstall_vscode = matches!(target.as_str(), "vscode" | "all");
+
+            if uninstall_claude {
+                let had_hook = install::is_hook_installed(&claude_path);
+                let had_mcp = install::is_mcp_registered(&claude_json);
+                match install::uninstall_hook(&claude_path, &claude_json) {
+                    Ok(()) => {
+                        if had_hook { println!("ecotokens hook removed ← {}", claude_path.display()); }
+                        if had_mcp { println!("ecotokens MCP server unregistered ← {}", claude_json.display()); }
+                        if !had_hook && !had_mcp { println!("ecotokens: nothing to uninstall (claude)"); }
                     }
-                    if had_mcp {
-                        println!("ecotokens MCP server unregistered ← {}", claude_json.display());
+                    Err(e) => { eprintln!("uninstall error (claude): {e}"); std::process::exit(1); }
+                }
+            }
+
+            if uninstall_vscode {
+                match vscode_path {
+                    Some(ref p) => {
+                        let had_vscode = install::is_vscode_mcp_registered(p);
+                        match install::uninstall_vscode_mcp(p) {
+                            Ok(()) => {
+                                if had_vscode { println!("ecotokens MCP server unregistered (VS Code) ← {}", p.display()); }
+                                else { println!("ecotokens: nothing to uninstall (vscode)"); }
+                            }
+                            Err(e) => { eprintln!("uninstall error (vscode): {e}"); std::process::exit(1); }
+                        }
                     }
-                    if !had_hook && !had_mcp {
-                        println!("ecotokens: nothing to uninstall");
+                    None => {
+                        eprintln!("cannot determine VS Code settings path on this system");
+                        std::process::exit(1);
                     }
                 }
-                Err(e) => { eprintln!("uninstall error: {e}"); std::process::exit(1); }
             }
         }
 
@@ -485,20 +464,25 @@ fn main() {
 
             let hook_installed = install::is_hook_installed(&settings_path);
             let mcp_registered = install::is_mcp_registered(&claude_json);
+            let vscode_mcp_registered = install::default_vscode_settings_path()
+                .map(|p| install::is_vscode_mcp_registered(&p))
+                .unwrap_or(false);
 
             if json {
                 let mut v = serde_json::to_value(&settings).unwrap();
                 v["hook_installed"] = serde_json::Value::Bool(hook_installed);
                 v["mcp_registered"] = serde_json::Value::Bool(mcp_registered);
+                v["vscode_mcp_registered"] = serde_json::Value::Bool(vscode_mcp_registered);
                 println!("{}", serde_json::to_string_pretty(&v).unwrap());
             } else {
-                println!("hook_installed : {}", hook_installed);
-                println!("mcp_registered : {}", mcp_registered);
-                println!("debug          : {}", settings.debug);
-                println!("threshold_lines: {}", settings.summary_threshold_lines);
-                println!("threshold_bytes: {}", settings.summary_threshold_bytes);
-                println!("exclusions     : {:?}", settings.exclusions);
-                println!("embed_provider : {}", provider_str);
+                println!("hook_installed        : {}", hook_installed);
+                println!("mcp_registered        : {}", mcp_registered);
+                println!("vscode_mcp_registered : {}", vscode_mcp_registered);
+                println!("debug                 : {}", settings.debug);
+                println!("threshold_lines       : {}", settings.summary_threshold_lines);
+                println!("threshold_bytes       : {}", settings.summary_threshold_bytes);
+                println!("exclusions            : {:?}", settings.exclusions);
+                println!("embed_provider        : {}", provider_str);
             }
         }
 
