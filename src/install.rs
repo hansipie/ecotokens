@@ -62,8 +62,7 @@ pub fn install_hook(settings_path: &Path, claude_json_path: &Path, with_mcp: boo
 
     if with_mcp {
         let mcp_entry = serde_json::json!({
-            "command": "ecotokens",
-            "args": ["mcp"],
+            "command": "ecotokens mcp",
             "type": "stdio"
         });
         let mut cv = read_settings(claude_json_path);

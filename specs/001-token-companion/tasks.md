@@ -293,18 +293,18 @@ manuellement. Utilise `notify` pour détecter les modifications de fichiers.
 
 ### Tests pour daemon — écrire en premier, vérifier qu'ils ÉCHOUENT
 
-- [ ] T064 [P] Tests unitaires watcher dans `tests/search/watcher_test.rs` : détection création fichier → déclenche indexation, détection modification → re-indexation partielle, fichier ignoré (`.gitignore`) → pas d'indexation — DOIT ÉCHOUER avant T066
-- [ ] T065 [P] Tests intégration daemon dans `tests/integration/daemon_test.rs` : `ecotokens watch --path <tmpdir>` démarre, modif fichier → log "re-indexed", SIGTERM → arrêt propre — DOIT ÉCHOUER avant T067
+- [X] T064 [P] Tests unitaires watcher dans `tests/search/watcher_test.rs` : détection création fichier → déclenche indexation, détection modification → re-indexation partielle, fichier ignoré (`.gitignore`) → pas d'indexation — DOIT ÉCHOUER avant T066
+- [X] T065 [P] Tests intégration daemon dans `tests/integration/daemon_test.rs` : `ecotokens watch --path <tmpdir>` démarre, modif fichier → log "re-indexed", SIGTERM → arrêt propre — DOIT ÉCHOUER avant T067
 
 ### Implémentation daemon
 
-- [ ] T066 Implémenter `src/daemon/watcher.rs` : surveillance via `notify`, debounce 500ms, appel indexation incrémentale jusqu'à ce que T064 passe
-- [ ] T067 Implémenter sous-commande `ecotokens watch` dans `src/main.rs` : options `--path`, `--daemon` (fork + PID file) jusqu'à ce que T065 passe
-- [ ] T067at [P] Tests TUI watch dans `tests/tui/watch_test.rs` :
+- [X] T066 Implémenter `src/daemon/watcher.rs` : surveillance via `notify`, debounce 500ms, appel indexation incrémentale jusqu'à ce que T064 passe
+- [X] T067 Implémenter sous-commande `ecotokens watch` dans `src/main.rs` : options `--path`, `--daemon` (fork + PID file) jusqu'à ce que T065 passe
+- [X] T067at [P] Tests TUI watch dans `tests/tui/watch_test.rs` :
   rendu avec TestBackend → header "ecotokens watch" présent, événements apparaissent
   dans le panel, mode --daemon ou non-TTY → pas de rendu TUI (texte seul)
   — DOIT ÉCHOUER avant T067a
-- [ ] T067a Implémenter `src/tui/watch.rs` : panel live ratatui (alternate screen, liste scrollable des événements, compteurs en temps réel), fallback log texte si `--daemon` ou non-TTY
+- [X] T067a Implémenter `src/tui/watch.rs` : panel live ratatui (alternate screen, liste scrollable des événements, compteurs en temps réel), fallback log texte si `--daemon` ou non-TTY
 
 **Checkpoint**: `ecotokens watch --daemon` maintient l'index à jour en arrière-plan
 
@@ -319,20 +319,20 @@ via Ollama ou LM Studio en complément de BM25. Feature flag `embeddings` — no
 
 ### Tests pour embeddings — écrire en premier, vérifier qu'ils ÉCHOUENT
 
-- [ ] T068 [P] Tests unitaires Ollama provider dans `tests/search/embed_test.rs` : requête embeddings Ollama → vec<f32> de taille fixe, URL invalide → erreur claire, modèle non disponible → fallback BM25 — DOIT ÉCHOUER avant T070
-- [ ] T069 [P] Tests unitaires LM Studio provider dans `tests/search/embed_test.rs` : même couverture qu'Ollama, format API OpenAI-compatible — DOIT ÉCHOUER avant T071
+- [X] T068 [P] Tests unitaires Ollama provider dans `tests/search/embed_test.rs` : requête embeddings Ollama → vec<f32> de taille fixe, URL invalide → erreur claire, modèle non disponible → fallback BM25 — DOIT ÉCHOUER avant T070
+- [X] T069 [P] Tests unitaires LM Studio provider dans `tests/search/embed_test.rs` : même couverture qu'Ollama, format API OpenAI-compatible — DOIT ÉCHOUER avant T071
 
 ### Implémentation embeddings
 
-- [ ] T070 Implémenter provider Ollama dans `src/search/index.rs` (feature `embeddings`) : appel HTTP `POST /api/embeddings`, vecteur stocké dans index tantivy jusqu'à ce que T068 passe
-- [ ] T071 Implémenter provider LM Studio dans `src/search/index.rs` (feature `embeddings`) : appel API OpenAI-compatible `/v1/embeddings` jusqu'à ce que T069 passe
-- [ ] T072t [P] Tests CLI embed-provider dans `tests/config/settings_test.rs` :
+- [X] T070 Implémenter provider Ollama dans `src/search/index.rs` (feature `embeddings`) : appel HTTP `POST /api/embeddings`, vecteur stocké dans index tantivy jusqu'à ce que T068 passe
+- [X] T071 Implémenter provider LM Studio dans `src/search/index.rs` (feature `embeddings`) : appel API OpenAI-compatible `/v1/embeddings` jusqu'à ce que T069 passe
+- [X] T072t [P] Tests CLI embed-provider dans `tests/config/settings_test.rs` :
   `ecotokens config --embed-provider ollama --embed-url http://localhost:11434` → stocké
   dans `~/.config/ecotokens/config.json`, `ecotokens config` sans flag → affiche provider
   et URL courants, provider inconnu → erreur claire sur stderr avec liste des valeurs valides,
   URL malformée → erreur de validation avant écriture
   — DOIT ÉCHOUER avant T072
-- [ ] T072 [P] Étendre `ecotokens config --embed-provider <ollama|lmstudio> --embed-url <url>` et documenter dans `quickstart.md`
+- [X] T072 [P] Étendre `ecotokens config --embed-provider <ollama|lmstudio> --embed-url <url>` et documenter dans `quickstart.md`
 
 **Checkpoint**: `ecotokens search "authentification"` retourne des résultats sémantiquement
 pertinents même sans correspondance lexicale exacte (avec Ollama actif)
