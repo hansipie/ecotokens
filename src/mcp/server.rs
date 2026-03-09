@@ -122,6 +122,13 @@ impl EcotokensServer {
             Err(e) => return format!("{{\"error\": \"{e}\"}}"),
         };
 
+        // Only attribute metrics to a project when the cwd is authoritative:
+        // either explicitly provided by the caller, or from ECOTOKENS_WORKSPACE_ROOT.
+        // Falling back to the server process cwd risks attributing commands to the
+        // wrong project (e.g. VS Code's own directory when started by Copilot).
+        let authoritative_cwd = params.cwd.is_some()
+            || std::env::var("ECOTOKENS_WORKSPACE_ROOT").is_ok();
+
         let start = std::time::Instant::now();
         let output = std::process::Command::new("bash")
             .arg("-lc")
@@ -137,8 +144,9 @@ impl EcotokensServer {
             Err(e) => return format!("{{\"error\": \"failed to run command: {e}\"}}"),
         };
         let duration_ms = start.elapsed().as_millis() as u32;
+        let metrics_cwd = authoritative_cwd.then_some(cwd.as_path());
         let (filtered, _before, _after) =
-            crate::filter::run_filter_pipeline_with_cwd(command, &raw, duration_ms, Some(&cwd));
+            crate::filter::run_filter_pipeline_with_cwd(command, &raw, duration_ms, metrics_cwd);
         filtered
     }
 }
