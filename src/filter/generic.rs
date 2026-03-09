@@ -3,6 +3,8 @@ pub const THRESHOLD_LINES: u32 = 500;
 
 const HEAD_TAIL_LINES: usize = 20;
 const HEAD_TAIL_BYTES: usize = 2048;
+const FORCE_KEEP_SMALL_BYTES: usize = 1024;
+const FORCE_HEAD_TAIL_BYTES: usize = 512;
 
 fn summarize_by_lines(lines: &[&str], line_count: usize) -> String {
     if line_count <= HEAD_TAIL_LINES * 2 {
@@ -58,21 +60,22 @@ pub fn force_filter_generic(output: &str) -> String {
     let lines: Vec<&str> = output.lines().collect();
     let line_count = lines.len();
 
-    if line_count <= HEAD_TAIL_LINES * 2 && byte_len <= HEAD_TAIL_BYTES * 2 {
+    if line_count <= HEAD_TAIL_LINES * 2 && byte_len <= FORCE_KEEP_SMALL_BYTES {
         return format!(
             "{}\n[ecotokens] passthrough disabled: output kept intact",
             output
         );
     }
 
-    if line_count <= HEAD_TAIL_LINES * 2 && byte_len > HEAD_TAIL_BYTES * 2 {
-        let head = &output[..HEAD_TAIL_BYTES.min(byte_len / 2)];
-        let tail_start = byte_len.saturating_sub(HEAD_TAIL_BYTES.min(byte_len / 2));
+    if line_count <= HEAD_TAIL_LINES * 2 {
+        let slice = FORCE_HEAD_TAIL_BYTES.min(byte_len / 2);
+        let head = &output[..slice];
+        let tail_start = byte_len.saturating_sub(slice);
         let tail = &output[tail_start..];
         return format!(
             "{}\n[ecotokens] ... {} bytes omitted ({} total) ...\n{}",
             head,
-            byte_len.saturating_sub(HEAD_TAIL_BYTES * 2),
+            byte_len.saturating_sub(slice * 2),
             byte_len,
             tail,
         );
