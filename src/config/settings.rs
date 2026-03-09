@@ -69,6 +69,10 @@ pub struct Settings {
     pub model_pricing: HashMap<String, ModelPrice>,
     #[serde(default = "EmbedProvider::default")]
     pub embed_provider: EmbedProvider,
+    #[serde(default)]
+    pub ai_summary_enabled: bool,
+    #[serde(default)]
+    pub ai_summary_model: Option<String>,
 }
 
 fn default_threshold_lines() -> u32 { 500 }
@@ -88,6 +92,8 @@ impl Default for Settings {
             default_model: "claude-sonnet-4-6".into(),
             model_pricing: default_model_pricing(),
             embed_provider: EmbedProvider::default(),
+            ai_summary_enabled: false,
+            ai_summary_model: None,
         }
     }
 }

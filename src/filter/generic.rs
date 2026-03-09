@@ -53,6 +53,7 @@ pub fn filter_generic(output: &str, threshold_lines: u32, threshold_bytes: u32) 
 }
 
 /// Force a generic summary, even when output is below normal thresholds.
+#[allow(dead_code)]
 pub fn force_filter_generic(output: &str) -> String {
     // Always reduce filtered output by at least one estimated token (4 chars).
     let chars: Vec<char> = output.chars().collect();

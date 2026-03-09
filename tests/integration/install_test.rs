@@ -119,8 +119,13 @@ fn install_with_mcp_adds_mcp_entry() {
     );
     assert_eq!(
         cv["mcpServers"]["ecotokens"]["command"].as_str().unwrap_or(""),
-        "ecotokens mcp",
-        "MCP command should be 'ecotokens mcp'"
+        "ecotokens",
+        "MCP command should be 'ecotokens'"
+    );
+    assert_eq!(
+        cv["mcpServers"]["ecotokens"]["args"][0].as_str().unwrap_or(""),
+        "mcp",
+        "MCP first arg should be 'mcp'"
     );
 
     // settings.json must NOT contain mcpServers

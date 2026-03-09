@@ -1,13 +1,24 @@
 use crate::config::settings::EmbedProvider;
 
 /// Obtient l'embedding d'un texte via le provider configuré.
-/// Retourne `None` si le provider est `None` ou si le provider est inaccessible
-/// (fallback BM25 automatique).
+/// Retourne `None` si le provider est `None`, si le provider est inaccessible
+/// (fallback BM25 automatique), ou si appelé depuis un contexte async tokio
+/// (reqwest::blocking ne peut pas créer son runtime interne dans ce cas).
 pub fn embed_text(text: &str, provider: &EmbedProvider) -> Option<Vec<f32>> {
     match provider {
         EmbedProvider::None => None,
-        EmbedProvider::Ollama { url } => get_ollama_embedding(text, url).ok(),
-        EmbedProvider::LmStudio { url } => get_lmstudio_embedding(text, url).ok(),
+        EmbedProvider::Ollama { url } => {
+            if tokio::runtime::Handle::try_current().is_ok() {
+                return None;
+            }
+            get_ollama_embedding(text, url).ok()
+        }
+        EmbedProvider::LmStudio { url } => {
+            if tokio::runtime::Handle::try_current().is_ok() {
+                return None;
+            }
+            get_lmstudio_embedding(text, url).ok()
+        }
     }
 }
 

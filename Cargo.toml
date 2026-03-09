@@ -10,9 +10,10 @@ keywords = ["claude", "tokens", "cli", "productivity", "ai"]
 categories = ["command-line-utilities", "development-tools"]
 
 [features]
-default = ["embeddings"]
+default = ["embeddings", "ai-summary"]
 exact-tokens = ["tiktoken-rs"]
 embeddings = ["reqwest"]
+ai-summary = ["reqwest"]
 
 [dependencies]
 clap = { version = "4", features = ["derive"] }
@@ -97,6 +98,10 @@ path = "tests/filter/cpp_test.rs"
 [[test]]
 name = "config_file_test"
 path = "tests/filter/config_file_test.rs"
+
+[[test]]
+name = "ai_summary_test"
+path = "tests/filter/ai_summary_test.rs"
 
 [[test]]
 name = "go_test"

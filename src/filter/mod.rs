@@ -1,3 +1,4 @@
+pub mod ai_summary;
 pub mod aws;
 pub mod cargo;
 pub mod config_file;
@@ -126,16 +127,17 @@ pub fn run_filter_pipeline_with_cwd(
     duration_ms: u32,
     cwd: Option<&std::path::Path>,
 ) -> (String, u32, u32) {
+    let settings = crate::config::Settings::load();
     let (masked, redacted) = crate::masking::mask(raw);
     let mut filtered = apply_filter(command, &masked);
     if filtered == masked {
-        filtered = generic::force_filter_generic(&masked);
+        filtered = ai_summary::ai_summary_or_fallback(&masked, &settings);
     }
 
     let masked_tokens = crate::tokens::estimate_tokens(&masked) as u32;
     let filtered_tokens = crate::tokens::estimate_tokens(&filtered) as u32;
     if masked_tokens > 0 && filtered_tokens >= masked_tokens {
-        filtered = generic::force_filter_generic(&masked);
+        filtered = ai_summary::ai_summary_or_fallback(&masked, &settings);
     }
 
     let tokens_before = crate::tokens::estimate_tokens(raw) as u32;
