@@ -91,7 +91,8 @@ pub struct RunParams {
     )]
     pub command: String,
     #[schemars(
-        description = "Optional working directory for the command (absolute or relative path)"
+        description = "Optional working directory for the command. Prefer absolute paths; \
+         relative paths are resolved from the server process working directory."
     )]
     pub cwd: Option<String>,
 }

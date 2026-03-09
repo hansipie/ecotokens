@@ -239,7 +239,7 @@ fn main() {
                     let mut project_filter: Option<String> = None;
                     let mut last_reload = std::time::Instant::now();
                     loop {
-                        // Recharger les données toutes les 2 secondes, même si des événements arrivent
+                        // Reload data every 2 seconds regardless of incoming key events
                         if last_reload.elapsed() >= std::time::Duration::from_secs(2) {
                             items = read_from(&path).unwrap_or_default();
                             report = aggregate(&items, p.clone(), model.as_deref().unwrap_or("sonnet"));

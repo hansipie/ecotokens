@@ -36,9 +36,10 @@ impl EcotokensServer {
         }
 
         if let Ok(ws_root) = std::env::var("ECOTOKENS_WORKSPACE_ROOT") {
-            let path = PathBuf::from(ws_root);
-            if path.is_dir() {
-                return Ok(path);
+            if let Ok(canonical) = std::fs::canonicalize(&ws_root) {
+                if canonical.is_dir() {
+                    return Ok(canonical);
+                }
             }
         }
 
@@ -130,6 +131,8 @@ impl EcotokensServer {
             || std::env::var("ECOTOKENS_WORKSPACE_ROOT").is_ok();
 
         let start = std::time::Instant::now();
+        // The command string is trusted to come from an AI agent, not from arbitrary
+        // user input, so shell injection is an accepted risk here.
         let output = std::process::Command::new("bash")
             .arg("-lc")
             .arg(command)
