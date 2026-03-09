@@ -156,6 +156,23 @@ pub fn index_directory(opts: IndexOptions) -> tantivy::Result<IndexStats> {
     Ok(IndexStats { file_count, chunk_count })
 }
 
+/// Count files that would be considered indexable during indexing.
+pub fn count_indexable_files(path: &Path) -> u64 {
+    let walker = ignore::WalkBuilder::new(path)
+        .hidden(false)
+        .git_ignore(true)
+        .build();
+
+    walker
+        .filter_map(|e| e.ok())
+        .filter(|e| e.path().is_file())
+        .filter(|e| {
+            let ext = e.path().extension().and_then(|x| x.to_str()).unwrap_or("");
+            is_indexable_extension(ext)
+        })
+        .count() as u64
+}
+
 fn is_indexable_extension(ext: &str) -> bool {
     matches!(ext, "rs" | "py" | "js" | "ts" | "md" | "toml" | "json" | "yaml" | "yml" | "txt")
 }

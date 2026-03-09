@@ -790,17 +790,8 @@ fn main() {
             let watch_path_str = watch_path.display().to_string();
             let is_interactive = !daemon && std::io::IsTerminal::is_terminal(&std::io::stdout());
 
-            // Compter les fichiers indexables
-            let total_files = {
-                let walker = ignore::WalkBuilder::new(&watch_path)
-                    .hidden(false)
-                    .git_ignore(true)
-                    .build();
-                walker
-                    .filter_map(|e| e.ok())
-                    .filter(|e| e.path().is_file())
-                    .count() as u64
-            };
+            // Compter uniquement les fichiers réellement indexables pour une progression fidèle.
+            let total_files = search::index::count_indexable_files(&watch_path);
 
             let counter = Arc::new(AtomicUsize::new(0));
             let opts = search::index::IndexOptions {
