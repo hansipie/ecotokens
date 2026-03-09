@@ -16,45 +16,37 @@ pub fn embed_text(text: &str, provider: &EmbedProvider) -> Option<Vec<f32>> {
 /// Endpoint : `POST {base_url}/api/embeddings`
 /// Modèle par défaut : `nomic-embed-text`
 pub fn get_ollama_embedding(text: &str, base_url: &str) -> Result<Vec<f32>, String> {
-    #[cfg(feature = "embeddings")]
-    {
-        let client = reqwest::blocking::Client::builder()
-            .timeout(std::time::Duration::from_secs(10))
-            .build()
-            .map_err(|e| format!("client error: {e}"))?;
+    let client = reqwest::blocking::Client::builder()
+        .timeout(std::time::Duration::from_secs(10))
+        .build()
+        .map_err(|e| format!("client error: {e}"))?;
 
-        let url = format!("{}/api/embeddings", base_url.trim_end_matches('/'));
-        let body = serde_json::json!({
-            "model": "nomic-embed-text",
-            "prompt": text
-        });
+    let url = format!("{}/api/embeddings", base_url.trim_end_matches('/'));
+    let body = serde_json::json!({
+        "model": "nomic-embed-text",
+        "prompt": text
+    });
 
-        let resp = client
-            .post(&url)
-            .json(&body)
-            .send()
-            .map_err(|e| format!("request error: {e}"))?;
+    let resp = client
+        .post(&url)
+        .json(&body)
+        .send()
+        .map_err(|e| format!("request error: {e}"))?;
 
-        if !resp.status().is_success() {
-            return Err(format!("HTTP {}: model not available", resp.status()));
-        }
-
-        let data: serde_json::Value = resp.json().map_err(|e| format!("parse error: {e}"))?;
-
-        let embedding = data["embedding"]
-            .as_array()
-            .ok_or_else(|| "missing 'embedding' field in response".to_string())?
-            .iter()
-            .map(|v| v.as_f64().unwrap_or(0.0) as f32)
-            .collect();
-
-        Ok(embedding)
+    if !resp.status().is_success() {
+        return Err(format!("HTTP {}: model not available", resp.status()));
     }
-    #[cfg(not(feature = "embeddings"))]
-    {
-        let _ = (text, base_url);
-        Err("feature 'embeddings' not enabled — recompile with --features embeddings".to_string())
-    }
+
+    let data: serde_json::Value = resp.json().map_err(|e| format!("parse error: {e}"))?;
+
+    let embedding = data["embedding"]
+        .as_array()
+        .ok_or_else(|| "missing 'embedding' field in response".to_string())?
+        .iter()
+        .map(|v| v.as_f64().unwrap_or(0.0) as f32)
+        .collect();
+
+    Ok(embedding)
 }
 
 /// Appel HTTP vers l'API LM Studio (format OpenAI-compatible) pour obtenir l'embedding.
@@ -62,45 +54,37 @@ pub fn get_ollama_embedding(text: &str, base_url: &str) -> Result<Vec<f32>, Stri
 /// Endpoint : `POST {base_url}/v1/embeddings`
 /// Modèle par défaut : `nomic-embed-text-v1.5`
 pub fn get_lmstudio_embedding(text: &str, base_url: &str) -> Result<Vec<f32>, String> {
-    #[cfg(feature = "embeddings")]
-    {
-        let client = reqwest::blocking::Client::builder()
-            .timeout(std::time::Duration::from_secs(10))
-            .build()
-            .map_err(|e| format!("client error: {e}"))?;
+    let client = reqwest::blocking::Client::builder()
+        .timeout(std::time::Duration::from_secs(10))
+        .build()
+        .map_err(|e| format!("client error: {e}"))?;
 
-        let url = format!("{}/v1/embeddings", base_url.trim_end_matches('/'));
-        let body = serde_json::json!({
-            "model": "nomic-embed-text-v1.5",
-            "input": text
-        });
+    let url = format!("{}/v1/embeddings", base_url.trim_end_matches('/'));
+    let body = serde_json::json!({
+        "model": "nomic-embed-text-v1.5",
+        "input": text
+    });
 
-        let resp = client
-            .post(&url)
-            .json(&body)
-            .send()
-            .map_err(|e| format!("request error: {e}"))?;
+    let resp = client
+        .post(&url)
+        .json(&body)
+        .send()
+        .map_err(|e| format!("request error: {e}"))?;
 
-        if !resp.status().is_success() {
-            return Err(format!("HTTP {}: model not available", resp.status()));
-        }
-
-        let data: serde_json::Value = resp.json().map_err(|e| format!("parse error: {e}"))?;
-
-        let embedding = data["data"][0]["embedding"]
-            .as_array()
-            .ok_or_else(|| "missing 'data[0].embedding' field in response".to_string())?
-            .iter()
-            .map(|v| v.as_f64().unwrap_or(0.0) as f32)
-            .collect();
-
-        Ok(embedding)
+    if !resp.status().is_success() {
+        return Err(format!("HTTP {}: model not available", resp.status()));
     }
-    #[cfg(not(feature = "embeddings"))]
-    {
-        let _ = (text, base_url);
-        Err("feature 'embeddings' not enabled — recompile with --features embeddings".to_string())
-    }
+
+    let data: serde_json::Value = resp.json().map_err(|e| format!("parse error: {e}"))?;
+
+    let embedding = data["data"][0]["embedding"]
+        .as_array()
+        .ok_or_else(|| "missing 'data[0].embedding' field in response".to_string())?
+        .iter()
+        .map(|v| v.as_f64().unwrap_or(0.0) as f32)
+        .collect();
+
+    Ok(embedding)
 }
 
 /// Similarité cosinus entre deux vecteurs de même dimension.

@@ -24,6 +24,14 @@ pub enum CommandFamily {
     Markdown,
     Python,
     ConfigFile,
+    Go,
+    Js,
+    Gh,
+    Container,
+    Grep,
+    Aws,
+    Network,
+    Db,
     Generic,
 }
 

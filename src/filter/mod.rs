@@ -1,10 +1,18 @@
+pub mod aws;
 pub mod cargo;
 pub mod config_file;
+pub mod container;
 pub mod cpp;
+pub mod db;
 pub mod fs;
 pub mod generic;
+pub mod gh;
 pub mod git;
+pub mod go;
+pub mod grep;
+pub mod js;
 pub mod markdown;
+pub mod network;
 pub mod python;
 
 use crate::metrics::store::CommandFamily;
@@ -34,11 +42,46 @@ pub fn detect_family(command: &str) -> CommandFamily {
         || cmd.starts_with("pytest")
         || cmd.starts_with("pip ")
         || cmd.starts_with("ruff ")
+        || cmd.starts_with("mypy")
         || cmd.starts_with("uv ")
     {
         CommandFamily::Python
-    } else if cmd.starts_with("ls") || cmd.starts_with("find") || cmd.starts_with("tree") {
+    } else if cmd.starts_with("ls")
+        || cmd.starts_with("find")
+        || cmd.starts_with("tree")
+        || cmd.starts_with("diff ")
+        || cmd.starts_with("wc")
+    {
         CommandFamily::Fs
+    } else if cmd.starts_with("go ") || cmd.contains("golangci-lint") {
+        CommandFamily::Go
+    } else if cmd.starts_with("npm ")
+        || cmd.starts_with("pnpm ")
+        || cmd.starts_with("npx ")
+        || cmd.starts_with("tsc")
+        || cmd.starts_with("vitest")
+        || cmd.starts_with("eslint")
+        || cmd.starts_with("prettier")
+        || cmd.starts_with("next ")
+        || cmd.contains("playwright")
+        || cmd.contains("prisma")
+    {
+        CommandFamily::Js
+    } else if cmd.starts_with("gh ") {
+        CommandFamily::Gh
+    } else if cmd.starts_with("docker ")
+        || cmd.starts_with("podman ")
+        || cmd.starts_with("kubectl ")
+    {
+        CommandFamily::Container
+    } else if cmd.starts_with("grep ") || cmd.starts_with("rg ") {
+        CommandFamily::Grep
+    } else if cmd.starts_with("aws ") {
+        CommandFamily::Aws
+    } else if cmd.starts_with("curl ") || cmd.starts_with("wget ") {
+        CommandFamily::Network
+    } else if cmd.starts_with("psql ") {
+        CommandFamily::Db
     } else {
         CommandFamily::Generic
     }
@@ -57,7 +100,15 @@ pub fn apply_filter(command: &str, output: &str) -> String {
         CommandFamily::Fs => fs::filter_fs(command, output),
         CommandFamily::Markdown => markdown::filter_markdown(output),
         CommandFamily::ConfigFile => config_file::filter_config_file(output, ext),
-        _ => generic::filter_generic(output, 200, 51200),
+        CommandFamily::Go => go::filter_go(command, output),
+        CommandFamily::Js => js::filter_js(command, output),
+        CommandFamily::Gh => gh::filter_gh(command, output),
+        CommandFamily::Container => container::filter_container(command, output),
+        CommandFamily::Grep => grep::filter_grep(output),
+        CommandFamily::Aws => aws::filter_aws(output),
+        CommandFamily::Network => network::filter_network(command, output),
+        CommandFamily::Db => db::filter_db(output),
+        CommandFamily::Generic => generic::filter_generic(output, 200, 51200),
     }
 }
 

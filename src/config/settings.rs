@@ -2,13 +2,19 @@ use serde::{Deserialize, Serialize};
 use std::collections::HashMap;
 use std::path::PathBuf;
 
-#[derive(Debug, Clone, Default, Serialize, Deserialize, PartialEq)]
+#[derive(Debug, Clone, Serialize, Deserialize, PartialEq)]
 #[serde(rename_all = "snake_case")]
 pub enum EmbedProvider {
-    #[default]
     None,
+    #[serde(alias = "ollama")]
     Ollama { url: String },
     LmStudio { url: String },
+}
+
+impl Default for EmbedProvider {
+    fn default() -> Self {
+        EmbedProvider::Ollama { url: "http://localhost:11434".into() }
+    }
 }
 
 #[derive(Debug, Clone, Serialize, Deserialize)]
@@ -61,7 +67,7 @@ pub struct Settings {
     pub default_model: String,
     #[serde(default = "default_model_pricing")]
     pub model_pricing: HashMap<String, ModelPrice>,
-    #[serde(default)]
+    #[serde(default = "EmbedProvider::default")]
     pub embed_provider: EmbedProvider,
 }
 
@@ -81,7 +87,7 @@ impl Default for Settings {
             debug: false,
             default_model: "claude-sonnet-4-6".into(),
             model_pricing: default_model_pricing(),
-            embed_provider: EmbedProvider::None,
+            embed_provider: EmbedProvider::default(),
         }
     }
 }
