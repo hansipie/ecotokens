@@ -1,4 +1,4 @@
-use ecotokens::filter::generic::{filter_generic, THRESHOLD_LINES};
+use ecotokens::filter::generic::{filter_generic, force_filter_generic, THRESHOLD_LINES};
 
 #[test]
 fn short_output_passes_through() {
@@ -44,4 +44,20 @@ fn passthrough_threshold_is_respected() {
 #[test]
 fn threshold_lines_constant_is_500() {
     assert_eq!(THRESHOLD_LINES, 500);
+}
+
+#[test]
+fn force_filter_always_reduces_non_empty_output() {
+    let input = "abcdefghijklmnopqrstuvwxyz";
+    let out = force_filter_generic(input);
+    assert!(out.len() < input.len());
+}
+
+#[test]
+fn force_filter_reduces_estimated_tokens() {
+    let input = "x".repeat(20);
+    let before = ecotokens::tokens::estimate_tokens(&input);
+    let out = force_filter_generic(&input);
+    let after = ecotokens::tokens::estimate_tokens(&out);
+    assert!(after < before, "after={after}, before={before}");
 }

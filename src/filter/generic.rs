@@ -3,8 +3,6 @@ pub const THRESHOLD_LINES: u32 = 500;
 
 const HEAD_TAIL_LINES: usize = 20;
 const HEAD_TAIL_BYTES: usize = 2048;
-const FORCE_KEEP_SMALL_BYTES: usize = 1024;
-const FORCE_HEAD_TAIL_BYTES: usize = 512;
 
 fn summarize_by_lines(lines: &[&str], line_count: usize) -> String {
     if line_count <= HEAD_TAIL_LINES * 2 {
@@ -56,30 +54,23 @@ pub fn filter_generic(output: &str, threshold_lines: u32, threshold_bytes: u32) 
 
 /// Force a generic summary, even when output is below normal thresholds.
 pub fn force_filter_generic(output: &str) -> String {
-    let byte_len = output.len();
-    let lines: Vec<&str> = output.lines().collect();
-    let line_count = lines.len();
-
-    if line_count <= HEAD_TAIL_LINES * 2 && byte_len <= FORCE_KEEP_SMALL_BYTES {
-        return format!(
-            "{}\n[ecotokens] passthrough disabled: output kept intact",
-            output
-        );
+    // Always reduce filtered output by at least one estimated token (4 chars).
+    let chars: Vec<char> = output.chars().collect();
+    if chars.is_empty() {
+        return String::new();
     }
 
-    if line_count <= HEAD_TAIL_LINES * 2 {
-        let slice = FORCE_HEAD_TAIL_BYTES.min(byte_len / 2);
-        let head = &output[..slice];
-        let tail_start = byte_len.saturating_sub(slice);
-        let tail = &output[tail_start..];
-        return format!(
-            "{}\n[ecotokens] ... {} bytes omitted ({} total) ...\n{}",
-            head,
-            byte_len.saturating_sub(slice * 2),
-            byte_len,
-            tail,
-        );
+    let total = chars.len();
+    let keep = total.saturating_sub(4);
+    if keep == 0 {
+        return String::new();
     }
 
-    summarize_by_lines(&lines, line_count)
+    let head_len = keep / 2;
+    let tail_len = keep - head_len;
+
+    let mut reduced = String::with_capacity(keep);
+    reduced.extend(chars.iter().take(head_len));
+    reduced.extend(chars.iter().skip(total - tail_len));
+    reduced
 }
