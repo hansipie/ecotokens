@@ -48,6 +48,12 @@ enum Commands {
         /// Target AI tool to install for: claude (default), vscode, all
         #[arg(long, default_value = "claude")]
         target: String,
+        /// Enable AI-powered output summarization via Ollama
+        #[arg(long)]
+        ai_summary: bool,
+        /// Ollama model to use for AI summary (implies --ai-summary)
+        #[arg(long)]
+        ai_summary_model: Option<String>,
     },
     /// Remove ecotokens hook from ~/.claude/settings.json
     Uninstall {
@@ -360,7 +366,7 @@ fn main() {
             }
         }
 
-        Commands::Install { with_mcp, target } => {
+        Commands::Install { with_mcp, target, ai_summary, ai_summary_model } => {
             let claude_path = default_settings_path();
             let claude_json = default_claude_json_path();
             let vscode_path = install::default_vscode_settings_path();
@@ -391,6 +397,20 @@ fn main() {
                         std::process::exit(1);
                     }
                 }
+            }
+
+            let enable_ai = ai_summary || ai_summary_model.is_some();
+            if enable_ai {
+                let mut settings = config::Settings::load();
+                settings.ai_summary_enabled = true;
+                if let Some(model) = ai_summary_model {
+                    settings.ai_summary_model = Some(model);
+                }
+                if let Err(e) = settings.save() {
+                    eprintln!("failed to save config: {e}");
+                    std::process::exit(1);
+                }
+                println!("AI summary configured in ~/.config/ecotokens/config.json");
             }
         }
 
@@ -496,6 +516,8 @@ fn main() {
                 println!("threshold_bytes       : {}", settings.summary_threshold_bytes);
                 println!("exclusions            : {:?}", settings.exclusions);
                 println!("embed_provider        : {}", provider_str);
+                println!("ai_summary_enabled    : {}", settings.ai_summary_enabled);
+                println!("ai_summary_model      : {}", settings.ai_summary_model.as_deref().unwrap_or("llama3.2:3b (default)"));
             }
         }
 
