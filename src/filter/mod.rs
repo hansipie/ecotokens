@@ -127,7 +127,10 @@ pub fn run_filter_pipeline_with_cwd(
     cwd: Option<&std::path::Path>,
 ) -> (String, u32, u32) {
     let (masked, redacted) = crate::masking::mask(raw);
-    let filtered = apply_filter(command, &masked);
+    let mut filtered = apply_filter(command, &masked);
+    if filtered == masked {
+        filtered = generic::force_filter_generic(&masked);
+    }
     let tokens_before = crate::tokens::estimate_tokens(raw) as u32;
     let tokens_after = crate::tokens::estimate_tokens(&filtered) as u32;
 
@@ -135,7 +138,7 @@ pub fn run_filter_pipeline_with_cwd(
         let mode = if tokens_after < tokens_before {
             crate::metrics::store::FilterMode::Filtered
         } else {
-            crate::metrics::store::FilterMode::Passthrough
+            crate::metrics::store::FilterMode::Summarized
         };
         let family = detect_family(command);
         let mut git_cmd = std::process::Command::new("git");
