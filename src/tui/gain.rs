@@ -88,7 +88,7 @@ fn project_label(name: &str) -> String {
     }
 }
 
-/// Retourne les noms de familles (triés par savings desc) présents dans un projet donné.
+/// Returns family names (sorted by descending savings) for a given project.
 pub fn sorted_family_keys_for_project(items: &[Interception], project: &str) -> Vec<String> {
     use std::collections::HashMap;
     let mut map: HashMap<String, f32> = HashMap::new();
@@ -185,7 +185,7 @@ fn render_stats(frame: &mut Frame, area: Rect, report: &Report, last_updated: Op
     ];
 
     let title = match last_updated {
-        Some(ts) => format!(" ecotokens gain – mis à jour {ts} UTC  [q] quit "),
+        Some(ts) => format!(" ecotokens gain - updated {ts} UTC  [q] quit "),
         None => " ecotokens gain  [q] quit ".to_string(),
     };
     let paragraph = Paragraph::new(text)
@@ -198,7 +198,7 @@ fn render_stats(frame: &mut Frame, area: Rect, report: &Report, last_updated: Op
 fn render_families(frame: &mut Frame, area: Rect, report: &Report, items: &[Interception], selected: Option<usize>, project_filter: Option<&str>) -> Vec<String> {
     let title = if let Some(proj) = project_filter {
         let basename = project_label(proj);
-        format!(" By family  ·  projet: {basename}  [↑↓/jk] nav  [b] projets ")
+        format!(" By family  ·  project: {basename}  [↑↓/jk] nav  [b] projects ")
     } else {
         " By family  ·  global  [↑↓/jk] nav  [b] projects ".to_string()
     };
@@ -340,9 +340,9 @@ fn render_projects(frame: &mut Frame, area: Rect, report: &Report, selected: Opt
 
 fn render_project_log_panel(frame: &mut Frame, area: Rect, project_name: Option<&str>, items: &[Interception]) {
     let Some(name) = project_name else {
-        let block = Block::default().borders(Borders::ALL).title(" Historique projet ");
+        let block = Block::default().borders(Borders::ALL).title(" Project history ");
         let p = Paragraph::new(Span::styled(
-            " ↑↓ / j k : sélectionner un projet",
+            " ↑↓ / j k: select a project",
             Style::default().fg(Color::DarkGray),
         ))
         .block(block);
@@ -362,7 +362,7 @@ fn render_project_log_panel(frame: &mut Frame, area: Rect, project_name: Option<
 
     let block = Block::default()
         .borders(Borders::ALL)
-        .title(format!(" Historique projet : {label} · {n}/20 "));
+        .title(format!(" Project history: {label} · {n}/20 "));
     let inner = block.inner(area);
     frame.render_widget(block, area);
 
@@ -386,9 +386,9 @@ fn render_project_log_panel(frame: &mut Frame, area: Rect, project_name: Option<
 
 fn render_detail(frame: &mut Frame, area: Rect, family_name: Option<&str>, items: &[Interception], detail_mode: DetailMode) {
     let Some(name) = family_name else {
-        let block = Block::default().borders(Borders::ALL).title(" Détail ");
+        let block = Block::default().borders(Borders::ALL).title(" Detail ");
         let p = Paragraph::new(Span::styled(
-            " ↑↓ / j k : sélectionner une famille  [d] diff/log  [b] projects",
+            " ↑↓ / j k: select a family  [d] diff/log  [b] projects",
             Style::default().fg(Color::DarkGray),
         ))
         .block(block);
@@ -412,8 +412,8 @@ fn render_detail(frame: &mut Frame, area: Rect, family_name: Option<&str>, items
     let Some(item) = last else {
         let block = Block::default()
             .borders(Borders::ALL)
-            .title(format!(" Détail : {name} "));
-        let p = Paragraph::new("Aucune interception pour cette famille.").block(block);
+            .title(format!(" Detail: {name} "));
+        let p = Paragraph::new("No interceptions for this family.").block(block);
         frame.render_widget(p, area);
         return;
     };
@@ -422,8 +422,8 @@ fn render_detail(frame: &mut Frame, area: Rect, family_name: Option<&str>, items
         let cmd_short: String = item.command.chars().take(40).collect();
         let block = Block::default()
             .borders(Borders::ALL)
-            .title(format!(" Détail : {name} · {cmd_short} "));
-        let p = Paragraph::new("Contenu non disponible (données antérieures à cette version).")
+            .title(format!(" Detail: {name} · {cmd_short} "));
+        let p = Paragraph::new("Content unavailable (data predates this version).")
             .block(block);
         frame.render_widget(p, area);
         return;
@@ -441,7 +441,7 @@ fn render_split_panel(frame: &mut Frame, area: Rect, name: &str, item: &Intercep
     let ts_short = item.timestamp.get(..16).unwrap_or(&item.timestamp);
     let block = Block::default()
         .borders(Borders::ALL)
-        .title(format!(" Détail : {name} · {cmd_short} · {ts_short}  [d] diff "));
+        .title(format!(" Detail: {name} · {cmd_short} · {ts_short}  [d] diff "));
     let inner = block.inner(area);
     frame.render_widget(block, area);
 
@@ -535,7 +535,7 @@ fn render_diff_panel(frame: &mut Frame, area: Rect, name: &str, item: &Intercept
 
     if lines.is_empty() {
         lines.push(Line::from(Span::styled(
-            "(aucune différence)",
+            "(no differences)",
             Style::default().fg(Color::DarkGray),
         )));
     }
@@ -562,7 +562,7 @@ fn render_log_panel(frame: &mut Frame, area: Rect, name: &str, items: &[Intercep
 
     let block = Block::default()
         .borders(Borders::ALL)
-        .title(format!(" Historique : {name} · {n}/15  [d] split "));
+        .title(format!(" History: {name} · {n}/15  [d] split "));
     let inner = block.inner(area);
     frame.render_widget(block, area);
 
@@ -614,7 +614,7 @@ fn log_scale(data: &[u64]) -> Vec<u64> {
         .collect()
 }
 
-/// Plafonne au P90 des valeurs non-nulles pour éviter qu'un outlier écrase le reste.
+/// Caps values at P90 of non-zero entries so one outlier does not flatten the rest.
 fn cap_scale(data: &[u64]) -> Vec<u64> {
     let mut nonzero: Vec<u64> = data.iter().copied().filter(|&v| v > 0).collect();
     if nonzero.is_empty() {

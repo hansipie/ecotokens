@@ -204,8 +204,8 @@ fn gain_log_mode_renders_history() {
         .unwrap();
     let content = buffer_text(&terminal);
     assert!(
-        content.contains("Historique"),
-        "log mode should show 'Historique' in panel title: {content:?}"
+        content.contains("History"),
+        "log mode should show 'History' in panel title: {content:?}"
     );
 }
 
@@ -252,8 +252,8 @@ fn gain_project_log_mode_renders_history() {
         .unwrap();
     let content = buffer_text(&terminal);
     assert!(
-        content.contains("Historique"),
-        "project log mode should show 'Historique' in panel title: {content:?}"
+        content.contains("history") || content.contains("History"),
+        "project log mode should show 'Project history' in panel title: {content:?}"
     );
 }
 

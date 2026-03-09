@@ -24,7 +24,7 @@ pub struct WatchStats {
     pub errors: u32,
 }
 
-/// Rail de phases : [✓ Indexation] → [● Surveillance] + résumé rapport inline
+/// Phase rail: [✓ Indexing] -> [● Watching] with an inline report summary.
 fn render_phase_rail(
     frame: &mut Frame,
     area: Rect,
@@ -35,19 +35,19 @@ fn render_phase_rail(
 
     match phase {
         WatchPhase::Indexing => {
-            spans.push(Span::styled("[● Indexation]", Style::default().fg(Color::Blue)));
+            spans.push(Span::styled("[● Indexing]", Style::default().fg(Color::Blue)));
             spans.push(Span::raw(" → "));
-            spans.push(Span::styled("[ Surveillance]", Style::default().fg(Color::DarkGray)));
+            spans.push(Span::styled("[ Watching]", Style::default().fg(Color::DarkGray)));
         }
         WatchPhase::Watching => {
-            spans.push(Span::styled("[✓ Indexation]", Style::default().fg(Color::Green)));
+            spans.push(Span::styled("[✓ Indexing]", Style::default().fg(Color::Green)));
             spans.push(Span::raw(" → "));
-            spans.push(Span::styled("[● Surveillance]", Style::default().fg(Color::Blue)));
+            spans.push(Span::styled("[● Watching]", Style::default().fg(Color::Blue)));
             if let Some(r) = report {
                 spans.push(Span::raw("    "));
                 spans.push(Span::styled(
                     format!(
-                        "{} fichiers · {} chunks · {:.1}s",
+                        "{} files · {} chunks · {:.1}s",
                         r.file_count, r.chunk_count, r.elapsed_secs
                     ),
                     Style::default().fg(Color::DarkGray),
@@ -61,7 +61,7 @@ fn render_phase_rail(
     frame.render_widget(rail, area);
 }
 
-/// Rendu complet pendant la phase d'indexation initiale.
+/// Full rendering during the initial indexing phase.
 pub fn render_indexing(frame: &mut Frame, area: Rect, done: u64, total: u64) {
     let chunks = Layout::default()
         .direction(Direction::Vertical)
@@ -73,15 +73,15 @@ pub fn render_indexing(frame: &mut Frame, area: Rect, done: u64, total: u64) {
         .split(area);
 
     render_phase_rail(frame, chunks[0], &WatchPhase::Indexing, None);
-    crate::tui::progress::render_progress(frame, chunks[1], done, total, " Indexation initiale… ");
+    crate::tui::progress::render_progress(frame, chunks[1], done, total, " Initial indexing... ");
 
-    let placeholder = Paragraph::new("Indexation en cours — la surveillance démarrera ensuite…")
-        .block(Block::default().borders(Borders::ALL).title(" Événements"))
+    let placeholder = Paragraph::new("Indexing in progress - watching will start next...")
+        .block(Block::default().borders(Borders::ALL).title(" Events "))
         .style(Style::default().fg(Color::DarkGray));
     frame.render_widget(placeholder, chunks[2]);
 }
 
-/// Rendu complet pendant la phase de surveillance.
+/// Full rendering during the watching phase.
 pub fn render_watch(
     frame: &mut Frame,
     area: Rect,
@@ -93,9 +93,9 @@ pub fn render_watch(
     let chunks = Layout::default()
         .direction(Direction::Vertical)
         .constraints([
-            Constraint::Length(3), // rail de phases + rapport
+            Constraint::Length(3), // phase rail + report
             Constraint::Length(3), // stats
-            Constraint::Min(1),    // liste d'événements
+            Constraint::Min(1),    // event list
             Constraint::Length(1), // barre d'aide
         ])
         .split(area);
@@ -104,7 +104,7 @@ pub fn render_watch(
 
     // Panneau stats
     let stats_text = format!(
-        "  {}   ré-indexés: {}  ignorés: {}  erreurs: {}",
+        "  {}   re-indexed: {}  ignored: {}  errors: {}",
         watch_path, stats.reindexed, stats.ignored, stats.errors
     );
     let stats_widget = Paragraph::new(stats_text)
@@ -114,12 +114,12 @@ pub fn render_watch(
 
     // Titre de la liste avec compteurs
     let events_title = format!(
-        " Événements — ré-indexés:{}  ignorés:{}  erreurs:{} ",
+        " Events - re-indexed:{}  ignored:{}  errors:{} ",
         stats.reindexed, stats.ignored, stats.errors
     );
 
     if events.is_empty() {
-        let empty = Paragraph::new("Aucun événement — en attente de modifications…")
+        let empty = Paragraph::new("No events - waiting for file changes...")
             .block(Block::default().borders(Borders::ALL).title(events_title))
             .style(Style::default().fg(Color::DarkGray));
         frame.render_widget(empty, chunks[2]);
@@ -164,7 +164,7 @@ pub fn render_watch(
     }
 
     // Barre d'aide
-    let help = Paragraph::new(" q/Esc: quitter  Ctrl-C: arrêter")
+    let help = Paragraph::new(" q/Esc: quit  Ctrl-C: stop")
         .style(Style::default().fg(Color::DarkGray));
     frame.render_widget(help, chunks[3]);
 }

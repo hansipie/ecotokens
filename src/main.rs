@@ -476,7 +476,7 @@ fn main() {
                     "none" => EmbedProvider::None,
                     other => {
                         eprintln!(
-                            "provider inconnu: '{}'. Valeurs valides: ollama, lmstudio, none",
+                            "unknown provider: '{}'. Valid values: ollama, lmstudio, none",
                             other
                         );
                         std::process::exit(1);
@@ -484,8 +484,8 @@ fn main() {
                 };
 
                 match settings.save() {
-                    Ok(()) => eprintln!("embed_provider mis à jour"),
-                    Err(e) => { eprintln!("erreur sauvegarde: {e}"); std::process::exit(1); }
+                    Ok(()) => eprintln!("embed_provider updated"),
+                    Err(e) => { eprintln!("save error: {e}"); std::process::exit(1); }
                 }
             }
 
@@ -540,7 +540,7 @@ fn main() {
                 use std::sync::atomic::{AtomicUsize, Ordering};
                 use std::sync::Arc;
 
-                // Premier passage : compter les fichiers indexables
+                // First pass: count indexable files.
                 let total = {
                     let walker = ignore::WalkBuilder::new(&target)
                         .hidden(false)
@@ -913,7 +913,7 @@ fn main() {
             let watch_path_str = watch_path.display().to_string();
             let is_interactive = !background && std::io::IsTerminal::is_terminal(&std::io::stdout());
 
-            // Compter uniquement les fichiers réellement indexables pour une progression fidèle.
+            // Count only truly indexable files for accurate progress.
             let total_files = search::index::count_indexable_files(&watch_path);
 
             let counter = Arc::new(AtomicUsize::new(0));
@@ -1011,7 +1011,7 @@ fn main() {
             });
 
             if is_interactive {
-                // Phase C — Boucle TUI watch (écran alternatif déjà actif)
+                // Phase C - Watch TUI loop (alternate screen already active)
                 use ratatui::backend::CrosstermBackend;
                 use ratatui::crossterm::event::{poll, read, Event, KeyCode, KeyModifiers};
                 use ratatui::crossterm::terminal::{
