@@ -781,33 +781,41 @@ fn main() {
         }
 
         Commands::Watch { path, index_dir, daemon } => {
+            use std::sync::atomic::{AtomicUsize, Ordering};
+            use std::sync::Arc;
+
             let cwd = std::env::current_dir().expect("cannot get current dir");
             let watch_path = path.unwrap_or(cwd);
             let idx_dir = index_dir.unwrap_or_else(default_index_dir);
-
-            let (event_tx, event_rx) = std::sync::mpsc::channel::<daemon::watcher::WatchEvent>();
-            let (stop_tx, stop_rx) = std::sync::mpsc::channel::<()>();
-
-            let watch_path_clone = watch_path.clone();
-            let idx_dir_clone = idx_dir.clone();
-            let watcher_handle = std::thread::spawn(move || {
-                daemon::watcher::watch_directory(&watch_path_clone, &idx_dir_clone, event_tx, stop_rx)
-            });
-
             let watch_path_str = watch_path.display().to_string();
+            let is_interactive = !daemon && std::io::IsTerminal::is_terminal(&std::io::stdout());
 
-            if daemon || !std::io::IsTerminal::is_terminal(&std::io::stdout()) {
-                // Mode non-interactif : écrire les événements sur stdout
-                eprintln!("ecotokens watch: surveillance de {} (Ctrl-C pour arrêter)", watch_path.display());
-                while let Ok(e) = event_rx.recv() {
-                    println!("[{}] {} {}", e.timestamp, e.path.display(), e.status);
-                }
-            } else {
-                // Mode TUI interactif
+            // Compter les fichiers indexables
+            let total_files = {
+                let walker = ignore::WalkBuilder::new(&watch_path)
+                    .hidden(false)
+                    .git_ignore(true)
+                    .build();
+                walker
+                    .filter_map(|e| e.ok())
+                    .filter(|e| e.path().is_file())
+                    .count() as u64
+            };
+
+            let counter = Arc::new(AtomicUsize::new(0));
+            let opts = search::index::IndexOptions {
+                reset: false,
+                path: watch_path.clone(),
+                index_dir: idx_dir.clone(),
+                progress: Some(counter.clone()),
+                embed_provider: config::Settings::load().embed_provider,
+            };
+
+            // Phase A — Indexation initiale
+            let report = if is_interactive {
                 use ratatui::backend::CrosstermBackend;
-                use ratatui::crossterm::event::{poll, read, Event, KeyCode, KeyModifiers};
                 use ratatui::crossterm::terminal::{
-                    disable_raw_mode, enable_raw_mode, EnterAlternateScreen, LeaveAlternateScreen,
+                    enable_raw_mode, EnterAlternateScreen,
                 };
                 use ratatui::crossterm::ExecutableCommand;
                 use ratatui::Terminal;
@@ -816,17 +824,117 @@ fn main() {
                 let _ = std::io::stdout().execute(EnterAlternateScreen);
                 let backend = CrosstermBackend::new(std::io::stdout());
 
+                let start = std::time::Instant::now();
+                let index_handle =
+                    std::thread::spawn(move || search::index::index_directory(opts));
+
+                let index_result = {
+                    let mut terminal_opt = Terminal::new(backend).ok();
+                    loop {
+                        let done = counter.load(Ordering::Relaxed) as u64;
+                        if let Some(ref mut t) = terminal_opt {
+                            let _ = t.draw(|f| {
+                                tui::watch::render_indexing(
+                                    f,
+                                    f.area(),
+                                    done,
+                                    total_files.max(1),
+                                );
+                            });
+                        }
+                        if index_handle.is_finished() {
+                            break;
+                        }
+                        std::thread::sleep(std::time::Duration::from_millis(50));
+                    }
+                    // Afficher 100 %
+                    if let Some(ref mut t) = terminal_opt {
+                        let _ = t.draw(|f| {
+                            tui::watch::render_indexing(
+                                f,
+                                f.area(),
+                                total_files,
+                                total_files.max(1),
+                            );
+                        });
+                    }
+                    index_handle.join().expect("indexing thread panicked")
+                };
+
+                let elapsed = start.elapsed().as_secs_f64();
+                // On reste dans l'écran alternatif pour la phase de surveillance
+                index_result.ok().map(|stats| tui::watch::IndexReport {
+                    file_count: stats.file_count,
+                    chunk_count: stats.chunk_count,
+                    elapsed_secs: elapsed,
+                })
+            } else {
+                // Mode non-interactif : indexation bloquante sur stderr
+                eprintln!(
+                    "ecotokens watch: indexation préalable de {} fichiers…",
+                    total_files
+                );
+                let start = std::time::Instant::now();
+                let result = search::index::index_directory(opts);
+                let elapsed = start.elapsed().as_secs_f64();
+                result.ok().map(|stats| tui::watch::IndexReport {
+                    file_count: stats.file_count,
+                    chunk_count: stats.chunk_count,
+                    elapsed_secs: elapsed,
+                })
+            };
+
+            // Phase B — Lancer le file watcher
+            let (event_tx, event_rx) = std::sync::mpsc::channel::<daemon::watcher::WatchEvent>();
+            let (stop_tx, stop_rx) = std::sync::mpsc::channel::<()>();
+            let watch_path_clone = watch_path.clone();
+            let idx_dir_clone = idx_dir.clone();
+            let watcher_handle = std::thread::spawn(move || {
+                daemon::watcher::watch_directory(
+                    &watch_path_clone,
+                    &idx_dir_clone,
+                    event_tx,
+                    stop_rx,
+                )
+            });
+
+            if is_interactive {
+                // Phase C — Boucle TUI watch (écran alternatif déjà actif)
+                use ratatui::backend::CrosstermBackend;
+                use ratatui::crossterm::event::{poll, read, Event, KeyCode, KeyModifiers};
+                use ratatui::crossterm::terminal::{
+                    disable_raw_mode, LeaveAlternateScreen,
+                };
+                use ratatui::crossterm::ExecutableCommand;
+                use ratatui::Terminal;
+
+                let backend = CrosstermBackend::new(std::io::stdout());
                 if let Ok(mut terminal) = Terminal::new(backend) {
                     let mut events: Vec<daemon::watcher::WatchEvent> = Vec::new();
+                    let mut watch_stats =
+                        tui::watch::WatchStats { reindexed: 0, ignored: 0, errors: 0 };
 
                     loop {
-                        // Drainer les nouveaux événements
                         while let Ok(e) = event_rx.try_recv() {
+                            if e.status == "re-indexed" {
+                                watch_stats.reindexed += 1;
+                            } else if e.status.starts_with("error") {
+                                watch_stats.errors += 1;
+                            } else {
+                                watch_stats.ignored += 1;
+                            }
                             events.push(e);
                         }
 
                         let _ = terminal.draw(|f| {
-                            tui::watch::render_watch(f, f.area(), &events, &watch_path_str);
+                            tui::watch::render_watch(
+                                f,
+                                f.area(),
+                                &events,
+                                &watch_path_str,
+                                report.as_ref(),
+                                &watch_stats,
+                            );
                         });
 
                         if poll(std::time::Duration::from_millis(100)).unwrap_or(false) {
@@ -846,6 +954,15 @@ fn main() {
 
                 let _ = disable_raw_mode();
                 let _ = std::io::stdout().execute(LeaveAlternateScreen);
+            } else {
+                // Mode non-interactif : écrire les événements sur stdout
+                eprintln!(
+                    "ecotokens watch: surveillance de {} (Ctrl-C pour arrêter)",
+                    watch_path.display()
+                );
+                while let Ok(e) = event_rx.recv() {
+                    println!("[{}] {} {}", e.timestamp, e.path.display(), e.status);
+                }
             }
 
             let _ = stop_tx.send(());

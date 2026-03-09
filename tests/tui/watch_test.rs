@@ -1,8 +1,12 @@
 use ecotokens::daemon::watcher::WatchEvent;
-use ecotokens::tui::watch::render_watch;
+use ecotokens::tui::watch::{render_watch, WatchStats};
 use ratatui::backend::TestBackend;
 use ratatui::Terminal;
 use std::path::PathBuf;
+
+fn empty_stats() -> WatchStats {
+    WatchStats { reindexed: 0, ignored: 0, errors: 0 }
+}
 
 /// Vérifie que le header "ecotokens watch" est présent dans le rendu.
 #[test]
@@ -14,7 +18,7 @@ fn test_render_watch_contains_header() {
 
     terminal
         .draw(|f| {
-            render_watch(f, f.area(), &events, "/some/path");
+            render_watch(f, f.area(), &events, "/some/path", None, &empty_stats());
         })
         .unwrap();
 
@@ -39,7 +43,7 @@ fn test_render_watch_shows_event() {
 
     terminal
         .draw(|f| {
-            render_watch(f, f.area(), &events, "/some/path");
+            render_watch(f, f.area(), &events, "/some/path", None, &empty_stats());
         })
         .unwrap();
 
@@ -57,10 +61,9 @@ fn test_render_watch_empty_no_panic() {
     let mut terminal = Terminal::new(backend).unwrap();
 
     let events: Vec<WatchEvent> = vec![];
-    // Ne doit pas paniquer
     terminal
         .draw(|f| {
-            render_watch(f, f.area(), &events, "/path");
+            render_watch(f, f.area(), &events, "/path", None, &empty_stats());
         })
         .unwrap();
 }
@@ -81,7 +84,7 @@ fn test_render_watch_multiple_events() {
 
     terminal
         .draw(|f| {
-            render_watch(f, f.area(), &events, "/project");
+            render_watch(f, f.area(), &events, "/project", None, &empty_stats());
         })
         .unwrap();
 }
@@ -100,7 +103,7 @@ fn test_render_watch_error_status() {
 
     terminal
         .draw(|f| {
-            render_watch(f, f.area(), &events, "/project");
+            render_watch(f, f.area(), &events, "/project", None, &empty_stats());
         })
         .unwrap();
 
