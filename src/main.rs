@@ -114,7 +114,16 @@ enum Commands {
         index_dir: Option<PathBuf>,
         /// Run in background (no TUI, log events to stdout)
         #[arg(long)]
-        daemon: bool,
+        background: bool,
+        /// Show status of background watch process
+        #[arg(long)]
+        status: bool,
+        /// Stop the background watch process
+        #[arg(long)]
+        stop: bool,
+        /// Output status as JSON
+        #[arg(long)]
+        json: bool,
     },
     /// Start MCP server (JSON-RPC over stdio)
     Mcp {
@@ -780,7 +789,96 @@ fn main() {
             }
         }
 
-        Commands::Watch { path, index_dir, daemon } => {
+        Commands::Watch { path, index_dir, background, status, stop, json } => {
+            // Si --stop est demandé, arrêter le processus et terminer
+            if stop {
+                if let Some(state) = config::BackgroundState::load() {
+                    match state.stop() {
+                        Ok(()) => {
+                            println!("ecotokens watch: background process (PID {}) stopped", state.pid);
+                        }
+                        Err(e) => {
+                            eprintln!("ecotokens watch: failed to stop process: {}", e);
+                            std::process::exit(1);
+                        }
+                    }
+                } else {
+                    eprintln!("ecotokens watch: no background process running");
+                    std::process::exit(1);
+                }
+                return;
+            }
+
+            // Si --status est demandé, afficher l'état et terminer
+            if status {
+                if let Some(state) = config::BackgroundState::load() {
+                    let is_running = state.is_running();
+                    if json {
+                        let mut obj = serde_json::to_value(&state).unwrap();
+                        obj["running"] = serde_json::Value::Bool(is_running);
+                        println!("{}", serde_json::to_string_pretty(&obj).unwrap());
+                    } else {
+                        println!("ecotokens watch (background) status:");
+                        println!("  PID              : {}", state.pid);
+                        println!("  Watch path       : {}", state.watch_path);
+                        println!("  Index dir        : {}", state.index_dir);
+                        println!("  Started at       : {}", state.started_at);
+                        if let Some(ref log) = state.log_file {
+                            println!("  Log file         : {}", log);
+                        }
+                        println!("  Running          : {}", if is_running { "yes" } else { "no" });
+                    }
+                } else {
+                    eprintln!("ecotokens watch: no background process running");
+                    std::process::exit(1);
+                }
+                return;
+            }
+
+            // Si --background est demandé, daemoniser le processus
+            #[cfg(unix)]
+            if background {
+                // Préparer les chemins pour l'état
+                let cwd_temp = std::env::current_dir().expect("cannot get current dir");
+                let watch_path_temp = path.as_ref().unwrap_or(&cwd_temp);
+                let default_idx = default_index_dir();
+                let idx_dir_temp = index_dir.as_ref().unwrap_or(&default_idx);
+
+                // Afficher le message AVANT de daemoniser (pour que l'utilisateur le voie)
+                println!("ecotokens watch: starting in background");
+                println!("  Watch path: {}", watch_path_temp.display());
+                println!("Use 'ecotokens watch --status' to check status");
+                println!("Use 'ecotokens watch --stop' to stop");
+
+                // Daemoniser le processus sans redirection de logs
+                match daemonize::Daemonize::new().start() {
+                    Ok(_) => {
+                        // On est maintenant dans le processus enfant (daemon)
+                        // Enregistrer l'état
+                        let bg_state = config::BackgroundState::new(
+                            watch_path_temp,
+                            idx_dir_temp,
+                            None,
+                        );
+                        
+                        if let Err(_) = bg_state.save() {
+                            // Ignorer les erreurs de sauvegarde en mode background
+                        }
+                    }
+                    Err(e) => {
+                        // Le parent reste vivant en cas d'erreur
+                        eprintln!("Failed to daemonize: {}", e);
+                        std::process::exit(1);
+                    }
+                }
+            }
+
+            #[cfg(not(unix))]
+            if background {
+                eprintln!("Background mode is only supported on Unix systems");
+                std::process::exit(1);
+            }
+
             use std::sync::atomic::{AtomicUsize, Ordering};
             use std::sync::Arc;
 
@@ -788,7 +886,7 @@ fn main() {
             let watch_path = path.unwrap_or(cwd);
             let idx_dir = index_dir.unwrap_or_else(default_index_dir);
             let watch_path_str = watch_path.display().to_string();
-            let is_interactive = !daemon && std::io::IsTerminal::is_terminal(&std::io::stdout());
+            let is_interactive = !background && std::io::IsTerminal::is_terminal(&std::io::stdout());
 
             // Compter uniquement les fichiers réellement indexables pour une progression fidèle.
             let total_files = search::index::count_indexable_files(&watch_path);
@@ -868,6 +966,7 @@ fn main() {
                 let start = std::time::Instant::now();
                 let result = search::index::index_directory(opts);
                 let elapsed = start.elapsed().as_secs_f64();
+                
                 result.ok().map(|stats| tui::watch::IndexReport {
                     file_count: stats.file_count,
                     chunk_count: stats.chunk_count,
@@ -946,14 +1045,13 @@ fn main() {
                 let _ = disable_raw_mode();
                 let _ = std::io::stdout().execute(LeaveAlternateScreen);
             } else {
-                // Mode non-interactif : écrire les événements sur stdout
-                eprintln!(
-                    "ecotokens watch: surveillance de {} (Ctrl-C pour arrêter)",
-                    watch_path.display()
-                );
-                while let Ok(e) = event_rx.recv() {
-                    println!("[{}] {} {}", e.timestamp, e.path.display(), e.status);
+                // Mode background : ignorer les événements silencieusement
+                while let Ok(_e) = event_rx.recv() {
+                    // Événement reçu, aucune action
                 }
+
+                // Nettoyer l'état à l'arrêt
+                let _ = config::BackgroundState::remove();
             }
 
             let _ = stop_tx.send(());
