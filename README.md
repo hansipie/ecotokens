@@ -10,10 +10,11 @@ ecotokens works in two complementary modes:
 
 1. Runs the command and captures its output
 2. Applies a family-specific filter (git, cargo, python, …)
-3. Returns the compressed output to Claude
-4. Records the before/after token counts in a local metrics store
+3. Optionally summarizes large outputs via a local AI model (Ollama)
+4. Returns the compressed output to Claude
+5. Records the before/after token counts in a local metrics store
 
-**MCP server mode (Claude Code + GitHub Copilot in VS Code)** — exposes five tools the model can call directly: codebase search, symbol lookup, call graph tracing, and `ecotokens_run` (runs any shell command and returns token-optimized output).
+**MCP server mode (Claude Code + GitHub Copilot in VS Code)** — exposes tools the model can call directly: codebase search, symbol lookup, call graph tracing, and `ecotokens_run` (runs any shell command and returns token-optimized output).
 
 The result: the model sees clean, concise output — and you keep your context window.
 
@@ -36,13 +37,25 @@ cargo install --path .
 ecotokens install --target vscode
 ```
 
-This writes the MCP server entry into `~/.config/Code/User/settings.json`. Copilot in Agent mode will then have access to all five ecotokens tools.
+This writes the MCP server entry into `~/.config/Code/User/settings.json`. Copilot in Agent mode will then have access to all ecotokens tools.
 
 ### Both at once
 
 ```bash
 ecotokens install --target all --with-mcp
 ```
+
+### With AI summarization
+
+Enable AI-powered output compression via Ollama at install time:
+
+```bash
+ecotokens install --ai-summary                          # use default model (llama3.2:3b)
+ecotokens install --ai-summary-model qwen2.5:3b         # specify model (implies --ai-summary)
+ecotokens install --with-mcp --ai-summary-model llama3.2:3b  # combined
+```
+
+This writes `ai_summary_enabled` and `ai_summary_model` to `~/.config/ecotokens/config.json`. Ollama must be running and the model must be pulled (`ollama pull llama3.2:3b`).
 
 ### Uninstall
 
@@ -56,10 +69,11 @@ ecotokens uninstall --target all      # both
 
 | Command | Description |
 |---------|-------------|
-| `ecotokens gain` | Interactive TUI dashboard — savings by family or project |
-| `ecotokens gain --json` | JSON report |
 | `ecotokens install` | Install the PreToolUse hook in `~/.claude/settings.json` |
 | `ecotokens uninstall` | Remove the hook |
+| `ecotokens filter -- CMD [ARGS]` | Run a command, filter its output, record metrics |
+| `ecotokens gain` | Interactive TUI dashboard — savings by family or project |
+| `ecotokens gain --json` | JSON report |
 | `ecotokens config` | Show current configuration |
 | `ecotokens index [--path DIR]` | Index a codebase for BM25 + symbolic search |
 | `ecotokens search QUERY` | Search the indexed codebase |
@@ -74,6 +88,8 @@ ecotokens uninstall --target all      # both
 
 ```
 ecotokens gain
+ecotokens gain --period 7d
+ecotokens gain --period today --model claude-sonnet-4-5
 ```
 
 Interactive TUI showing token savings per command family and per project, with a 14-day sparkline.
@@ -87,6 +103,52 @@ Interactive TUI showing token savings per command family and per project, with a
 | `d` | Cycle detail mode (split / diff / log) — family view only |
 | `s` | Cycle sparkline scale (linear / log / capped) |
 | `q` / `Esc` | Quit |
+
+## Filter command
+
+`ecotokens filter` runs a command directly and returns its filtered output. Useful for testing filters or wrapping commands in scripts:
+
+```bash
+ecotokens filter -- cargo test
+ecotokens filter --debug -- git log --oneline -50
+```
+
+The output is compressed by the same family-specific filters used by the hook, and token savings are recorded in the metrics store.
+
+## Watch command
+
+`ecotokens watch` monitors a directory and automatically re-indexes files as they change.
+
+```bash
+ecotokens watch                    # foreground, TUI progress
+ecotokens watch --path ./src       # watch a specific directory
+ecotokens watch --background       # fork to background, log to stdout
+ecotokens watch --status           # show status of background process
+ecotokens watch --status --json    # JSON status output
+ecotokens watch --stop             # stop the background process
+```
+
+## Configuration
+
+```bash
+ecotokens config           # show all settings (text)
+ecotokens config --json    # show all settings (JSON)
+```
+
+Output includes:
+
+```
+hook_installed        : true
+mcp_registered        : true
+vscode_mcp_registered : false
+debug                 : false
+threshold_lines       : 500
+threshold_bytes       : 51200
+exclusions            : []
+embed_provider        : ollama (http://localhost:11434)
+ai_summary_enabled    : false
+ai_summary_model      : llama3.2:3b (default)
+```
 
 ## Supported command families
 
@@ -103,13 +165,16 @@ Interactive TUI showing token savings per command family and per project, with a
 
 ## MCP server
 
-When registered (via `--with-mcp` for Claude Code, or `--target vscode` for Copilot), ecotokens exposes five tools:
+When registered (via `--with-mcp` for Claude Code, or `--target vscode` for Copilot), ecotokens exposes these tools:
 
-- **`ecotokens_search`** — semantic search over the indexed codebase
-- **`ecotokens_outline`** — list symbols in a file or directory
-- **`ecotokens_symbol`** — retrieve a symbol's source by stable ID
-- **`ecotokens_trace_callers`** / **`ecotokens_trace_callees`** — call graph tracing
-- **`ecotokens_run`** — execute a shell command and return token-optimized output (filters noise, records savings)
+| Tool | Description |
+|------|-------------|
+| `ecotokens_search` | Semantic + BM25 search over the indexed codebase |
+| `ecotokens_outline` | List symbols in a file or directory |
+| `ecotokens_symbol` | Retrieve a symbol's source by stable ID |
+| `ecotokens_trace_callers` | Find callers of a symbol (call graph) |
+| `ecotokens_trace_callees` | Find callees of a symbol (call graph) |
+| `ecotokens_run` | Execute a shell command and return token-optimized output |
 
 ## Embeddings (optional)
 
@@ -126,10 +191,32 @@ ecotokens config --embed-provider lmstudio --embed-url http://localhost:1234
 ecotokens config --embed-provider none
 ```
 
+## AI summarization (optional)
+
+When enabled, large command outputs (> ~2500 tokens) are summarized by a local Ollama model instead of being truncated. Falls back to generic filtering if Ollama is unavailable or times out.
+
+Enable via install:
+
+```bash
+ecotokens install --ai-summary-model llama3.2:3b
+```
+
+Or update the config file directly (`~/.config/ecotokens/config.json`):
+
+```json
+{
+  "ai_summary_enabled": true,
+  "ai_summary_model": "llama3.2:3b"
+}
+```
+
+Ollama must be running locally. The model is called with a 3-second timeout to avoid blocking the model.
+
 ## Requirements
 
 - Rust ≥ 1.75 (stable)
 - Claude Code with hook support, and/or VS Code ≥ 1.99 with GitHub Copilot
+- Ollama (optional, for semantic search embeddings and AI summarization)
 
 ## License
 
