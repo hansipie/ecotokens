@@ -13,7 +13,7 @@ pub enum EmbedProvider {
 
 impl Default for EmbedProvider {
     fn default() -> Self {
-        EmbedProvider::Ollama { url: "http://localhost:11434".into() }
+        EmbedProvider::None
     }
 }
 
@@ -73,12 +73,23 @@ pub struct Settings {
     pub ai_summary_enabled: bool,
     #[serde(default)]
     pub ai_summary_model: Option<String>,
+    /// Ollama base URL for AI summary (defaults to "http://localhost:11434")
+    #[serde(default)]
+    pub ai_summary_url: Option<String>,
+    /// Minimum token count to trigger AI summarization (default: 2500)
+    #[serde(default = "default_ai_summary_min_tokens")]
+    pub ai_summary_min_tokens: u32,
+    /// Timeout in milliseconds for Ollama API calls (default: 3000)
+    #[serde(default = "default_ai_summary_timeout_ms")]
+    pub ai_summary_timeout_ms: u64,
 }
 
 fn default_threshold_lines() -> u32 { 500 }
 fn default_threshold_bytes() -> u32 { 51200 }
 fn default_true() -> bool { true }
 fn default_model() -> String { "claude-sonnet-4-6".into() }
+fn default_ai_summary_min_tokens() -> u32 { 2500 }
+fn default_ai_summary_timeout_ms() -> u64 { 3000 }
 
 impl Default for Settings {
     fn default() -> Self {
@@ -91,9 +102,12 @@ impl Default for Settings {
             debug: false,
             default_model: "claude-sonnet-4-6".into(),
             model_pricing: default_model_pricing(),
-            embed_provider: EmbedProvider::default(),
+            embed_provider: EmbedProvider::None,
             ai_summary_enabled: false,
             ai_summary_model: None,
+            ai_summary_url: None,
+            ai_summary_min_tokens: 2500,
+            ai_summary_timeout_ms: 3000,
         }
     }
 }

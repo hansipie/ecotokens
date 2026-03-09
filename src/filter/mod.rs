@@ -130,13 +130,10 @@ pub fn run_filter_pipeline_with_cwd(
     let settings = crate::config::Settings::load();
     let (masked, redacted) = crate::masking::mask(raw);
     let mut filtered = apply_filter(command, &masked);
-    if filtered == masked {
-        filtered = ai_summary::ai_summary_or_fallback(&masked, &settings);
-    }
 
     let masked_tokens = crate::tokens::estimate_tokens(&masked) as u32;
     let filtered_tokens = crate::tokens::estimate_tokens(&filtered) as u32;
-    if masked_tokens > 0 && filtered_tokens >= masked_tokens {
+    if filtered == masked || (masked_tokens > 0 && filtered_tokens >= masked_tokens) {
         filtered = ai_summary::ai_summary_or_fallback(&masked, &settings);
     }
 

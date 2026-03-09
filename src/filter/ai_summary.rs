@@ -5,31 +5,23 @@ use crate::filter::generic;
 #[cfg(feature = "ai-summary")]
 use std::time::Duration;
 
-/// Minimum tokens to trigger AI summarization (avoid overhead for small outputs).
-const MIN_TOKENS_FOR_AI: u32 = 2500;
-
-/// Timeout for Ollama API call (fail fast to avoid blocking Claude).
-const OLLAMA_TIMEOUT_MS: u64 = 3000;
+const DEFAULT_OLLAMA_URL: &str = "http://localhost:11434";
 
 #[cfg(feature = "ai-summary")]
 /// Attempt AI-powered summarization via Ollama. Falls back to generic filter on error.
 pub fn try_ai_summary(output: &str, settings: &Settings) -> Result<String, String> {
-    // Guard: only summarize large outputs where AI is worth the cost
-    let tokens = crate::tokens::estimate_tokens(output) as u32;
-    if tokens < MIN_TOKENS_FOR_AI {
-        return Err("Output too small for AI summary".into());
-    }
-
     // Guard: check if AI summary is enabled in config
     if !settings.ai_summary_enabled {
         return Err("AI summary disabled in config".into());
     }
 
-    // Extract Ollama URL from settings
-    let ollama_url = match &settings.embed_provider {
-        crate::config::settings::EmbedProvider::Ollama { url } => url.clone(),
-        _ => return Err("Ollama not configured".into()),
-    };
+    // Guard: only summarize large outputs where AI is worth the cost
+    let tokens = crate::tokens::estimate_tokens(output) as u32;
+    if tokens < settings.ai_summary_min_tokens {
+        return Err(format!("Output too small for AI summary ({} < {} tokens)", tokens, settings.ai_summary_min_tokens));
+    }
+
+    let ollama_url = settings.ai_summary_url.as_deref().unwrap_or(DEFAULT_OLLAMA_URL);
 
     // Prepare prompt
     let prompt = format!(
@@ -39,7 +31,7 @@ pub fn try_ai_summary(output: &str, settings: &Settings) -> Result<String, Strin
 
     // Call Ollama API
     let client = reqwest::blocking::Client::builder()
-        .timeout(Duration::from_millis(OLLAMA_TIMEOUT_MS))
+        .timeout(Duration::from_millis(settings.ai_summary_timeout_ms))
         .build()
         .map_err(|e| format!("Failed to build HTTP client: {}", e))?;
 
@@ -54,7 +46,7 @@ pub fn try_ai_summary(output: &str, settings: &Settings) -> Result<String, Strin
     });
 
     let response = client
-        .post(format!("{}/api/generate", ollama_url))
+        .post(format!("{}/api/generate", ollama_url.trim_end_matches('/')))
         .json(&payload)
         .send()
         .map_err(|e| format!("Ollama request failed: {}", e))?;

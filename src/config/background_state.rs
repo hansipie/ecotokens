@@ -2,23 +2,23 @@ use serde::{Deserialize, Serialize};
 use std::fs;
 use std::path::{Path, PathBuf};
 
-/// Représente l'état persisté d'une instance watch en mode background
+/// Persisted state for a background watch process.
 #[derive(Debug, Clone, Serialize, Deserialize)]
 pub struct BackgroundState {
-    /// PID du processus watch
+    /// PID of the watch process
     pub pid: u32,
-    /// Répertoire surveillé
+    /// Directory being watched
     pub watch_path: String,
-    /// Répertoire de l'index
+    /// Index directory
     pub index_dir: String,
-    /// Timestamp de démarrage (ISO 8601)
+    /// Start timestamp (ISO 8601)
     pub started_at: String,
-    /// Chemin du fichier log (optionnel)
+    /// Path to the log file (optional)
     pub log_file: Option<String>,
 }
 
 impl BackgroundState {
-    /// Crée un nouvel état background
+    /// Create a new background state for the current process.
     pub fn new(
         watch_path: impl AsRef<Path>,
         index_dir: impl AsRef<Path>,
@@ -33,7 +33,7 @@ impl BackgroundState {
         }
     }
 
-    /// Sauvegarde l'état dans `~/.config/ecotokens/watch-bg.json`
+    /// Persist state to `~/.config/ecotokens/watch-bg.json`.
     pub fn save(&self) -> std::io::Result<PathBuf> {
         let config_dir = dirs::config_dir()
             .unwrap_or_else(|| PathBuf::from("."))
@@ -47,7 +47,7 @@ impl BackgroundState {
         Ok(state_file)
     }
 
-    /// Charge l'état depuis `~/.config/ecotokens/watch-bg.json`
+    /// Load state from `~/.config/ecotokens/watch-bg.json`.
     pub fn load() -> Option<Self> {
         let config_dir = dirs::config_dir()?;
         let state_file = config_dir.join("ecotokens").join("watch-bg.json");
@@ -55,7 +55,7 @@ impl BackgroundState {
         serde_json::from_str(&content).ok()
     }
 
-    /// Supprime le fichier d'état background
+    /// Remove the background state file.
     pub fn remove() -> std::io::Result<()> {
         let config_dir = dirs::config_dir()
             .unwrap_or_else(|| PathBuf::from("."))
@@ -67,21 +67,19 @@ impl BackgroundState {
         Ok(())
     }
 
-    /// Vérifie si le processus est toujours en cours d'exécution
+    /// Returns true if the process is still running.
     pub fn is_running(&self) -> bool {
-        // Vérifier si le PID existe dans /proc (Unix-like)
         #[cfg(unix)]
         {
             Path::new(&format!("/proc/{}", self.pid)).exists()
         }
         #[cfg(not(unix))]
         {
-            // Sur Windows, c'est moins simple, on retourne true par défaut
             true
         }
     }
 
-    /// Arrête le processus background et nettoie le fichier d'état
+    /// Send SIGTERM to the background process and clean up state.
     pub fn stop(&self) -> std::io::Result<()> {
         if !self.is_running() {
             return Err(std::io::Error::new(
@@ -92,7 +90,6 @@ impl BackgroundState {
 
         #[cfg(unix)]
         {
-            // Envoyer SIGTERM au processus
             let status = std::process::Command::new("kill")
                 .arg("-TERM")
                 .arg(self.pid.to_string())
@@ -108,7 +105,6 @@ impl BackgroundState {
 
         #[cfg(not(unix))]
         {
-            // Sur Windows, utiliser taskkill
             let status = std::process::Command::new("taskkill")
                 .arg("/PID")
                 .arg(self.pid.to_string())
@@ -123,12 +119,8 @@ impl BackgroundState {
             }
         }
 
-        // Attendre un peu pour que le processus se termine
         std::thread::sleep(std::time::Duration::from_millis(500));
-
-        // Nettoyer le fichier d'état
         Self::remove()?;
-
         Ok(())
     }
 }

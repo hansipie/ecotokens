@@ -518,6 +518,9 @@ fn main() {
                 println!("embed_provider        : {}", provider_str);
                 println!("ai_summary_enabled    : {}", settings.ai_summary_enabled);
                 println!("ai_summary_model      : {}", settings.ai_summary_model.as_deref().unwrap_or("llama3.2:3b (default)"));
+                println!("ai_summary_url        : {}", settings.ai_summary_url.as_deref().unwrap_or("http://localhost:11434 (default)"));
+                println!("ai_summary_min_tokens : {}", settings.ai_summary_min_tokens);
+                println!("ai_summary_timeout_ms : {}", settings.ai_summary_timeout_ms);
             }
         }
 
@@ -812,7 +815,7 @@ fn main() {
         }
 
         Commands::Watch { path, index_dir, background, status, stop, json } => {
-            // Si --stop est demandé, arrêter le processus et terminer
+            // If --stop is requested, stop the background process and exit.
             if stop {
                 if let Some(state) = config::BackgroundState::load() {
                     match state.stop() {
@@ -831,7 +834,7 @@ fn main() {
                 return;
             }
 
-            // Si --status est demandé, afficher l'état et terminer
+            // If --status is requested, show status and exit.
             if status {
                 if let Some(state) = config::BackgroundState::load() {
                     let is_running = state.is_running();
@@ -857,38 +860,38 @@ fn main() {
                 return;
             }
 
-            // Si --background est demandé, daemoniser le processus
+            // If --background is requested, daemonize the process.
             #[cfg(unix)]
             if background {
-                // Préparer les chemins pour l'état
                 let cwd_temp = std::env::current_dir().expect("cannot get current dir");
                 let watch_path_temp = path.as_ref().unwrap_or(&cwd_temp);
                 let default_idx = default_index_dir();
                 let idx_dir_temp = index_dir.as_ref().unwrap_or(&default_idx);
 
-                // Afficher le message AVANT de daemoniser (pour que l'utilisateur le voie)
+                let log_path = dirs::config_dir()
+                    .unwrap_or_else(|| std::path::PathBuf::from("."))
+                    .join("ecotokens")
+                    .join("watch.log");
+                let log_path_str = log_path.to_string_lossy().to_string();
+
+                // Print before daemonizing so the user sees it in the terminal.
                 println!("ecotokens watch: starting in background");
                 println!("  Watch path: {}", watch_path_temp.display());
+                println!("  Log file  : {}", log_path_str);
                 println!("Use 'ecotokens watch --status' to check status");
                 println!("Use 'ecotokens watch --stop' to stop");
 
-                // Daemoniser le processus sans redirection de logs
                 match daemonize::Daemonize::new().start() {
                     Ok(_) => {
-                        // On est maintenant dans le processus enfant (daemon)
-                        // Enregistrer l'état
+                        // We are now in the daemon child process.
                         let bg_state = config::BackgroundState::new(
                             watch_path_temp,
                             idx_dir_temp,
-                            None,
+                            Some(log_path_str),
                         );
-                        
-                        if let Err(_) = bg_state.save() {
-                            // Ignorer les erreurs de sauvegarde en mode background
-                        }
+                        let _ = bg_state.save();
                     }
                     Err(e) => {
-                        // Le parent reste vivant en cas d'erreur
                         eprintln!("Failed to daemonize: {}", e);
                         std::process::exit(1);
                     }
@@ -973,18 +976,15 @@ fn main() {
                 };
 
                 let elapsed = start.elapsed().as_secs_f64();
-                // On reste dans l'écran alternatif pour la phase de surveillance
+                // Stay in the alternate screen for the watch phase.
                 index_result.ok().map(|stats| tui::watch::IndexReport {
                     file_count: stats.file_count,
                     chunk_count: stats.chunk_count,
                     elapsed_secs: elapsed,
                 })
             } else {
-                // Mode non-interactif : indexation bloquante sur stderr
-                eprintln!(
-                    "ecotokens watch: indexation préalable de {} fichiers…",
-                    total_files
-                );
+                // Non-interactive mode: blocking initial index.
+                eprintln!("ecotokens watch: initial indexing of {} files…", total_files);
                 let start = std::time::Instant::now();
                 let result = search::index::index_directory(opts);
                 let elapsed = start.elapsed().as_secs_f64();
@@ -1067,12 +1067,23 @@ fn main() {
                 let _ = disable_raw_mode();
                 let _ = std::io::stdout().execute(LeaveAlternateScreen);
             } else {
-                // Mode background : ignorer les événements silencieusement
-                while let Ok(_e) = event_rx.recv() {
-                    // Événement reçu, aucune action
+                // Background mode: log events to the watch.log file.
+                let log_file = config::BackgroundState::load()
+                    .and_then(|s| s.log_file)
+                    .map(std::path::PathBuf::from);
+
+                while let Ok(e) = event_rx.recv() {
+                    if let Some(ref path) = log_file {
+                        let line = format!("[{}] {} {}\n", e.timestamp, e.path.display(), e.status);
+                        let _ = std::fs::OpenOptions::new()
+                            .create(true)
+                            .append(true)
+                            .open(path)
+                            .and_then(|mut f| std::io::Write::write_all(&mut f, line.as_bytes()));
+                    }
                 }
 
-                // Nettoyer l'état à l'arrêt
+                // Clean up state on exit.
                 let _ = config::BackgroundState::remove();
             }
 
