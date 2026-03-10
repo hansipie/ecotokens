@@ -28,12 +28,10 @@ fn filter_container_ps(output: &str) -> String {
     // docker/podman ps columns: CONTAINER_ID, IMAGE, COMMAND, CREATED, STATUS, PORTS, NAMES
     // We keep ID, Name, Status, Image, Ports in compact form
     let mut result = Vec::new();
-    let mut headers: Vec<String> = Vec::new();
 
     for (i, line) in lines.iter().enumerate() {
         if i == 0 {
-            // Header line — detect column positions
-            headers = line.split_whitespace().map(|s| s.to_uppercase()).collect();
+            // Header line — emit compact header
             result.push(format!(
                 "{:<15} {:<30} {:<20} {:<15}",
                 "ID", "NAME", "STATUS", "IMAGE"
@@ -74,9 +72,6 @@ fn filter_container_ps(output: &str) -> String {
             result.push(line.to_string());
         }
     }
-
-    // Suppress unused variable warning
-    let _ = headers;
 
     result.join("\n")
 }
@@ -129,10 +124,9 @@ fn filter_kubectl_get(output: &str) -> String {
     // Keep header + all lines, but limit to 100 entries
     const MAX_ROWS: usize = 100;
     if lines.len() > MAX_ROWS + 1 {
-        let mut result: Vec<&str> = lines.iter().take(MAX_ROWS + 1).copied().collect();
+        let mut result: Vec<String> = lines.iter().take(MAX_ROWS + 1).map(|s| s.to_string()).collect();
         let omitted = lines.len() - MAX_ROWS - 1;
-        let summary = format!("[ecotokens] ... {} more rows omitted ...", omitted);
-        result.push(Box::leak(summary.into_boxed_str()));
+        result.push(format!("[ecotokens] ... {} more rows omitted ...", omitted));
         result.join("\n")
     } else {
         output.to_string()

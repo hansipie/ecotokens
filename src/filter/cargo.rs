@@ -153,11 +153,11 @@ fn filter_cargo_clippy(output: &str) -> String {
         return output.to_string();
     }
 
-    let mut result = Vec::new();
+    let mut result: Vec<String> = Vec::new();
 
     // Include errors first
     if !errors.is_empty() {
-        result.extend(errors);
+        result.extend(errors.iter().map(|s| s.to_string()));
     }
 
     // Summarize warnings grouped by file
@@ -166,22 +166,18 @@ fn filter_cargo_clippy(output: &str) -> String {
         sorted_files.sort();
         for file in sorted_files {
             let count = file_warnings[&file].len();
-            result.push(Box::leak(
-                format!("[ecotokens] {} warnings in {}", count, file).into_boxed_str(),
-            ) as &str);
+            result.push(format!("[ecotokens] {} warnings in {}", count, file));
             // Show first warning per file as example
             if let Some(first) = file_warnings[&file].first() {
                 for warn_line in first.lines().take(3) {
-                    result.push(Box::leak(warn_line.to_string().into_boxed_str()) as &str);
+                    result.push(warn_line.to_string());
                 }
             }
         }
-        result.push(Box::leak(
-            format!("[ecotokens] {} total warnings", total_warnings).into_boxed_str(),
-        ) as &str);
+        result.push(format!("[ecotokens] {} total warnings", total_warnings));
     }
 
-    result.extend(finish_lines);
+    result.extend(finish_lines.iter().map(|s| s.to_string()));
     result.join("\n")
 }
 

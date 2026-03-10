@@ -76,6 +76,10 @@ fn truncate_line(s: &str) -> String {
     if s.len() <= MAX_LINE_LEN {
         s.to_string()
     } else {
-        format!("{}…", &s[..MAX_LINE_LEN])
+        let mut i = MAX_LINE_LEN;
+        while i > 0 && !s.is_char_boundary(i) {
+            i -= 1;
+        }
+        format!("{}…", &s[..i])
     }
 }

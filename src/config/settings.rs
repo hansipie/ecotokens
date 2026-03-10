@@ -2,19 +2,14 @@ use serde::{Deserialize, Serialize};
 use std::collections::HashMap;
 use std::path::PathBuf;
 
-#[derive(Debug, Clone, Serialize, Deserialize, PartialEq)]
+#[derive(Debug, Clone, Default, Serialize, Deserialize, PartialEq)]
 #[serde(rename_all = "snake_case")]
 pub enum EmbedProvider {
+    #[default]
     None,
     #[serde(alias = "ollama")]
     Ollama { url: String },
     LmStudio { url: String },
-}
-
-impl Default for EmbedProvider {
-    fn default() -> Self {
-        EmbedProvider::None
-    }
 }
 
 #[derive(Debug, Clone, Serialize, Deserialize)]

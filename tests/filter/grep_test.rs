@@ -55,3 +55,19 @@ fn grep_counts_files() {
     let out = filter_grep(&input);
     assert!(out.contains("35 files") || out.contains("35 matches"), "should count matches");
 }
+
+#[test]
+fn grep_truncate_line_does_not_split_utf8_codepoint() {
+    // Build a line where the 120-byte boundary falls in the middle of a multi-byte char.
+    // Fill 119 ASCII bytes then append "é" (2 bytes), so truncation at 120 would split it.
+    let prefix = "a".repeat(119);
+    let line = format!("{prefix}éé_more_text");
+    // Wrap in enough lines to trigger filtering (> PASSTHROUGH_THRESHOLD = 30)
+    let mut input = String::new();
+    for i in 1..=31 {
+        input.push_str(&format!("src/f.rs:{i}:{line}\n"));
+    }
+    // Must not panic
+    let out = filter_grep(&input);
+    assert!(!out.is_empty(), "output should not be empty");
+}

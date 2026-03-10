@@ -37,3 +37,15 @@ fn aws_short_json_passes_through() {
     let out = filter_aws(input);
     assert!(out.contains("ok"), "short JSON should be kept");
 }
+
+#[test]
+fn aws_truncation_does_not_split_utf8_codepoint() {
+    // MAX_JSON_BYTES = 51200. compact = `{"k":"<filler>éé"}`.
+    // With filler of 51193 'a' chars the compact length is 6+51193+4+2 = 51205 bytes.
+    // Byte 51200 falls inside the first "é" (a 2-byte codepoint starting at 51199) —
+    // a naive &compact[..51200] would panic; floor_char_boundary must prevent that.
+    let filler = "a".repeat(51193);
+    let input = format!("{{\"k\":\"{filler}éé\"}}");
+    let out = filter_aws(&input);
+    assert!(out.contains("…[truncated]"), "long JSON should be truncated");
+}

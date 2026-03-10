@@ -9,7 +9,13 @@ const VSCODE_MCP_KEY: &str = "ecotokens";
 fn read_settings(path: &Path) -> serde_json::Value {
     if path.exists() {
         let s = std::fs::read_to_string(path).unwrap_or_default();
-        serde_json::from_str(&s).unwrap_or(serde_json::json!({}))
+        match serde_json::from_str(&s) {
+            Ok(v) => v,
+            Err(e) => {
+                eprintln!("ecotokens: warning: {} contains invalid JSON, ignoring: {}", path.display(), e);
+                serde_json::json!({})
+            }
+        }
     } else {
         serde_json::json!({})
     }

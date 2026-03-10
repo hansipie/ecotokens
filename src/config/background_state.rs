@@ -69,11 +69,11 @@ impl BackgroundState {
 
     /// Returns true if the process is still running.
     pub fn is_running(&self) -> bool {
-        #[cfg(unix)]
+        #[cfg(target_os = "linux")]
         {
             Path::new(&format!("/proc/{}", self.pid)).exists()
         }
-        #[cfg(not(unix))]
+        #[cfg(not(target_os = "linux"))]
         {
             true
         }
@@ -96,8 +96,7 @@ impl BackgroundState {
                 .status()?;
 
             if !status.success() {
-                return Err(std::io::Error::new(
-                    std::io::ErrorKind::Other,
+                return Err(std::io::Error::other(
                     format!("Failed to stop process {}", self.pid),
                 ));
             }
@@ -112,8 +111,7 @@ impl BackgroundState {
                 .status()?;
 
             if !status.success() {
-                return Err(std::io::Error::new(
-                    std::io::ErrorKind::Other,
+                return Err(std::io::Error::other(
                     format!("Failed to stop process {}", self.pid),
                 ));
             }

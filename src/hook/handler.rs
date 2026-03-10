@@ -72,5 +72,8 @@ pub fn handle() {
         }
     };
 
-    println!("{}", serde_json::to_string(&response).unwrap());
+    match serde_json::to_string(&response) {
+        Ok(s) => println!("{s}"),
+        Err(e) => eprintln!("ecotokens hook: failed to serialize response: {e}"),
+    }
 }
