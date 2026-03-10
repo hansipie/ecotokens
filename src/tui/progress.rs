@@ -12,13 +12,13 @@ pub fn render_progress(frame: &mut Frame, area: Rect, done: u64, total: u64, lab
     } else {
         (done as f64 / total as f64).clamp(0.0, 1.0)
     };
-    let pct = (ratio * 100.0).round() as u16;
+    let pct = ratio * 100.0;
 
     let gauge = Gauge::default()
         .block(Block::default().borders(Borders::ALL).title(label))
         .gauge_style(Style::default().fg(Color::Green))
-        .percent(pct)
-        .label(Span::raw(format!("{pct}%")));
+        .ratio(ratio)
+        .label(Span::raw(format!("{pct:.1}%")));
 
     frame.render_widget(gauge, area);
 }

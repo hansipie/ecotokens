@@ -94,6 +94,10 @@ pub fn index_directory(opts: IndexOptions) -> tantivy::Result<IndexStats> {
             continue;
         }
 
+        if let Some(p) = &opts.progress {
+            p.fetch_add(1, Ordering::Relaxed);
+        }
+
         let content = match std::fs::read_to_string(path) {
             Ok(c) => c,
             Err(_) => continue,
@@ -148,9 +152,6 @@ pub fn index_directory(opts: IndexOptions) -> tantivy::Result<IndexStats> {
         }
 
         file_count += 1;
-        if let Some(p) = &opts.progress {
-            p.fetch_add(1, Ordering::Relaxed);
-        }
     }
 
     writer.commit()?;
@@ -186,6 +187,17 @@ pub fn count_indexable_files(path: &Path) -> u64 {
 fn is_indexable_extension(ext: &str) -> bool {
     matches!(
         ext,
-        "rs" | "py" | "js" | "ts" | "md" | "toml" | "json" | "yaml" | "yml" | "txt"
+        "rs"
+            | "py"
+            | "js"
+            | "ts"
+            | "jsx"
+            | "tsx"
+            | "md"
+            | "toml"
+            | "json"
+            | "yaml"
+            | "yml"
+            | "txt"
     )
 }
