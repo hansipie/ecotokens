@@ -746,7 +746,12 @@ fn cmd_index(path: Option<PathBuf>, index_dir: Option<PathBuf>, reset: bool) {
     let target = path.unwrap_or(cwd);
     let idx_dir = index_dir.unwrap_or_else(default_index_dir);
 
-    if std::io::IsTerminal::is_terminal(&std::io::stderr()) {
+    let is_stderr_tty = std::io::IsTerminal::is_terminal(&std::io::stderr());
+    let is_stdin_tty = std::io::IsTerminal::is_terminal(&std::io::stdin());
+    let is_dumb = std::env::var("TERM").map(|v| v == "dumb").unwrap_or(false);
+    let is_automated = std::env::var("CI").is_ok() || std::env::var("ECOTOKENS_BATCH").is_ok();
+
+    if is_stderr_tty && is_stdin_tty && !is_dumb && !is_automated {
         use std::sync::atomic::{AtomicUsize, Ordering};
         use std::sync::Arc;
 
@@ -809,14 +814,6 @@ fn cmd_index(path: Option<PathBuf>, index_dir: Option<PathBuf>, reset: bool) {
                 });
             }
             let result = handle.join().expect("indexing thread panicked");
-            // Wait for q/Esc/Ctrl-C before closing
-            loop {
-                if let Ok(Event::Key(key)) = read() {
-                    if is_quit_key(&key) {
-                        break;
-                    }
-                }
-            }
             result
         };
 
