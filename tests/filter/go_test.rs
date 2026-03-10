@@ -18,7 +18,10 @@ FAIL\tgithub.com/example/pkg\t0.001s
 ";
     let out = filter_go("go test ./...", input);
     assert!(out.contains("FAIL: TestFoo"), "failed test should be kept");
-    assert!(out.contains("foo_test.go:10"), "failure context should be kept");
+    assert!(
+        out.contains("foo_test.go:10"),
+        "failure context should be kept"
+    );
     assert!(out.contains("✓"), "summary should show pass count");
     assert!(out.contains("✗"), "summary should show fail count");
 }
@@ -48,7 +51,10 @@ fn go_build_keeps_errors() {
 fn go_build_short_passes_through() {
     let input = "# github.com/example/pkg\n./main.go:5:1: syntax error\n";
     let out = filter_go("go build ./...", input);
-    assert!(out.contains("syntax error"), "short build error should be kept");
+    assert!(
+        out.contains("syntax error"),
+        "short build error should be kept"
+    );
 }
 
 #[test]
@@ -70,7 +76,10 @@ fn go_other_commands_use_generic() {
 fn golangci_lint_short_passes_through() {
     let input = "src/main.go:10:5: exported function Foo should have comment (golint)\n";
     let out = filter_go("golangci-lint run", input);
-    assert!(out.contains("Foo"), "short golangci-lint output should pass through");
+    assert!(
+        out.contains("Foo"),
+        "short golangci-lint output should pass through"
+    );
 }
 
 #[test]
@@ -102,5 +111,8 @@ fn golangci_lint_deduplicates_messages() {
     }
     let out = filter_go("golangci-lint run", &input);
     // The same message repeated 35 times should be deduplicated
-    assert!(out.contains("35x") || out.contains("(35x)"), "repeated messages should show count");
+    assert!(
+        out.contains("35x") || out.contains("(35x)"),
+        "repeated messages should show count"
+    );
 }

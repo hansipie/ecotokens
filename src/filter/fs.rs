@@ -89,10 +89,7 @@ fn filter_ls(output: &str) -> String {
         if result.is_empty() {
             format!("[ecotokens] {} noisy entries excluded", removed)
         } else {
-            format!(
-                "{}\n[ecotokens] {} noisy entries excluded",
-                result, removed
-            )
+            format!("{}\n[ecotokens] {} noisy entries excluded", result, removed)
         }
     } else if lines.len() > FS_LINE_THRESHOLD as usize {
         filter_generic(output, FS_LINE_THRESHOLD, 51200)
@@ -127,7 +124,11 @@ fn filter_find(output: &str) -> String {
         .collect();
 
     let noisy_removed = lines.len() - filtered.len();
-    let source = if filtered.len() < lines.len() { &filtered[..] } else { &lines[..] };
+    let source = if filtered.len() < lines.len() {
+        &filtered[..]
+    } else {
+        &lines[..]
+    };
 
     // Group by parent directory to reduce repetition
     let grouped = group_by_directory(source);
@@ -218,7 +219,11 @@ pub fn filter_tree(output: &str) -> String {
     }
 
     let head: Vec<&str> = filtered.iter().take(MAX_TREE_LINES).copied().collect();
-    format!("{}\n... +{} more lines", head.join("\n"), total - MAX_TREE_LINES)
+    format!(
+        "{}\n... +{} more lines",
+        head.join("\n"),
+        total - MAX_TREE_LINES
+    )
 }
 
 /// Filter `diff` output: keep only changed lines (+/-/@@/---/+++), limit to 200.
@@ -231,11 +236,7 @@ pub fn filter_diff(output: &str) -> String {
     let significant: Vec<&str> = lines
         .iter()
         .copied()
-        .filter(|l| {
-            l.starts_with('+')
-                || l.starts_with('-')
-                || l.starts_with("@@")
-        })
+        .filter(|l| l.starts_with('+') || l.starts_with('-') || l.starts_with("@@"))
         .collect();
 
     const MAX_DIFF_LINES: usize = 200;

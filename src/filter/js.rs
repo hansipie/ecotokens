@@ -114,10 +114,18 @@ fn filter_tsc(output: &str) -> String {
                 }
             })
             .collect();
-        result.push(format!("[{}] {} errors: {}", file, count, codes_str.join(", ")));
+        result.push(format!(
+            "[{}] {} errors: {}",
+            file,
+            count,
+            codes_str.join(", ")
+        ));
     }
 
-    result.push(format!("[ecotokens] {} total TypeScript errors", total_errors));
+    result.push(format!(
+        "[ecotokens] {} total TypeScript errors",
+        total_errors
+    ));
     result.join("\n")
 }
 
@@ -163,10 +171,7 @@ fn filter_vitest(output: &str) -> String {
     }
 
     let mut result = failures.join("\n");
-    result.push_str(&format!(
-        "\n✓ {} | ✗ {} | ⊘ {}",
-        passed, failed, skipped
-    ));
+    result.push_str(&format!("\n✓ {} | ✗ {} | ⊘ {}", passed, failed, skipped));
     result
 }
 

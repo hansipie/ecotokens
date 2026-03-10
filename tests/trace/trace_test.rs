@@ -1,6 +1,6 @@
 use ecotokens::search::index::{index_directory, IndexOptions};
-use ecotokens::trace::callers::find_callers;
 use ecotokens::trace::callees::find_callees;
+use ecotokens::trace::callers::find_callers;
 use std::fs;
 use tempfile::TempDir;
 

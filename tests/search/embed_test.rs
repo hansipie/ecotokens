@@ -1,5 +1,7 @@
 use ecotokens::config::settings::EmbedProvider;
-use ecotokens::search::embed::{cosine_similarity, embed_text, get_lmstudio_embedding, get_ollama_embedding};
+use ecotokens::search::embed::{
+    cosine_similarity, embed_text, get_lmstudio_embedding, get_ollama_embedding,
+};
 
 // ── Tests provider None ────────────────────────────────────────────────────────
 
@@ -28,7 +30,10 @@ fn test_ollama_provider_unavailable_falls_back_to_none() {
         url: "http://127.0.0.1:1".into(),
     };
     let result = embed_text("hello", &provider);
-    assert!(result.is_none(), "provider indisponible doit retourner None (fallback BM25)");
+    assert!(
+        result.is_none(),
+        "provider indisponible doit retourner None (fallback BM25)"
+    );
 }
 
 /// URL avec schéma incorrect → erreur claire.
@@ -56,7 +61,10 @@ fn test_lmstudio_provider_unavailable_falls_back_to_none() {
         url: "http://127.0.0.1:1".into(),
     };
     let result = embed_text("hello", &provider);
-    assert!(result.is_none(), "provider indisponible doit retourner None (fallback BM25)");
+    assert!(
+        result.is_none(),
+        "provider indisponible doit retourner None (fallback BM25)"
+    );
 }
 
 /// LM Studio utilise le format OpenAI-compatible (/v1/embeddings).
@@ -67,7 +75,10 @@ fn test_lmstudio_openai_compatible_endpoint() {
     assert!(result.is_err());
     // Le message ne doit pas mentionner "lmstudio" ou "ollama" — c'est une erreur réseau
     let err = result.unwrap_err();
-    assert!(!err.contains("panic"), "erreur ne doit pas être un panic : {err}");
+    assert!(
+        !err.contains("panic"),
+        "erreur ne doit pas être un panic : {err}"
+    );
 }
 
 // ── Tests cosine_similarity ────────────────────────────────────────────────────
@@ -76,7 +87,10 @@ fn test_lmstudio_openai_compatible_endpoint() {
 fn test_cosine_similarity_identical_vectors() {
     let v = vec![1.0_f32, 0.0, 0.0];
     let sim = cosine_similarity(&v, &v);
-    assert!((sim - 1.0).abs() < 1e-5, "vecteurs identiques → similarité 1.0, got {sim}");
+    assert!(
+        (sim - 1.0).abs() < 1e-5,
+        "vecteurs identiques → similarité 1.0, got {sim}"
+    );
 }
 
 #[test]
@@ -84,7 +98,10 @@ fn test_cosine_similarity_orthogonal_vectors() {
     let a = vec![1.0_f32, 0.0, 0.0];
     let b = vec![0.0_f32, 1.0, 0.0];
     let sim = cosine_similarity(&a, &b);
-    assert!(sim.abs() < 1e-5, "vecteurs orthogonaux → similarité ≈ 0.0, got {sim}");
+    assert!(
+        sim.abs() < 1e-5,
+        "vecteurs orthogonaux → similarité ≈ 0.0, got {sim}"
+    );
 }
 
 #[test]
@@ -92,7 +109,10 @@ fn test_cosine_similarity_opposite_vectors() {
     let a = vec![1.0_f32, 0.0];
     let b = vec![-1.0_f32, 0.0];
     let sim = cosine_similarity(&a, &b);
-    assert!((sim + 1.0).abs() < 1e-5, "vecteurs opposés → similarité -1.0, got {sim}");
+    assert!(
+        (sim + 1.0).abs() < 1e-5,
+        "vecteurs opposés → similarité -1.0, got {sim}"
+    );
 }
 
 #[test]

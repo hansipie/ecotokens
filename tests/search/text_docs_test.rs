@@ -39,10 +39,15 @@ fn cargo_toml_extracts_table_sections() {
     let symbols = index_text_doc(&path, "Cargo.toml").unwrap();
     assert!(!symbols.is_empty(), "should extract TOML table sections");
     let kinds: Vec<&str> = symbols.iter().map(|s| s.kind.as_str()).collect();
-    assert!(kinds.contains(&"table"), "should have 'table' kind, got: {kinds:?}");
+    assert!(
+        kinds.contains(&"table"),
+        "should have 'table' kind, got: {kinds:?}"
+    );
     let names: Vec<&str> = symbols.iter().map(|s| s.name.as_str()).collect();
     assert!(
-        names.iter().any(|n| *n == "package" || *n == "dependencies"),
+        names
+            .iter()
+            .any(|n| *n == "package" || *n == "dependencies"),
         "should extract table names, got: {names:?}"
     );
 }
@@ -64,5 +69,8 @@ fn json_file_extracts_root_keys() {
     let symbols = index_text_doc(&path, "config.json").unwrap();
     assert!(!symbols.is_empty(), "should extract JSON root keys");
     let kinds: Vec<&str> = symbols.iter().map(|s| s.kind.as_str()).collect();
-    assert!(kinds.contains(&"key"), "should have 'key' kind, got: {kinds:?}");
+    assert!(
+        kinds.contains(&"key"),
+        "should have 'key' kind, got: {kinds:?}"
+    );
 }

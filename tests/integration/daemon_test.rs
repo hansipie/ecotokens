@@ -52,9 +52,8 @@ fn test_watch_stops_cleanly_on_stop_signal() {
     let watch_path = dir.path().to_path_buf();
     let idx_dir = index_dir.path().to_path_buf();
 
-    let handle = std::thread::spawn(move || {
-        watch_directory(&watch_path, &idx_dir, event_tx, stop_rx)
-    });
+    let handle =
+        std::thread::spawn(move || watch_directory(&watch_path, &idx_dir, event_tx, stop_rx));
 
     std::thread::sleep(Duration::from_millis(200));
 
@@ -62,7 +61,11 @@ fn test_watch_stops_cleanly_on_stop_signal() {
     stop_tx.send(()).unwrap();
 
     let result = handle.join().expect("le thread watcher a paniqué");
-    assert!(result.is_ok(), "watch_directory a retourné une erreur : {:?}", result);
+    assert!(
+        result.is_ok(),
+        "watch_directory a retourné une erreur : {:?}",
+        result
+    );
 }
 
 /// Vérifie que le watcher gère correctement plusieurs fichiers en rafale (debounce).

@@ -36,7 +36,9 @@ fn filter_compiler_output(output: &str) -> String {
                     i += 1;
                     break;
                 }
-                if next.starts_with(' ') || next.contains(" |") || next.trim_start().starts_with('^')
+                if next.starts_with(' ')
+                    || next.contains(" |")
+                    || next.trim_start().starts_with('^')
                 {
                     result.push(next.to_string());
                     i += 1;
@@ -63,7 +65,10 @@ fn filter_compiler_output(output: &str) -> String {
                     i += 1;
                     break;
                 }
-                if next.starts_with(' ') || next.contains(" |") || next.trim_start().starts_with('^') {
+                if next.starts_with(' ')
+                    || next.contains(" |")
+                    || next.trim_start().starts_with('^')
+                {
                     result.push(next.to_string());
                     i += 1;
                     continue;

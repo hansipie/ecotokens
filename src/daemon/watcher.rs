@@ -70,7 +70,14 @@ pub fn watch_directory(
             pending.remove(&path);
             let ts = chrono::Utc::now().format("%H:%M:%S").to_string();
             let status = reindex_single_file(&path, watch_path, index_dir);
-            if event_tx.send(WatchEvent { path, timestamp: ts, status }).is_err() {
+            if event_tx
+                .send(WatchEvent {
+                    path,
+                    timestamp: ts,
+                    status,
+                })
+                .is_err()
+            {
                 // Receiver fermé : on arrête
                 return Ok(());
             }

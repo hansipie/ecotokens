@@ -44,7 +44,11 @@ fn filter_container_ps(output: &str) -> String {
         }
 
         // Split by multiple spaces (docker ps uses wide spacing)
-        let cols: Vec<&str> = line.splitn(7, "   ").map(|s| s.trim()).filter(|s| !s.is_empty()).collect();
+        let cols: Vec<&str> = line
+            .splitn(7, "   ")
+            .map(|s| s.trim())
+            .filter(|s| !s.is_empty())
+            .collect();
 
         if cols.len() >= 2 {
             let id = cols.first().unwrap_or(&"");
@@ -53,7 +57,13 @@ fn filter_container_ps(output: &str) -> String {
 
             // Find relevant columns from the header positions
             let name = cols.last().unwrap_or(&"");
-            let status = if cols.len() > 4 { cols[4] } else if cols.len() > 3 { cols[3] } else { "" };
+            let status = if cols.len() > 4 {
+                cols[4]
+            } else if cols.len() > 3 {
+                cols[3]
+            } else {
+                ""
+            };
             let image = if cols.len() > 1 { cols[1] } else { "" };
             let ports = if cols.len() > 5 { cols[5] } else { "" };
 
@@ -124,7 +134,11 @@ fn filter_kubectl_get(output: &str) -> String {
     // Keep header + all lines, but limit to 100 entries
     const MAX_ROWS: usize = 100;
     if lines.len() > MAX_ROWS + 1 {
-        let mut result: Vec<String> = lines.iter().take(MAX_ROWS + 1).map(|s| s.to_string()).collect();
+        let mut result: Vec<String> = lines
+            .iter()
+            .take(MAX_ROWS + 1)
+            .map(|s| s.to_string())
+            .collect();
         let omitted = lines.len() - MAX_ROWS - 1;
         result.push(format!("[ecotokens] ... {} more rows omitted ...", omitted));
         result.join("\n")

@@ -4,7 +4,10 @@ use ecotokens::filter::grep::filter_grep;
 fn short_grep_passes_through() {
     let input = "src/main.rs:10:fn main() {\n";
     let out = filter_grep(input);
-    assert!(out.contains("fn main"), "short grep output should pass through");
+    assert!(
+        out.contains("fn main"),
+        "short grep output should pass through"
+    );
 }
 
 #[test]
@@ -53,7 +56,10 @@ fn grep_counts_files() {
         input.push_str(&format!("src/file{}.rs:1:match here\n", i));
     }
     let out = filter_grep(&input);
-    assert!(out.contains("35 files") || out.contains("35 matches"), "should count matches");
+    assert!(
+        out.contains("35 files") || out.contains("35 matches"),
+        "should count matches"
+    );
 }
 
 #[test]

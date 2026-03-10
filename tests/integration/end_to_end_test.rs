@@ -24,13 +24,23 @@ fn install_then_uninstall_is_clean() {
         .env("HOME", home.path())
         .output()
         .expect("failed to run install");
-    assert!(out.status.success(), "install failed: {}", String::from_utf8_lossy(&out.stderr));
-    assert!(settings.exists(), "settings.json should be created after install");
+    assert!(
+        out.status.success(),
+        "install failed: {}",
+        String::from_utf8_lossy(&out.stderr)
+    );
+    assert!(
+        settings.exists(),
+        "settings.json should be created after install"
+    );
 
     // Verify hook is present
     let content = std::fs::read_to_string(&settings).unwrap();
     let v: serde_json::Value = serde_json::from_str(&content).unwrap();
-    assert!(v["hooks"]["PreToolUse"].is_array(), "PreToolUse hooks should be present");
+    assert!(
+        v["hooks"]["PreToolUse"].is_array(),
+        "PreToolUse hooks should be present"
+    );
 
     // Uninstall
     let out = Command::new(ecotokens())
@@ -38,7 +48,11 @@ fn install_then_uninstall_is_clean() {
         .env("HOME", home.path())
         .output()
         .expect("failed to run uninstall");
-    assert!(out.status.success(), "uninstall failed: {}", String::from_utf8_lossy(&out.stderr));
+    assert!(
+        out.status.success(),
+        "uninstall failed: {}",
+        String::from_utf8_lossy(&out.stderr)
+    );
 }
 
 #[test]
@@ -46,7 +60,9 @@ fn filter_large_output_reduces_size() {
     // Generic filter triggers at 200 lines — create 300-line fixture
     let tmp = TempDir::new().unwrap();
     let input_file = tmp.path().join("large_output.txt");
-    let lines: Vec<String> = (0..300).map(|i| format!("line {i}: some content that takes space")).collect();
+    let lines: Vec<String> = (0..300)
+        .map(|i| format!("line {i}: some content that takes space"))
+        .collect();
     let input = lines.join("\n");
     std::fs::write(&input_file, &input).unwrap();
 
@@ -54,14 +70,22 @@ fn filter_large_output_reduces_size() {
         .args(["filter", "--", "cat", input_file.to_str().unwrap()])
         .output()
         .expect("failed to run filter");
-    assert!(out.status.success(), "filter should succeed: {}", String::from_utf8_lossy(&out.stderr));
+    assert!(
+        out.status.success(),
+        "filter should succeed: {}",
+        String::from_utf8_lossy(&out.stderr)
+    );
     let filtered = String::from_utf8_lossy(&out.stdout);
     assert!(
         filtered.len() < input.len(),
         "filtered output ({} bytes) should be shorter than input ({} bytes)",
-        filtered.len(), input.len()
+        filtered.len(),
+        input.len()
     );
-    assert!(filtered.contains("[ecotokens]"), "should contain summary marker");
+    assert!(
+        filtered.contains("[ecotokens]"),
+        "should contain summary marker"
+    );
 }
 
 #[test]
@@ -72,7 +96,10 @@ fn config_subcommand_shows_settings() {
         .expect("failed to run config");
     assert!(out.status.success(), "config should succeed");
     let stdout = String::from_utf8_lossy(&out.stdout);
-    assert!(stdout.contains("debug"), "config output should contain settings keys");
+    assert!(
+        stdout.contains("debug"),
+        "config output should contain settings keys"
+    );
 }
 
 #[test]
@@ -84,5 +111,8 @@ fn config_json_flag_outputs_valid_json() {
     assert!(out.status.success());
     let stdout = String::from_utf8_lossy(&out.stdout);
     let v: Result<serde_json::Value, _> = serde_json::from_str(&stdout);
-    assert!(v.is_ok(), "config --json should produce valid JSON: {stdout}");
+    assert!(
+        v.is_ok(),
+        "config --json should produce valid JSON: {stdout}"
+    );
 }

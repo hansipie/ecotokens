@@ -18,10 +18,16 @@ pub fn try_ai_summary(output: &str, settings: &Settings) -> Result<String, Strin
     // Guard: only summarize large outputs where AI is worth the cost
     let tokens = crate::tokens::estimate_tokens(output) as u32;
     if tokens < settings.ai_summary_min_tokens {
-        return Err(format!("Output too small for AI summary ({} < {} tokens)", tokens, settings.ai_summary_min_tokens));
+        return Err(format!(
+            "Output too small for AI summary ({} < {} tokens)",
+            tokens, settings.ai_summary_min_tokens
+        ));
     }
 
-    let ollama_url = settings.ai_summary_url.as_deref().unwrap_or(DEFAULT_OLLAMA_URL);
+    let ollama_url = settings
+        .ai_summary_url
+        .as_deref()
+        .unwrap_or(DEFAULT_OLLAMA_URL);
 
     // Prepare prompt
     let prompt = format!(

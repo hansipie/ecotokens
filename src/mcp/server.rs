@@ -1,10 +1,9 @@
 use std::path::PathBuf;
 
 use rmcp::{
-    ServerHandler,
     handler::server::{router::tool::ToolRouter, wrapper::Parameters},
     model::{Implementation, ServerCapabilities, ServerInfo},
-    tool, tool_handler, tool_router,
+    tool, tool_handler, tool_router, ServerHandler,
 };
 
 use super::tools::*;
@@ -65,7 +64,7 @@ impl EcotokensServer {
         };
         match crate::search::query::search_index(opts) {
             Ok(results) => serde_json::to_string_pretty(&results).unwrap_or_default(),
-            Err(e) => format!("{{\"error\": \"{e}\"}}")
+            Err(e) => format!("{{\"error\": \"{e}\"}}"),
         }
     }
 
@@ -78,7 +77,7 @@ impl EcotokensServer {
         };
         match crate::search::outline::outline_path(opts) {
             Ok(symbols) => serde_json::to_string_pretty(&symbols).unwrap_or_default(),
-            Err(e) => format!("{{\"error\": \"{e}\"}}")
+            Err(e) => format!("{{\"error\": \"{e}\"}}"),
         }
     }
 
@@ -87,7 +86,7 @@ impl EcotokensServer {
         match crate::search::symbols::lookup_symbol(&params.id, &self.index_dir) {
             Ok(Some(snippet)) => snippet,
             Ok(None) => format!("{{\"error\": \"symbol not found: {}\"}}", params.id),
-            Err(e) => format!("{{\"error\": \"{e}\"}}")
+            Err(e) => format!("{{\"error\": \"{e}\"}}"),
         }
     }
 
@@ -95,23 +94,32 @@ impl EcotokensServer {
     fn ecotokens_trace_callers(&self, Parameters(params): Parameters<TraceParams>) -> String {
         match crate::trace::callers::find_callers(&params.symbol, &self.index_dir) {
             Ok(edges) => serde_json::to_string_pretty(&edges).unwrap_or_default(),
-            Err(e) => format!("{{\"error\": \"{e}\"}}")
+            Err(e) => format!("{{\"error\": \"{e}\"}}"),
         }
     }
 
     #[tool(description = "Find all callees (functions called by) a symbol")]
-    fn ecotokens_trace_callees(&self, Parameters(params): Parameters<TraceCalleesParams>) -> String {
-        match crate::trace::callees::find_callees(&params.symbol, &self.index_dir, params.depth.unwrap_or(1)) {
+    fn ecotokens_trace_callees(
+        &self,
+        Parameters(params): Parameters<TraceCalleesParams>,
+    ) -> String {
+        match crate::trace::callees::find_callees(
+            &params.symbol,
+            &self.index_dir,
+            params.depth.unwrap_or(1),
+        ) {
             Ok(edges) => serde_json::to_string_pretty(&edges).unwrap_or_default(),
-            Err(e) => format!("{{\"error\": \"{e}\"}}")
+            Err(e) => format!("{{\"error\": \"{e}\"}}"),
         }
     }
 
-    #[tool(description = "Execute a shell command and return token-optimized output. \
+    #[tool(
+        description = "Execute a shell command and return token-optimized output. \
         Use this instead of the terminal for commands that may produce large output \
         (e.g. 'git log', 'cargo test', 'find . -type f'). \
         Output is automatically filtered and compressed to save context tokens, \
-        and token savings are recorded in the metrics store.")]
+        and token savings are recorded in the metrics store."
+    )]
     fn ecotokens_run(&self, Parameters(params): Parameters<RunParams>) -> String {
         let command = params.command.trim();
         if command.is_empty() {
@@ -127,8 +135,8 @@ impl EcotokensServer {
         // either explicitly provided by the caller, or from ECOTOKENS_WORKSPACE_ROOT.
         // Falling back to the server process cwd risks attributing commands to the
         // wrong project (e.g. VS Code's own directory when started by Copilot).
-        let authoritative_cwd = params.cwd.is_some()
-            || std::env::var("ECOTOKENS_WORKSPACE_ROOT").is_ok();
+        let authoritative_cwd =
+            params.cwd.is_some() || std::env::var("ECOTOKENS_WORKSPACE_ROOT").is_ok();
 
         let start = std::time::Instant::now();
         // The command string is trusted to come from an AI agent, not from arbitrary
@@ -142,7 +150,11 @@ impl EcotokensServer {
             Ok(o) => {
                 let stdout = String::from_utf8_lossy(&o.stdout).into_owned();
                 let stderr = String::from_utf8_lossy(&o.stderr).into_owned();
-                if stderr.is_empty() { stdout } else { format!("{stdout}{stderr}") }
+                if stderr.is_empty() {
+                    stdout
+                } else {
+                    format!("{stdout}{stderr}")
+                }
             }
             Err(e) => return format!("{{\"error\": \"failed to run command: {e}\"}}"),
         };

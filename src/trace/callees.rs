@@ -6,8 +6,8 @@ use tantivy::query::TermQuery;
 use tantivy::schema::{IndexRecordOption, Value};
 use tantivy::{Index, ReloadPolicy, TantivyDocument, Term};
 
-use crate::search::index::build_schema;
 use super::{CallEdge, TraceError};
+use crate::search::index::build_schema;
 
 /// Find all callees (functions called by) the given symbol name.
 /// `depth` controls recursive traversal (1 = direct callees only).
@@ -39,10 +39,29 @@ pub fn find_callees(
 
     for (_score, addr) in &all_symbols {
         let doc: TantivyDocument = searcher.doc(*addr)?;
-        let sid = doc.get_first(symbol_id_field).and_then(|v| v.as_str()).unwrap_or("").to_string();
-        let source = doc.get_first(content_field).and_then(|v| v.as_str()).unwrap_or("").to_string();
-        let file = doc.get_first(file_path_field).and_then(|v| v.as_str()).unwrap_or("").to_string();
-        let name = sid.split("::").last().unwrap_or("").split('#').next().unwrap_or("").to_string();
+        let sid = doc
+            .get_first(symbol_id_field)
+            .and_then(|v| v.as_str())
+            .unwrap_or("")
+            .to_string();
+        let source = doc
+            .get_first(content_field)
+            .and_then(|v| v.as_str())
+            .unwrap_or("")
+            .to_string();
+        let file = doc
+            .get_first(file_path_field)
+            .and_then(|v| v.as_str())
+            .unwrap_or("")
+            .to_string();
+        let name = sid
+            .split("::")
+            .last()
+            .unwrap_or("")
+            .split('#')
+            .next()
+            .unwrap_or("")
+            .to_string();
         symbol_names.insert(name.clone());
         symbol_docs.push((sid, name, file, source));
     }
@@ -118,7 +137,14 @@ fn find_callees_recursive(
 
             // Recurse if depth > 1
             if depth > 1 {
-                find_callees_recursive(known, symbol_docs, known_symbols, depth - 1, visited, result);
+                find_callees_recursive(
+                    known,
+                    symbol_docs,
+                    known_symbols,
+                    depth - 1,
+                    visited,
+                    result,
+                );
             }
         }
     }

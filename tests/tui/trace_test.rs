@@ -49,10 +49,7 @@ fn render_trace_shows_columns() {
         content.contains("orchestrator"),
         "should display caller name 'orchestrator'"
     );
-    assert!(
-        content.contains("main.rs"),
-        "should display file path"
-    );
+    assert!(content.contains("main.rs"), "should display file path");
 }
 
 #[test]

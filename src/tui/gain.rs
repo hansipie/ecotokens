@@ -37,7 +37,7 @@ pub enum GainMode {
 impl GainMode {
     pub fn toggle(self) -> Self {
         match self {
-            GainMode::Family  => GainMode::Project,
+            GainMode::Family => GainMode::Project,
             GainMode::Project => GainMode::Family,
         }
     }
@@ -92,7 +92,10 @@ fn project_label(name: &str) -> String {
 pub fn sorted_family_keys_for_project(items: &[Interception], project: &str) -> Vec<String> {
     use std::collections::HashMap;
     let mut map: HashMap<String, f32> = HashMap::new();
-    for item in items.iter().filter(|i| i.git_root.as_deref() == Some(project)) {
+    for item in items
+        .iter()
+        .filter(|i| i.git_root.as_deref() == Some(project))
+    {
         if let Some(family) = serde_json::to_value(&item.command_family)
             .ok()
             .and_then(|v| v.as_str().map(|s| s.to_string()))
@@ -111,7 +114,19 @@ pub fn sorted_family_keys_for_project(items: &[Interception], project: &str) -> 
 ///   - detail: last interception content for selected family (split or diff)
 ///   - bottom: Sparkline of tokens saved over the last 14 days
 #[allow(clippy::too_many_arguments)]
-pub fn render_gain(frame: &mut Frame, area: Rect, report: &Report, items: &[Interception], last_updated: Option<&str>, gain_mode: GainMode, sparkline_mode: SparklineMode, selected_family: Option<usize>, detail_mode: DetailMode, selected_project: Option<usize>, project_filter: Option<&str>) {
+pub fn render_gain(
+    frame: &mut Frame,
+    area: Rect,
+    report: &Report,
+    items: &[Interception],
+    last_updated: Option<&str>,
+    gain_mode: GainMode,
+    sparkline_mode: SparklineMode,
+    selected_family: Option<usize>,
+    detail_mode: DetailMode,
+    selected_project: Option<usize>,
+    project_filter: Option<&str>,
+) {
     // Outer layout: stats | pool(family+detail) | sparkline
     let outer = Layout::default()
         .direction(Direction::Vertical)
@@ -130,7 +145,9 @@ pub fn render_gain(frame: &mut Frame, area: Rect, report: &Report, items: &[Inte
             .constraints([Constraint::Percentage(50), Constraint::Percentage(50)])
             .split(outer[1]);
         let project_names = render_projects(frame, pool[0], report, selected_project);
-        let sel_proj = selected_project.and_then(|i| project_names.get(i)).map(String::as_str);
+        let sel_proj = selected_project
+            .and_then(|i| project_names.get(i))
+            .map(String::as_str);
         render_project_log_panel(frame, pool[1], sel_proj, items);
         render_sparkline(frame, outer[2], items, sparkline_mode);
         return;
@@ -151,12 +168,23 @@ pub fn render_gain(frame: &mut Frame, area: Rect, report: &Report, items: &[Inte
 
     let filtered_items: Vec<Interception>;
     let display_items: &[Interception] = if let Some(proj) = project_filter {
-        filtered_items = items.iter().filter(|i| i.git_root.as_deref() == Some(proj)).cloned().collect();
+        filtered_items = items
+            .iter()
+            .filter(|i| i.git_root.as_deref() == Some(proj))
+            .cloned()
+            .collect();
         &filtered_items
     } else {
         items
     };
-    let family_names = render_families(frame, pool[0], report, display_items, selected_family, project_filter);
+    let family_names = render_families(
+        frame,
+        pool[0],
+        report,
+        display_items,
+        selected_family,
+        project_filter,
+    );
     let sel_name = selected_family
         .and_then(|i| family_names.get(i))
         .map(String::as_str);
@@ -167,7 +195,9 @@ pub fn render_gain(frame: &mut Frame, area: Rect, report: &Report, items: &[Inte
 // ── Stats panel ───────────────────────────────────────────────────────────────
 
 fn render_stats(frame: &mut Frame, area: Rect, report: &Report, last_updated: Option<&str>) {
-    let saved = report.total_tokens_before.saturating_sub(report.total_tokens_after);
+    let saved = report
+        .total_tokens_before
+        .saturating_sub(report.total_tokens_after);
     let text = vec![
         Line::from(vec![
             Span::styled("Interceptions: ", Style::default().fg(Color::Cyan)),
@@ -188,14 +218,20 @@ fn render_stats(frame: &mut Frame, area: Rect, report: &Report, last_updated: Op
         Some(ts) => format!(" ecotokens gain - updated {ts} UTC  [q] quit "),
         None => " ecotokens gain  [q] quit ".to_string(),
     };
-    let paragraph = Paragraph::new(text)
-        .block(Block::default().borders(Borders::ALL).title(title));
+    let paragraph = Paragraph::new(text).block(Block::default().borders(Borders::ALL).title(title));
     frame.render_widget(paragraph, area);
 }
 
 // ── Family gauges ─────────────────────────────────────────────────────────────
 
-fn render_families(frame: &mut Frame, area: Rect, report: &Report, items: &[Interception], selected: Option<usize>, project_filter: Option<&str>) -> Vec<String> {
+fn render_families(
+    frame: &mut Frame,
+    area: Rect,
+    report: &Report,
+    items: &[Interception],
+    selected: Option<usize>,
+    project_filter: Option<&str>,
+) -> Vec<String> {
     let title = if let Some(proj) = project_filter {
         let basename = project_label(proj);
         format!(" By family  ·  project: {basename}  [↑↓/jk] nav  [b] projects ")
@@ -225,7 +261,10 @@ fn render_families(frame: &mut Frame, area: Rect, report: &Report, items: &[Inte
             .collect();
         sorted.sort_by(|a, b| b.1.partial_cmp(&a.1).unwrap_or(std::cmp::Ordering::Equal));
         families_owned = sorted;
-        families_owned.iter().map(|(k, v)| (k.as_str(), *v)).collect()
+        families_owned
+            .iter()
+            .map(|(k, v)| (k.as_str(), *v))
+            .collect()
     } else {
         if report.by_family.is_empty() {
             let paragraph = Paragraph::new("No data yet.").block(block);
@@ -240,7 +279,10 @@ fn render_families(frame: &mut Frame, area: Rect, report: &Report, items: &[Inte
             .collect();
         sorted.sort_by(|a, b| b.1.partial_cmp(&a.1).unwrap_or(std::cmp::Ordering::Equal));
         families_owned = sorted.into_iter().map(|(k, v)| (k.clone(), v)).collect();
-        families_owned.iter().map(|(k, v)| (k.as_str(), *v)).collect()
+        families_owned
+            .iter()
+            .map(|(k, v)| (k.as_str(), *v))
+            .collect()
     };
 
     if families.is_empty() {
@@ -255,7 +297,10 @@ fn render_families(frame: &mut Frame, area: Rect, report: &Report, items: &[Inte
     frame.render_widget(block, area);
 
     let row_height = (inner.height / n).max(1);
-    let constraints: Vec<Constraint> = families.iter().map(|_| Constraint::Length(row_height)).collect();
+    let constraints: Vec<Constraint> = families
+        .iter()
+        .map(|_| Constraint::Length(row_height))
+        .collect();
     let rows = Layout::default()
         .direction(Direction::Vertical)
         .constraints(constraints)
@@ -267,7 +312,11 @@ fn render_families(frame: &mut Frame, area: Rect, report: &Report, items: &[Inte
         }
         let is_sel = selected == Some(i);
         let color = if is_sel { Color::Green } else { Color::Yellow };
-        let modifier = if is_sel { Modifier::BOLD } else { Modifier::empty() };
+        let modifier = if is_sel {
+            Modifier::BOLD
+        } else {
+            Modifier::empty()
+        };
         let prefix = if is_sel { "▶ " } else { "  " };
         let ratio = (*pct as f64 / 100.0).clamp(0.0, 1.0);
         let gauge = Gauge::default()
@@ -283,8 +332,15 @@ fn render_families(frame: &mut Frame, area: Rect, report: &Report, items: &[Inte
 
 // ── Project gauges ────────────────────────────────────────────────────────────
 
-fn render_projects(frame: &mut Frame, area: Rect, report: &Report, selected: Option<usize>) -> Vec<String> {
-    let block = Block::default().borders(Borders::ALL).title(" By project  [↑↓/jk] nav  [b] families ");
+fn render_projects(
+    frame: &mut Frame,
+    area: Rect,
+    report: &Report,
+    selected: Option<usize>,
+) -> Vec<String> {
+    let block = Block::default()
+        .borders(Borders::ALL)
+        .title(" By project  [↑↓/jk] nav  [b] families ");
 
     if report.by_project.is_empty() {
         let paragraph = Paragraph::new("No data yet.").block(block);
@@ -311,7 +367,10 @@ fn render_projects(frame: &mut Frame, area: Rect, report: &Report, selected: Opt
     frame.render_widget(block, area);
 
     let row_height = (inner.height / n).max(1);
-    let constraints: Vec<Constraint> = projects.iter().map(|_| Constraint::Length(row_height)).collect();
+    let constraints: Vec<Constraint> = projects
+        .iter()
+        .map(|_| Constraint::Length(row_height))
+        .collect();
     let rows = Layout::default()
         .direction(Direction::Vertical)
         .constraints(constraints)
@@ -323,7 +382,11 @@ fn render_projects(frame: &mut Frame, area: Rect, report: &Report, selected: Opt
         }
         let is_sel = selected == Some(i);
         let color = if is_sel { Color::Green } else { Color::Yellow };
-        let modifier = if is_sel { Modifier::BOLD } else { Modifier::empty() };
+        let modifier = if is_sel {
+            Modifier::BOLD
+        } else {
+            Modifier::empty()
+        };
         let prefix = if is_sel { "▶ " } else { "  " };
         let label = project_label(name.as_str());
         let ratio = (*pct as f64 / 100.0).clamp(0.0, 1.0);
@@ -338,9 +401,16 @@ fn render_projects(frame: &mut Frame, area: Rect, report: &Report, selected: Opt
     projects.iter().map(|(name, _)| name.to_string()).collect()
 }
 
-fn render_project_log_panel(frame: &mut Frame, area: Rect, project_name: Option<&str>, items: &[Interception]) {
+fn render_project_log_panel(
+    frame: &mut Frame,
+    area: Rect,
+    project_name: Option<&str>,
+    items: &[Interception],
+) {
     let Some(name) = project_name else {
-        let block = Block::default().borders(Borders::ALL).title(" Project history ");
+        let block = Block::default()
+            .borders(Borders::ALL)
+            .title(" Project history ");
         let p = Paragraph::new(Span::styled(
             " ↑↓ / j k: select a project",
             Style::default().fg(Color::DarkGray),
@@ -384,7 +454,13 @@ fn render_project_log_panel(frame: &mut Frame, area: Rect, project_name: Option<
 
 // ── Detail panel ──────────────────────────────────────────────────────────────
 
-fn render_detail(frame: &mut Frame, area: Rect, family_name: Option<&str>, items: &[Interception], detail_mode: DetailMode) {
+fn render_detail(
+    frame: &mut Frame,
+    area: Rect,
+    family_name: Option<&str>,
+    items: &[Interception],
+    detail_mode: DetailMode,
+) {
     let Some(name) = family_name else {
         let block = Block::default().borders(Borders::ALL).title(" Detail ");
         let p = Paragraph::new(Span::styled(
@@ -423,8 +499,7 @@ fn render_detail(frame: &mut Frame, area: Rect, family_name: Option<&str>, items
         let block = Block::default()
             .borders(Borders::ALL)
             .title(format!(" Detail: {name} · {cmd_short} "));
-        let p = Paragraph::new("Content unavailable (data predates this version).")
-            .block(block);
+        let p = Paragraph::new("Content unavailable (data predates this version).").block(block);
         frame.render_widget(p, area);
         return;
     }
@@ -439,9 +514,9 @@ fn render_detail(frame: &mut Frame, area: Rect, family_name: Option<&str>, items
 fn render_split_panel(frame: &mut Frame, area: Rect, name: &str, item: &Interception) {
     let cmd_short: String = item.command.chars().take(40).collect();
     let ts_short = item.timestamp.get(..16).unwrap_or(&item.timestamp);
-    let block = Block::default()
-        .borders(Borders::ALL)
-        .title(format!(" Detail: {name} · {cmd_short} · {ts_short}  [d] diff "));
+    let block = Block::default().borders(Borders::ALL).title(format!(
+        " Detail: {name} · {cmd_short} · {ts_short}  [d] diff "
+    ));
     let inner = block.inner(area);
     frame.render_widget(block, area);
 
@@ -454,13 +529,16 @@ fn render_split_panel(frame: &mut Frame, area: Rect, name: &str, item: &Intercep
     let before_text = item.content_before.as_deref().unwrap_or("");
     let mut before_lines: Vec<Line> = vec![Line::from(Span::styled(
         format!("▲ before · {} tok", item.tokens_before),
-        Style::default().fg(Color::DarkGray).add_modifier(Modifier::BOLD),
+        Style::default()
+            .fg(Color::DarkGray)
+            .add_modifier(Modifier::BOLD),
     ))];
-    before_lines.extend(
-        before_text
-            .lines()
-            .map(|l| Line::from(Span::styled(l.to_string(), Style::default().fg(Color::DarkGray)))),
-    );
+    before_lines.extend(before_text.lines().map(|l| {
+        Line::from(Span::styled(
+            l.to_string(),
+            Style::default().fg(Color::DarkGray),
+        ))
+    }));
     frame.render_widget(
         Paragraph::new(before_lines).wrap(Wrap { trim: false }),
         halves[0],
@@ -469,14 +547,20 @@ fn render_split_panel(frame: &mut Frame, area: Rect, name: &str, item: &Intercep
     // After (bottom)
     let after_text = item.content_after.as_deref().unwrap_or("");
     let mut after_lines: Vec<Line> = vec![Line::from(Span::styled(
-        format!("▼ after  · {} tok  (-{:.0}%)", item.tokens_after, item.savings_pct),
-        Style::default().fg(Color::Green).add_modifier(Modifier::BOLD),
+        format!(
+            "▼ after  · {} tok  (-{:.0}%)",
+            item.tokens_after, item.savings_pct
+        ),
+        Style::default()
+            .fg(Color::Green)
+            .add_modifier(Modifier::BOLD),
     ))];
-    after_lines.extend(
-        after_text
-            .lines()
-            .map(|l| Line::from(Span::styled(l.to_string(), Style::default().fg(Color::Green)))),
-    );
+    after_lines.extend(after_text.lines().map(|l| {
+        Line::from(Span::styled(
+            l.to_string(),
+            Style::default().fg(Color::Green),
+        ))
+    }));
     frame.render_widget(
         Paragraph::new(after_lines).wrap(Wrap { trim: false }),
         halves[1],
@@ -486,12 +570,10 @@ fn render_split_panel(frame: &mut Frame, area: Rect, name: &str, item: &Intercep
 fn render_diff_panel(frame: &mut Frame, area: Rect, name: &str, item: &Interception) {
     let cmd_short: String = item.command.chars().take(40).collect();
     let ts_short = item.timestamp.get(..16).unwrap_or(&item.timestamp);
-    let block = Block::default()
-        .borders(Borders::ALL)
-        .title(format!(
-            " Diff : {name} · {cmd_short} · {}→{} tok (-{:.0}%) · {ts_short}  [d] log ",
-            item.tokens_before, item.tokens_after, item.savings_pct,
-        ));
+    let block = Block::default().borders(Borders::ALL).title(format!(
+        " Diff : {name} · {cmd_short} · {}→{} tok (-{:.0}%) · {ts_short}  [d] log ",
+        item.tokens_before, item.tokens_after, item.savings_pct,
+    ));
     let inner = block.inner(area);
     frame.render_widget(block, area);
 
@@ -514,7 +596,9 @@ fn render_diff_panel(frame: &mut Frame, area: Rect, name: &str, item: &Intercept
         let _ = last;
         lines.push(Line::from(Span::styled(
             format!("@@ -{old_start},{old_len} +{new_start},{new_len} @@"),
-            Style::default().fg(Color::Cyan).add_modifier(Modifier::BOLD),
+            Style::default()
+                .fg(Color::Cyan)
+                .add_modifier(Modifier::BOLD),
         )));
 
         for op in &group {
@@ -540,10 +624,7 @@ fn render_diff_panel(frame: &mut Frame, area: Rect, name: &str, item: &Intercept
         )));
     }
 
-    frame.render_widget(
-        Paragraph::new(lines).wrap(Wrap { trim: false }),
-        inner,
-    );
+    frame.render_widget(Paragraph::new(lines).wrap(Wrap { trim: false }), inner);
 }
 
 fn render_log_panel(frame: &mut Frame, area: Rect, name: &str, items: &[Interception]) {

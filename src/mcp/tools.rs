@@ -14,9 +14,10 @@ where
             .as_u64()
             .map(|n| Some(n as usize))
             .ok_or_else(|| serde::de::Error::custom("expected non-negative integer")),
-        Some(serde_json::Value::String(s)) => {
-            s.parse::<usize>().map(Some).map_err(serde::de::Error::custom)
-        }
+        Some(serde_json::Value::String(s)) => s
+            .parse::<usize>()
+            .map(Some)
+            .map_err(serde::de::Error::custom),
         Some(other) => Err(serde::de::Error::custom(format!(
             "expected number or string, got {other}"
         ))),

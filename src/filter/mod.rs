@@ -20,13 +20,23 @@ use crate::metrics::store::CommandFamily;
 
 fn is_cpp_command(command: &str) -> bool {
     use std::path::Path;
-    let Some(program) = command.split_whitespace().next() else { return false; };
+    let Some(program) = command.split_whitespace().next() else {
+        return false;
+    };
     let Some(program) = Path::new(program).file_name().and_then(|n| n.to_str()) else {
         return false;
     };
     matches!(
         program,
-        "gcc" | "g++" | "cc" | "c++" | "clang" | "clang++" | "clang-cl" | "make" | "cmake"
+        "gcc"
+            | "g++"
+            | "cc"
+            | "c++"
+            | "clang"
+            | "clang++"
+            | "clang-cl"
+            | "make"
+            | "cmake"
             | "ninja"
     )
 }

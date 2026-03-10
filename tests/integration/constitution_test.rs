@@ -16,7 +16,10 @@ fn config_json_flag_outputs_valid_json() {
     assert!(out.status.success(), "exit code should be 0");
     let stdout = String::from_utf8_lossy(&out.stdout);
     let v: Result<serde_json::Value, _> = serde_json::from_str(&stdout);
-    assert!(v.is_ok(), "config --json must produce valid JSON, got: {stdout}");
+    assert!(
+        v.is_ok(),
+        "config --json must produce valid JSON, got: {stdout}"
+    );
 }
 
 #[test]
@@ -28,7 +31,10 @@ fn gain_json_flag_outputs_valid_json() {
     assert!(out.status.success(), "exit code should be 0");
     let stdout = String::from_utf8_lossy(&out.stdout);
     let v: Result<serde_json::Value, _> = serde_json::from_str(&stdout);
-    assert!(v.is_ok(), "gain --json must produce valid JSON, got: {stdout}");
+    assert!(
+        v.is_ok(),
+        "gain --json must produce valid JSON, got: {stdout}"
+    );
 }
 
 /// Errors must go to stderr, not stdout.
@@ -42,7 +48,10 @@ fn missing_subcommand_error_on_stderr() {
     let stderr = String::from_utf8_lossy(&out.stderr);
     let stdout = String::from_utf8_lossy(&out.stdout);
     if !out.status.success() {
-        assert!(!stderr.is_empty(), "errors should appear on stderr, not stdout: stdout={stdout}");
+        assert!(
+            !stderr.is_empty(),
+            "errors should appear on stderr, not stdout: stdout={stdout}"
+        );
     }
 }
 
@@ -64,17 +73,17 @@ fn filter_runs_without_network_access() {
         .env("HTTPS_PROXY", "http://127.0.0.1:1")
         .output()
         .expect("filter should run");
-    assert!(out.status.success(), "filter should succeed without network: {}", String::from_utf8_lossy(&out.stderr));
+    assert!(
+        out.status.success(),
+        "filter should succeed without network: {}",
+        String::from_utf8_lossy(&out.stderr)
+    );
 }
 
 /// Return codes: successful commands exit 0.
 #[test]
 fn successful_commands_exit_zero() {
-    let cmds: &[&[&str]] = &[
-        &["config"],
-        &["config", "--json"],
-        &["gain", "--json"],
-    ];
+    let cmds: &[&[&str]] = &[&["config"], &["config", "--json"], &["gain", "--json"]];
     for cmd in cmds {
         let out = Command::new(ecotokens())
             .args(*cmd)

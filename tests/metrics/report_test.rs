@@ -1,8 +1,13 @@
+use chrono::Utc;
 use ecotokens::metrics::report::{aggregate, Period};
 use ecotokens::metrics::store::{CommandFamily, FilterMode, Interception};
-use chrono::Utc;
 
-fn make_interception_ago(seconds_ago: i64, family: CommandFamily, tokens_before: u32, tokens_after: u32) -> Interception {
+fn make_interception_ago(
+    seconds_ago: i64,
+    family: CommandFamily,
+    tokens_before: u32,
+    tokens_after: u32,
+) -> Interception {
     let ts = (Utc::now() - chrono::Duration::seconds(seconds_ago)).to_rfc3339();
     Interception {
         id: uuid::Uuid::new_v4().to_string(),
@@ -12,10 +17,16 @@ fn make_interception_ago(seconds_ago: i64, family: CommandFamily, tokens_before:
         git_root: Some("/repo".into()),
         tokens_before,
         tokens_after,
-        savings_pct: if tokens_before == 0 { 0.0 } else {
+        savings_pct: if tokens_before == 0 {
+            0.0
+        } else {
             ((1.0 - tokens_after as f64 / tokens_before as f64) * 100.0) as f32
         },
-        mode: if tokens_after < tokens_before { FilterMode::Filtered } else { FilterMode::Passthrough },
+        mode: if tokens_after < tokens_before {
+            FilterMode::Filtered
+        } else {
+            FilterMode::Passthrough
+        },
         redacted: false,
         duration_ms: 5,
         content_before: None,
@@ -25,7 +36,7 @@ fn make_interception_ago(seconds_ago: i64, family: CommandFamily, tokens_before:
 
 fn make_items() -> Vec<Interception> {
     vec![
-        make_interception_ago(10, CommandFamily::Git, 1000, 200),   // today, 80% savings
+        make_interception_ago(10, CommandFamily::Git, 1000, 200), // today, 80% savings
         make_interception_ago(100, CommandFamily::Cargo, 500, 400), // today, 20% savings
         make_interception_ago(86500, CommandFamily::Git, 800, 300), // yesterday
     ]
@@ -56,15 +67,24 @@ fn aggregate_week_includes_recent_items() {
 fn savings_pct_calculated() {
     let items = make_items();
     let report = aggregate(&items, Period::All, "claude-sonnet-4-6");
-    assert!(report.total_savings_pct > 0.0, "should have positive savings");
+    assert!(
+        report.total_savings_pct > 0.0,
+        "should have positive savings"
+    );
 }
 
 #[test]
 fn by_family_groups_correctly() {
     let items = make_items();
     let report = aggregate(&items, Period::All, "claude-sonnet-4-6");
-    assert!(report.by_family.contains_key("git"), "should have git family");
-    assert!(report.by_family.contains_key("cargo"), "should have cargo family");
+    assert!(
+        report.by_family.contains_key("git"),
+        "should have git family"
+    );
+    assert!(
+        report.by_family.contains_key("cargo"),
+        "should have cargo family"
+    );
     let git_stats = &report.by_family["git"];
     assert_eq!(git_stats.count, 2, "two git interceptions");
 }
@@ -73,7 +93,10 @@ fn by_family_groups_correctly() {
 fn by_project_groups_by_git_root() {
     let items = make_items();
     let report = aggregate(&items, Period::All, "claude-sonnet-4-6");
-    assert!(report.by_project.contains_key("/repo"), "should group by /repo");
+    assert!(
+        report.by_project.contains_key("/repo"),
+        "should group by /repo"
+    );
 }
 
 #[test]
@@ -99,7 +122,10 @@ fn by_project_ignores_blank_git_root() {
 fn cost_avoided_usd_positive_for_savings() {
     let items = make_items();
     let report = aggregate(&items, Period::All, "claude-sonnet-4-6");
-    assert!(report.cost_avoided_usd > 0.0, "cost avoided should be positive");
+    assert!(
+        report.cost_avoided_usd > 0.0,
+        "cost avoided should be positive"
+    );
 }
 
 #[test]

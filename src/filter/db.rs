@@ -14,7 +14,9 @@ pub fn filter_db(output: &str) -> String {
 }
 
 fn is_table_format(lines: &[&str]) -> bool {
-    lines.iter().any(|l| l.contains('─') || l.contains("-+-") || l.contains("+--+"))
+    lines
+        .iter()
+        .any(|l| l.contains('─') || l.contains("-+-") || l.contains("+--+"))
 }
 
 fn is_expanded_format(lines: &[&str]) -> bool {
@@ -67,7 +69,8 @@ fn is_separator(line: &str) -> bool {
     if t.is_empty() {
         return false;
     }
-    t.chars().all(|c| matches!(c, '─' | '-' | '+' | '|' | '┼' | '┤' | '├' | ' '))
+    t.chars()
+        .all(|c| matches!(c, '─' | '-' | '+' | '|' | '┼' | '┤' | '├' | ' '))
         && (t.contains('─') || t.contains("-+-") || t.contains("+--+") || t.contains("---"))
 }
 

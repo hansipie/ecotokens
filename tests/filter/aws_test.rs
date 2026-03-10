@@ -28,7 +28,10 @@ fn aws_non_json_uses_generic() {
     }
     let out = filter_aws(&input);
     assert!(!out.is_empty(), "should return something");
-    assert!(out.len() < input.len(), "non-JSON output should be truncated");
+    assert!(
+        out.len() < input.len(),
+        "non-JSON output should be truncated"
+    );
 }
 
 #[test]
@@ -47,5 +50,8 @@ fn aws_truncation_does_not_split_utf8_codepoint() {
     let filler = "a".repeat(51193);
     let input = format!("{{\"k\":\"{filler}éé\"}}");
     let out = filter_aws(&input);
-    assert!(out.contains("…[truncated]"), "long JSON should be truncated");
+    assert!(
+        out.contains("…[truncated]"),
+        "long JSON should be truncated"
+    );
 }

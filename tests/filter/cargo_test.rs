@@ -2,7 +2,8 @@ use ecotokens::filter::cargo::filter_cargo;
 
 #[test]
 fn successful_build_shows_stats_only() {
-    let input = "   Compiling ecotokens v0.1.0\n    Finished dev [unoptimized] target(s) in 1.23s\n";
+    let input =
+        "   Compiling ecotokens v0.1.0\n    Finished dev [unoptimized] target(s) in 1.23s\n";
     let out = filter_cargo("cargo build", input);
     assert!(out.contains("Finished"), "stats line should be kept");
 }
@@ -19,7 +20,9 @@ fn build_with_errors_preserves_errors() {
 fn many_warnings_produce_summary() {
     let mut input = String::new();
     for i in 0..30 {
-        input.push_str(&format!("warning: unused variable `x{i}`\n --> src/lib.rs:{i}:9\n\n"));
+        input.push_str(&format!(
+            "warning: unused variable `x{i}`\n --> src/lib.rs:{i}:9\n\n"
+        ));
     }
     input.push_str("warning: 30 warnings emitted\n");
     input.push_str("    Finished dev target(s) in 2.00s\n");

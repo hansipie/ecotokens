@@ -61,7 +61,10 @@ fn filter_pip(output: &str) -> String {
 
     let mut result = Vec::new();
     for line in &lines {
-        if line.starts_with("Successfully installed") || line.contains("ERROR:") || line.contains("WARNING:") {
+        if line.starts_with("Successfully installed")
+            || line.contains("ERROR:")
+            || line.contains("WARNING:")
+        {
             result.push(*line);
         }
     }

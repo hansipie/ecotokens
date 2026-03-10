@@ -10,7 +10,13 @@ fn summarize_by_lines(lines: &[&str], line_count: usize) -> String {
     }
 
     let head: Vec<&str> = lines.iter().take(HEAD_TAIL_LINES).copied().collect();
-    let tail: Vec<&str> = lines.iter().rev().take(HEAD_TAIL_LINES).rev().copied().collect();
+    let tail: Vec<&str> = lines
+        .iter()
+        .rev()
+        .take(HEAD_TAIL_LINES)
+        .rev()
+        .copied()
+        .collect();
     let omitted = line_count.saturating_sub(HEAD_TAIL_LINES * 2);
 
     format!(

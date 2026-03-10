@@ -2,7 +2,7 @@
 
 ## What this project does
 
-**ecotokens** is a token-saving companion for Claude Code. It acts as a `PreToolUse` hook to intercept bash command outputs, compress them with family-specific filters, and record how many tokens were saved. It also exposes an MCP server with 4 tools for semantic code search, symbol lookup, and call graph tracing.
+**ecotokens** is a token-saving companion for Claude Code, Gemini CLI, and GitHub Copilot (VS Code). It intercepts bash/shell command outputs before they reach the model, compresses them with family-specific filters, and records how many tokens were saved. It also exposes an MCP server with tools for semantic code search, symbol lookup, and call graph tracing.
 
 ## Commands
 
@@ -30,8 +30,10 @@ cargo fmt --check && cargo clippy -- -D warnings && cargo test
 # Install ecotokens as MCP server
 ecotokens install --target claude    # Claude Code only
 ecotokens install --target vscode    # VS Code / GitHub Copilot (writes mcp.servers in settings.json)
-ecotokens install --target all       # both targets
+ecotokens install --target gemini    # Gemini CLI (writes BeforeTool hook + mcpServers in ~/.gemini/settings.json)
+ecotokens install --target all       # all three targets
 ecotokens uninstall --target vscode  # remove VS Code registration
+ecotokens uninstall --target gemini  # remove Gemini registration
 ```
 
 ## Architecture
@@ -41,7 +43,7 @@ The project is organized into 12 modules, each with a `mod.rs` exporting its pub
 | Module | Role |
 |---|---|
 | `filter/` | Family-specific output compression (Git, Cargo, Python, C++, FS, Markdown, ConfigFile, Generic) |
-| `hook/` | Reads Claude Code `PreToolUse` JSON from stdin, rewrites command to `ecotokens filter -- <cmd>` |
+| `hook/` | Handles hook stdin→stdout for both Claude Code (`PreToolUse`, `ecotokens hook`) and Gemini CLI (`BeforeTool`, `ecotokens hook-gemini`) |
 | `metrics/` | Appends `Interception` records to `~/.config/ecotokens/metrics.jsonl`; aggregates for reports |
 | `tokens/` | `estimate_tokens(s)` → `chars * 0.25`; optional exact counting via `tiktoken-rs` feature gate |
 | `search/` | Tantivy BM25 index + tree-sitter symbol extraction; chunk size 50 lines |
@@ -50,16 +52,16 @@ The project is organized into 12 modules, each with a `mod.rs` exporting its pub
 | `mcp/` | JSON-RPC stdio server (rmcp crate) exposing 4 tools |
 | `config/` | TOML settings at `~/.config/ecotokens/settings.toml`; all fields optional with defaults |
 | `masking/` | Regex-based PII/secret redaction (AWS keys, GitHub PATs, JWTs, `.env` secrets, etc.) |
-| `install/` | Idempotent hook + MCP registration in `~/.claude/settings.json` and `~/.claude.json` (Claude Code) and in `~/.config/Code/User/settings.json` under `mcp.servers` (VS Code / GitHub Copilot) |
+| `install/` | Idempotent hook + MCP registration for Claude Code (`~/.claude/settings.json` + `~/.claude.json`), Gemini CLI (`~/.gemini/settings.json`), and VS Code (`~/.config/Code/User/settings.json` under `mcp.servers`) |
 | `daemon/` | `notify`-based file watcher; debounces 500 ms before reindexing |
 
 **Data flow:**
 ```
-Claude Code bash call
-  → hook (rewrite command)
+AI CLI bash call (Claude Code or Gemini CLI)
+  → hook (rewrite command via PreToolUse or BeforeTool)
     → filter (run cmd, compress output, return filtered text)
       → metrics (record before/after token counts)
-        → Claude Code (sees compressed output)
+        → AI CLI (sees compressed output)
 ```
 
 ## Key conventions

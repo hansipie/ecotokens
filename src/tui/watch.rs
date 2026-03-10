@@ -35,14 +35,26 @@ fn render_phase_rail(
 
     match phase {
         WatchPhase::Indexing => {
-            spans.push(Span::styled("[● Indexing]", Style::default().fg(Color::Blue)));
+            spans.push(Span::styled(
+                "[● Indexing]",
+                Style::default().fg(Color::Blue),
+            ));
             spans.push(Span::raw(" → "));
-            spans.push(Span::styled("[ Watching]", Style::default().fg(Color::DarkGray)));
+            spans.push(Span::styled(
+                "[ Watching]",
+                Style::default().fg(Color::DarkGray),
+            ));
         }
         WatchPhase::Watching => {
-            spans.push(Span::styled("[✓ Indexing]", Style::default().fg(Color::Green)));
+            spans.push(Span::styled(
+                "[✓ Indexing]",
+                Style::default().fg(Color::Green),
+            ));
             spans.push(Span::raw(" → "));
-            spans.push(Span::styled("[● Watching]", Style::default().fg(Color::Blue)));
+            spans.push(Span::styled(
+                "[● Watching]",
+                Style::default().fg(Color::Blue),
+            ));
             if let Some(r) = report {
                 spans.push(Span::raw("    "));
                 spans.push(Span::styled(
@@ -56,8 +68,11 @@ fn render_phase_rail(
         }
     }
 
-    let rail = Paragraph::new(Line::from(spans))
-        .block(Block::default().borders(Borders::ALL).title(" ecotokens watch "));
+    let rail = Paragraph::new(Line::from(spans)).block(
+        Block::default()
+            .borders(Borders::ALL)
+            .title(" ecotokens watch "),
+    );
     frame.render_widget(rail, area);
 }
 
@@ -164,7 +179,7 @@ pub fn render_watch(
     }
 
     // Barre d'aide
-    let help = Paragraph::new(" q/Esc: quit  Ctrl-C: stop")
-        .style(Style::default().fg(Color::DarkGray));
+    let help =
+        Paragraph::new(" q/Esc: quit  Ctrl-C: stop").style(Style::default().fg(Color::DarkGray));
     frame.render_widget(help, chunks[3]);
 }

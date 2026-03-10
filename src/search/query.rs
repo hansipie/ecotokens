@@ -82,11 +82,20 @@ pub fn search_index(opts: SearchOptions) -> tantivy::Result<Vec<SearchResult>> {
             bm25_score
         };
 
-        results.push(SearchResult { file_path, snippet, score, line_start });
+        results.push(SearchResult {
+            file_path,
+            snippet,
+            score,
+            line_start,
+        });
     }
 
     // Trier par score décroissant et limiter à top_k
-    results.sort_by(|a, b| b.score.partial_cmp(&a.score).unwrap_or(std::cmp::Ordering::Equal));
+    results.sort_by(|a, b| {
+        b.score
+            .partial_cmp(&a.score)
+            .unwrap_or(std::cmp::Ordering::Equal)
+    });
     results.truncate(opts.top_k);
 
     Ok(results)

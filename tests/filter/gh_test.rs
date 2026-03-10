@@ -4,7 +4,10 @@ use ecotokens::filter::gh::filter_gh;
 fn gh_pr_view_strips_html_comments() {
     let input = "number:\t42\ntitle:\tFix the bug\nstate:\tOPEN\nauthor:\talice\nbody:\n<!-- this is a comment -->\nThis PR fixes the issue.\n";
     let out = filter_gh("gh pr view 42", input);
-    assert!(!out.contains("<!-- this is a comment -->"), "HTML comments should be removed");
+    assert!(
+        !out.contains("<!-- this is a comment -->"),
+        "HTML comments should be removed"
+    );
     assert!(out.contains("Fix the bug"), "title should be kept");
     assert!(out.contains("fixes the issue"), "body text should be kept");
 }
@@ -46,7 +49,8 @@ fn gh_run_view_keeps_failures() {
 
 #[test]
 fn gh_pr_view_long_body_truncated() {
-    let mut input = String::from("number:\t99\ntitle:\tBig PR\nstate:\tOPEN\nauthor:\tcarol\nbody:\n");
+    let mut input =
+        String::from("number:\t99\ntitle:\tBig PR\nstate:\tOPEN\nauthor:\tcarol\nbody:\n");
     for i in 0..300 {
         input.push_str(&format!("Body line {}\n", i));
     }

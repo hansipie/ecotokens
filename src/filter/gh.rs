@@ -80,7 +80,11 @@ fn filter_gh_pr_list(output: &str) -> String {
         if parts.len() >= 3 {
             let number = parts[0].trim();
             let title = parts[1].trim();
-            let state = if parts.len() > 3 { parts[3].trim() } else { "open" };
+            let state = if parts.len() > 3 {
+                parts[3].trim()
+            } else {
+                "open"
+            };
             result.push(format!("#{} [{}] {}", number, state, title));
         } else {
             // Not tab-separated, keep as-is
@@ -113,7 +117,11 @@ fn filter_gh_issue_list(output: &str) -> String {
         if parts.len() >= 2 {
             let number = parts[0].trim();
             let title = parts[1].trim();
-            let state = if parts.len() > 3 { parts[3].trim() } else { "open" };
+            let state = if parts.len() > 3 {
+                parts[3].trim()
+            } else {
+                "open"
+            };
             result.push(format!("#{} [{}] {}", number, state, title));
         } else {
             result.push(line.to_string());

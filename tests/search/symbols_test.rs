@@ -18,7 +18,10 @@ fn parse_rust_extracts_fn_and_struct() {
     assert!(!symbols.is_empty(), "should extract at least one symbol");
     let kinds: Vec<&str> = symbols.iter().map(|s| s.kind.as_str()).collect();
     assert!(kinds.contains(&"fn"), "should extract fn, got: {kinds:?}");
-    assert!(kinds.contains(&"struct"), "should extract struct, got: {kinds:?}");
+    assert!(
+        kinds.contains(&"struct"),
+        "should extract struct, got: {kinds:?}"
+    );
 }
 
 #[test]
@@ -34,7 +37,11 @@ fn parse_empty_file_returns_empty() {
 fn parse_rust_extracts_impl() {
     let dir = TempDir::new().unwrap();
     let path = dir.path().join("types.rs");
-    fs::write(&path, "pub struct Bar;\nimpl Bar { pub fn new() -> Self { Bar } }\n").unwrap();
+    fs::write(
+        &path,
+        "pub struct Bar;\nimpl Bar { pub fn new() -> Self { Bar } }\n",
+    )
+    .unwrap();
     let symbols = parse_symbols(&path).unwrap();
     let kinds: Vec<&str> = symbols.iter().map(|s| s.kind.as_str()).collect();
     assert!(
@@ -97,7 +104,13 @@ fn lookup_valid_id_returns_source_snippet() {
     assert!(!symbols.is_empty(), "parse_symbols should find fn compute");
 
     // Index the symbols so lookup_symbol can find them
-    let opts = IndexOptions { reset: false, path: dir.path().to_path_buf(), index_dir: idx.path().to_path_buf(), progress: None, embed_provider: ecotokens::config::settings::EmbedProvider::None };
+    let opts = IndexOptions {
+        reset: false,
+        path: dir.path().to_path_buf(),
+        index_dir: idx.path().to_path_buf(),
+        progress: None,
+        embed_provider: ecotokens::config::settings::EmbedProvider::None,
+    };
     let index = open_or_create_index(&opts.index_dir, opts.reset).unwrap();
     let mut writer = index.writer(15_000_000).unwrap();
     write_symbols(&symbols, &mut writer).unwrap();
@@ -105,7 +118,10 @@ fn lookup_valid_id_returns_source_snippet() {
 
     let sym = symbols.iter().find(|s| s.kind == "fn").unwrap();
     let snippet = lookup_symbol(&sym.id, idx.path()).unwrap();
-    assert!(snippet.is_some(), "should return source for valid id after indexing");
+    assert!(
+        snippet.is_some(),
+        "should return source for valid id after indexing"
+    );
     assert!(
         snippet.unwrap().contains("compute"),
         "snippet should contain the function name"

@@ -65,7 +65,10 @@ fn test_watcher_ignores_non_indexable_files() {
 
     // Si un événement arrive, il doit être "ignored"
     if let Ok(event) = event_rx.recv_timeout(Duration::from_secs(2)) {
-        assert_eq!(event.status, "ignored", "fichier binaire ne devrait pas être indexé");
+        assert_eq!(
+            event.status, "ignored",
+            "fichier binaire ne devrait pas être indexé"
+        );
     }
     // Pas d'événement = comportement correct aussi (le watcher filtre silencieusement)
 

@@ -5,7 +5,11 @@ use ratatui::Terminal;
 use std::path::PathBuf;
 
 fn empty_stats() -> WatchStats {
-    WatchStats { reindexed: 0, ignored: 0, errors: 0 }
+    WatchStats {
+        reindexed: 0,
+        ignored: 0,
+        errors: 0,
+    }
 }
 
 /// Vérifie que le header "ecotokens watch" est présent dans le rendu.

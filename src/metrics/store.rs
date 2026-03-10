@@ -111,7 +111,10 @@ pub fn append_to(path: &std::path::Path, interception: &Interception) -> std::io
     let line = serde_json::to_string(interception)
         .map_err(|e| std::io::Error::new(std::io::ErrorKind::InvalidData, e))?;
     use std::io::Write;
-    let mut file = std::fs::OpenOptions::new().create(true).append(true).open(path)?;
+    let mut file = std::fs::OpenOptions::new()
+        .create(true)
+        .append(true)
+        .open(path)?;
     writeln!(file, "{line}")
 }
 

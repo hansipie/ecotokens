@@ -49,8 +49,16 @@ fn progress_bar_full_shows_100() {
 fn index_directory_produces_bm25_entries() {
     let src = TempDir::new().unwrap();
     let idx = TempDir::new().unwrap();
-    fs::write(src.path().join("main.rs"), "fn main() { println!(\"hello\"); }\n").unwrap();
-    fs::write(src.path().join("README.md"), "# Hello\n\nThis project does things.\n").unwrap();
+    fs::write(
+        src.path().join("main.rs"),
+        "fn main() { println!(\"hello\"); }\n",
+    )
+    .unwrap();
+    fs::write(
+        src.path().join("README.md"),
+        "# Hello\n\nThis project does things.\n",
+    )
+    .unwrap();
     let opts = IndexOptions {
         reset: true,
         path: src.path().to_path_buf(),

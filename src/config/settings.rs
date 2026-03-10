@@ -8,8 +8,12 @@ pub enum EmbedProvider {
     #[default]
     None,
     #[serde(alias = "ollama")]
-    Ollama { url: String },
-    LmStudio { url: String },
+    Ollama {
+        url: String,
+    },
+    LmStudio {
+        url: String,
+    },
 }
 
 #[derive(Debug, Clone, Serialize, Deserialize)]
@@ -22,24 +26,39 @@ fn default_model_pricing() -> HashMap<String, ModelPrice> {
     let mut m = HashMap::new();
     m.insert(
         "claude-haiku-4-5".into(),
-        ModelPrice { input_usd_per_1m: 0.80, output_usd_per_1m: 4.00 },
+        ModelPrice {
+            input_usd_per_1m: 0.80,
+            output_usd_per_1m: 4.00,
+        },
     );
     m.insert(
         "claude-sonnet-4-5".into(),
-        ModelPrice { input_usd_per_1m: 3.00, output_usd_per_1m: 15.00 },
+        ModelPrice {
+            input_usd_per_1m: 3.00,
+            output_usd_per_1m: 15.00,
+        },
     );
     m.insert(
         "claude-sonnet-4-6".into(),
-        ModelPrice { input_usd_per_1m: 3.00, output_usd_per_1m: 15.00 },
+        ModelPrice {
+            input_usd_per_1m: 3.00,
+            output_usd_per_1m: 15.00,
+        },
     );
     m.insert(
         "claude-opus-4-6".into(),
-        ModelPrice { input_usd_per_1m: 15.00, output_usd_per_1m: 75.00 },
+        ModelPrice {
+            input_usd_per_1m: 15.00,
+            output_usd_per_1m: 75.00,
+        },
     );
     // Subscription-based: no per-token cost, token savings still tracked
     m.insert(
         "github-copilot".into(),
-        ModelPrice { input_usd_per_1m: 0.0, output_usd_per_1m: 0.0 },
+        ModelPrice {
+            input_usd_per_1m: 0.0,
+            output_usd_per_1m: 0.0,
+        },
     );
     m
 }
@@ -79,12 +98,24 @@ pub struct Settings {
     pub ai_summary_timeout_ms: u64,
 }
 
-fn default_threshold_lines() -> u32 { 500 }
-fn default_threshold_bytes() -> u32 { 51200 }
-fn default_true() -> bool { true }
-fn default_model() -> String { "claude-sonnet-4-6".into() }
-fn default_ai_summary_min_tokens() -> u32 { 2500 }
-fn default_ai_summary_timeout_ms() -> u64 { 3000 }
+fn default_threshold_lines() -> u32 {
+    500
+}
+fn default_threshold_bytes() -> u32 {
+    51200
+}
+fn default_true() -> bool {
+    true
+}
+fn default_model() -> String {
+    "claude-sonnet-4-6".into()
+}
+fn default_ai_summary_min_tokens() -> u32 {
+    2500
+}
+fn default_ai_summary_timeout_ms() -> u64 {
+    3000
+}
 
 impl Default for Settings {
     fn default() -> Self {

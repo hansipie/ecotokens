@@ -37,7 +37,9 @@ fn filter_curl(output: &str) -> String {
 
 fn is_curl_progress(line: &str) -> bool {
     let t = line.trim();
-    t.contains("% Total") || t.contains("Dload") || (t.contains('%') && t.split_whitespace().count() > 3)
+    t.contains("% Total")
+        || t.contains("Dload")
+        || (t.contains('%') && t.split_whitespace().count() > 3)
 }
 
 fn filter_wget(output: &str) -> String {

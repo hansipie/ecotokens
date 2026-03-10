@@ -35,7 +35,10 @@ id   | 2\n\
 name | Bob\n";
     let out = filter_db(input);
     assert!(out.contains("id = 1"), "expanded field should be formatted");
-    assert!(out.contains("name = Alice"), "expanded field should be kept");
+    assert!(
+        out.contains("name = Alice"),
+        "expanded field should be kept"
+    );
 }
 
 #[test]

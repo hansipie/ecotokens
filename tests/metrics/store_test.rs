@@ -71,14 +71,20 @@ fn two_successive_appends_produce_two_lines() {
 #[test]
 fn savings_pct_is_zero_in_passthrough_mode() {
     let item = make_interception(100, 100, FilterMode::Passthrough);
-    assert_eq!(item.savings_pct, 0.0, "savings should be 0 in passthrough mode");
+    assert_eq!(
+        item.savings_pct, 0.0,
+        "savings should be 0 in passthrough mode"
+    );
 }
 
 #[test]
 fn savings_pct_calculated_correctly_in_filtered_mode() {
     let item = make_interception(100, 40, FilterMode::Filtered);
     let expected = 60.0f32;
-    assert!((item.savings_pct - expected).abs() < 0.01, "savings should be ~60%");
+    assert!(
+        (item.savings_pct - expected).abs() < 0.01,
+        "savings should be ~60%"
+    );
 }
 
 #[test]

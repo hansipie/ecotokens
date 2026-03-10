@@ -21,7 +21,11 @@ fn filter_toml(content: &str, total_lines: usize) -> String {
     let table_re = regex!(r"^\[([^\]]+)\]");
     let tables: Vec<&str> = content
         .lines()
-        .filter_map(|l| table_re.captures(l).and_then(|c| c.get(1).map(|m| m.as_str())))
+        .filter_map(|l| {
+            table_re
+                .captures(l)
+                .and_then(|c| c.get(1).map(|m| m.as_str()))
+        })
         .collect();
 
     format!(
@@ -35,7 +39,11 @@ fn filter_json(content: &str, total_lines: usize) -> String {
     let key_re = regex!(r#"^\s{0,2}"([^"]+)"\s*:"#);
     let keys: Vec<&str> = content
         .lines()
-        .filter_map(|l| key_re.captures(l).and_then(|c| c.get(1).map(|m| m.as_str())))
+        .filter_map(|l| {
+            key_re
+                .captures(l)
+                .and_then(|c| c.get(1).map(|m| m.as_str()))
+        })
         .take(30)
         .collect();
 
@@ -50,7 +58,11 @@ fn filter_yaml(content: &str, total_lines: usize) -> String {
     let key_re = regex!(r"^([a-zA-Z_][a-zA-Z0-9_-]*):");
     let keys: Vec<&str> = content
         .lines()
-        .filter_map(|l| key_re.captures(l).and_then(|c| c.get(1).map(|m| m.as_str())))
+        .filter_map(|l| {
+            key_re
+                .captures(l)
+                .and_then(|c| c.get(1).map(|m| m.as_str()))
+        })
         .take(30)
         .collect();
 

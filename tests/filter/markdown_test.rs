@@ -28,7 +28,10 @@ fn long_file_produces_toc_and_first_section() {
 fn toc_includes_headings() {
     let input = make_md(300);
     let out = filter_markdown(&input);
-    assert!(out.contains("Title") || out.contains("Section One"), "ToC should have headings");
+    assert!(
+        out.contains("Title") || out.contains("Section One"),
+        "ToC should have headings"
+    );
 }
 
 #[test]
@@ -36,5 +39,8 @@ fn file_without_headings_falls_back_to_generic() {
     let lines: Vec<String> = (1..=300).map(|i| format!("plain line {i}")).collect();
     let input = lines.join("\n");
     let out = filter_markdown(&input);
-    assert!(out.contains("[ecotokens]"), "should fall back to generic summary");
+    assert!(
+        out.contains("[ecotokens]"),
+        "should fall back to generic summary"
+    );
 }

@@ -1,10 +1,10 @@
 use serde::{Deserialize, Serialize};
 use std::path::Path;
-use tantivy::{doc, IndexWriter, TantivyDocument};
-use tantivy::schema::Value;
 use tantivy::collector::TopDocs;
 use tantivy::query::TermQuery;
 use tantivy::schema::IndexRecordOption;
+use tantivy::schema::Value;
+use tantivy::{doc, IndexWriter, TantivyDocument};
 use tantivy::{Index, ReloadPolicy, Term};
 use tree_sitter::{Language, Parser};
 
@@ -48,7 +48,6 @@ impl From<std::io::Error> for SymbolError {
 
 impl std::error::Error for SymbolError {}
 
-
 fn language_for_ext(ext: &str) -> Option<Language> {
     match ext {
         "rs" => Some(tree_sitter_rust::LANGUAGE.into()),
@@ -66,9 +65,9 @@ fn is_declaration_node(node_kind: &str) -> Option<&'static str> {
         "impl_item" => Some("impl"),
         "enum_item" => Some("enum"),
         "trait_item" => Some("trait"),
-        "function_definition" => Some("fn"),  // Python
-        "class_definition" => Some("struct"), // Python
-        "function_declaration" => Some("fn"), // JS
+        "function_definition" => Some("fn"),   // Python
+        "class_definition" => Some("struct"),  // Python
+        "function_declaration" => Some("fn"),  // JS
         "class_declaration" => Some("struct"), // JS
         _ => None,
     }

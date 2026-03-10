@@ -86,7 +86,12 @@ fn embed_provider_ollama_roundtrip() {
     };
     let json = serde_json::to_string(&s).unwrap();
     let s2: Settings = serde_json::from_str(&json).unwrap();
-    assert_eq!(s2.embed_provider, EmbedProvider::Ollama { url: "http://localhost:11434".to_string() });
+    assert_eq!(
+        s2.embed_provider,
+        EmbedProvider::Ollama {
+            url: "http://localhost:11434".to_string()
+        }
+    );
 }
 
 #[test]
@@ -97,7 +102,12 @@ fn embed_provider_lmstudio_roundtrip() {
     };
     let json = serde_json::to_string(&s).unwrap();
     let s2: Settings = serde_json::from_str(&json).unwrap();
-    assert_eq!(s2.embed_provider, EmbedProvider::LmStudio { url: "http://localhost:1234".to_string() });
+    assert_eq!(
+        s2.embed_provider,
+        EmbedProvider::LmStudio {
+            url: "http://localhost:1234".to_string()
+        }
+    );
 }
 
 #[test]

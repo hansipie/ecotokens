@@ -19,7 +19,11 @@ fn make_fixture() -> TempDir {
 fn outline_single_file_sorted_by_line() {
     let src = make_fixture();
     let path = src.path().join("lib.rs");
-    let opts = OutlineOptions { path, depth: None, kinds: None };
+    let opts = OutlineOptions {
+        path,
+        depth: None,
+        kinds: None,
+    };
     let symbols = outline_path(opts).unwrap();
     assert!(!symbols.is_empty(), "should return symbols for lib.rs");
     let lines: Vec<u64> = symbols.iter().map(|s| s.line_start).collect();
@@ -56,14 +60,22 @@ fn outline_filter_kinds_fn_only() {
     let symbols = outline_path(opts).unwrap();
     assert!(!symbols.is_empty(), "should find at least one fn symbol");
     for s in &symbols {
-        assert_eq!(s.kind, "fn", "expected only fn symbols, got kind: {}", s.kind);
+        assert_eq!(
+            s.kind, "fn",
+            "expected only fn symbols, got kind: {}",
+            s.kind
+        );
     }
 }
 
 #[test]
 fn outline_empty_directory_returns_empty() {
     let src = TempDir::new().unwrap();
-    let opts = OutlineOptions { path: src.path().to_path_buf(), depth: None, kinds: None };
+    let opts = OutlineOptions {
+        path: src.path().to_path_buf(),
+        depth: None,
+        kinds: None,
+    };
     let symbols = outline_path(opts).unwrap();
     assert!(symbols.is_empty(), "empty dir should yield no symbols");
 }

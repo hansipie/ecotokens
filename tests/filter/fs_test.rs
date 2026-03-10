@@ -29,7 +29,10 @@ fn long_find_is_summarized() {
 fn tree_short_passes_through() {
     let input = ".\n├── src\n│   └── main.rs\n└── Cargo.toml\n";
     let out = filter_fs("tree", input);
-    assert!(out.contains("main.rs"), "short tree output should pass through");
+    assert!(
+        out.contains("main.rs"),
+        "short tree output should pass through"
+    );
 }
 
 #[test]
@@ -41,7 +44,10 @@ fn tree_filters_noisy_dirs() {
     input.push_str("├── node_modules/some/package\n");
     input.push_str("└── target/debug/binary\n");
     let out = filter_fs("tree", &input);
-    assert!(!out.contains("node_modules"), "node_modules should be filtered");
+    assert!(
+        !out.contains("node_modules"),
+        "node_modules should be filtered"
+    );
     assert!(!out.contains("target/debug"), "target should be filtered");
 }
 
@@ -77,7 +83,13 @@ fn wc_short_passes_through() {
 fn wc_formats_compactly() {
     let mut input = String::new();
     for i in 0..10 {
-        input.push_str(&format!("  {}  {}  {} file{}.rs\n", i * 10, i * 20, i * 100, i));
+        input.push_str(&format!(
+            "  {}  {}  {} file{}.rs\n",
+            i * 10,
+            i * 20,
+            i * 100,
+            i
+        ));
     }
     let out = filter_fs("wc *.rs", &input);
     assert!(out.contains('L'), "should use compact L/W/C format");

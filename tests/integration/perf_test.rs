@@ -13,7 +13,10 @@ fn filter_p90_latency_under_50ms() {
     let tmp = TempDir::new().unwrap();
     // Create a realistic fixture (small-medium git output)
     let fixture = tmp.path().join("output.txt");
-    let content = (0..30).map(|i| format!("line {i}: some content here")).collect::<Vec<_>>().join("\n");
+    let content = (0..30)
+        .map(|i| format!("line {i}: some content here"))
+        .collect::<Vec<_>>()
+        .join("\n");
     std::fs::write(&fixture, &content).unwrap();
 
     let mut durations_ms = Vec::new();
@@ -67,5 +70,8 @@ fn gain_report_with_large_store_is_fast() {
     let elapsed = start.elapsed().as_millis();
 
     assert_eq!(items.len(), 1000, "should have read 1000 entries");
-    assert!(elapsed < 3000, "reading 1000 entries should be < 3s, took {elapsed}ms");
+    assert!(
+        elapsed < 3000,
+        "reading 1000 entries should be < 3s, took {elapsed}ms"
+    );
 }

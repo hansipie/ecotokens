@@ -34,7 +34,9 @@ fn filter_cargo_build(output: &str) -> String {
         if error_re.is_match(line) || line.contains("error[") {
             errors.push(line);
             // Also keep the "  --> file:line" context line
-            if i + 1 < lines.len() && (lines[i + 1].contains("-->") || lines[i + 1].starts_with("  ")) {
+            if i + 1 < lines.len()
+                && (lines[i + 1].contains("-->") || lines[i + 1].starts_with("  "))
+            {
                 i += 1;
                 errors.push(lines[i]);
             }
@@ -45,7 +47,11 @@ fn filter_cargo_build(output: &str) -> String {
     // Count warnings
     let warning_count = lines.iter().filter(|l| warning_re.is_match(l)).count();
     // Keep Finished/Compiling lines
-    let stats: Vec<&str> = lines.iter().filter(|l| finish_re.is_match(l)).copied().collect();
+    let stats: Vec<&str> = lines
+        .iter()
+        .filter(|l| finish_re.is_match(l))
+        .copied()
+        .collect();
 
     if errors.is_empty() && warning_count <= WARNING_THRESHOLD {
         return output.to_string();

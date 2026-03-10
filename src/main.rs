@@ -24,7 +24,11 @@ mod tui;
 const DEFAULT_MODEL: &str = "sonnet";
 
 #[derive(Parser)]
-#[command(name = "ecotokens", version, about = "Token-saving companion for Claude Code")]
+#[command(
+    name = "ecotokens",
+    version,
+    about = "Token-saving companion for Claude Code, Gemini CLI, and GitHub Copilot"
+)]
 struct Cli {
     #[command(subcommand)]
     command: Commands,
@@ -34,6 +38,8 @@ struct Cli {
 enum Commands {
     /// Intercept a bash command via PreToolUse hook (reads JSON from stdin)
     Hook,
+    /// Intercept a Gemini CLI tool call via BeforeTool hook (reads JSON from stdin)
+    HookGemini,
     /// Execute a command, filter its output, record metrics
     Filter {
         #[arg(last = true)]
@@ -50,11 +56,11 @@ enum Commands {
         #[arg(long)]
         model: Option<String>,
     },
-    /// Install ecotokens hook in ~/.claude/settings.json
+    /// Install ecotokens hook in ~/.claude/settings.json or ~/.gemini/settings.json
     Install {
         #[arg(long)]
         with_mcp: bool,
-        /// Target AI tool to install for: claude (default), vscode, all
+        /// Target AI tool to install for: claude, vscode, gemini, or all (default: claude)
         #[arg(long, default_value = "claude")]
         target: String,
         /// Enable AI-powered output summarization via Ollama
@@ -64,9 +70,9 @@ enum Commands {
         #[arg(long)]
         ai_summary_model: Option<String>,
     },
-    /// Remove ecotokens hook from ~/.claude/settings.json
+    /// Remove ecotokens hook from ~/.claude/settings.json or ~/.gemini/settings.json
     Uninstall {
-        /// Target to uninstall from: claude (default), vscode, all
+        /// Target to uninstall from: claude, vscode, gemini, or all (default: claude)
         #[arg(long, default_value = "claude")]
         target: String,
     },
@@ -195,8 +201,10 @@ impl Drop for TerminalGuard {
 }
 
 fn is_quit_key(key: &ratatui::crossterm::event::KeyEvent) -> bool {
-    matches!(key.code, KeyCode::Char('q') | KeyCode::Char('Q') | KeyCode::Esc)
-        || (key.code == KeyCode::Char('c') && key.modifiers.contains(KeyModifiers::CONTROL))
+    matches!(
+        key.code,
+        KeyCode::Char('q') | KeyCode::Char('Q') | KeyCode::Esc
+    ) || (key.code == KeyCode::Char('c') && key.modifiers.contains(KeyModifiers::CONTROL))
 }
 
 fn default_index_dir() -> PathBuf {
@@ -308,9 +316,7 @@ fn cmd_gain(period: String, json: bool, model: Option<String>) {
                 }
                 let ts = chrono::Utc::now().format("%H:%M:%S").to_string();
                 let family_count = match project_filter.as_deref() {
-                    Some(proj) => {
-                        tui::gain::sorted_family_keys_for_project(&items, proj).len()
-                    }
+                    Some(proj) => tui::gain::sorted_family_keys_for_project(&items, proj).len(),
                     None => report.by_family.len(),
                 };
                 let project_count = report.by_project.len();
@@ -358,7 +364,11 @@ fn cmd_gain(period: String, json: bool, model: Option<String>) {
                                     selected_family = Some(match selected_family {
                                         None => family_count - 1,
                                         Some(i) => {
-                                            if i == 0 { family_count - 1 } else { i - 1 }
+                                            if i == 0 {
+                                                family_count - 1
+                                            } else {
+                                                i - 1
+                                            }
                                         }
                                     });
                                 }
@@ -377,7 +387,11 @@ fn cmd_gain(period: String, json: bool, model: Option<String>) {
                                     selected_project = Some(match selected_project {
                                         None => project_count - 1,
                                         Some(i) => {
-                                            if i == 0 { project_count - 1 } else { i - 1 }
+                                            if i == 0 {
+                                                project_count - 1
+                                            } else {
+                                                i - 1
+                                            }
                                         }
                                     });
                                 }
@@ -430,18 +444,23 @@ fn sorted_projects_from(report: &metrics::report::Report) -> Vec<(String, f32)> 
     projects
 }
 
-fn cmd_install(
-    with_mcp: bool,
-    target: String,
-    ai_summary: bool,
-    ai_summary_model: Option<String>,
-) {
+fn cmd_install(with_mcp: bool, target: String, ai_summary: bool, ai_summary_model: Option<String>) {
     let claude_path = default_settings_path();
     let claude_json = default_claude_json_path();
     let vscode_path = install::default_vscode_settings_path();
+    let gemini_path = install::default_gemini_settings_path();
 
     let install_claude = matches!(target.as_str(), "claude" | "all");
     let install_vscode = matches!(target.as_str(), "vscode" | "all");
+    let install_gemini = matches!(target.as_str(), "gemini" | "all");
+
+    if !install_claude && !install_vscode && !install_gemini {
+        eprintln!(
+            "unknown target '{}'. Valid values: claude, vscode, gemini, all",
+            target
+        );
+        std::process::exit(1);
+    }
 
     if install_claude {
         match install::install_hook(&claude_path, &claude_json, with_mcp) {
@@ -465,7 +484,10 @@ fn cmd_install(
         match vscode_path {
             Some(ref p) => match install::install_vscode_mcp(p) {
                 Ok(()) => {
-                    println!("ecotokens MCP server registered (VS Code) → {}", p.display())
+                    println!(
+                        "ecotokens MCP server registered (VS Code) → {}",
+                        p.display()
+                    )
                 }
                 Err(e) => {
                     eprintln!("install error (vscode): {e}");
@@ -474,6 +496,35 @@ fn cmd_install(
             },
             None => {
                 eprintln!("cannot determine VS Code settings path on this system");
+                std::process::exit(1);
+            }
+        }
+    }
+
+    if install_gemini {
+        match gemini_path {
+            Some(ref p) => {
+                match install::install_gemini_hook(p) {
+                    Ok(()) => println!("ecotokens hook installed (Gemini) → {}", p.display()),
+                    Err(e) => {
+                        eprintln!("install error (gemini hook): {e}");
+                        std::process::exit(1);
+                    }
+                }
+                if with_mcp {
+                    match install::install_gemini_mcp(p) {
+                        Ok(()) => {
+                            println!("ecotokens MCP server registered (Gemini) → {}", p.display())
+                        }
+                        Err(e) => {
+                            eprintln!("install error (gemini mcp): {e}");
+                            std::process::exit(1);
+                        }
+                    }
+                }
+            }
+            None => {
+                eprintln!("cannot determine Gemini settings path on this system");
                 std::process::exit(1);
             }
         }
@@ -498,9 +549,19 @@ fn cmd_uninstall(target: String) {
     let claude_path = default_settings_path();
     let claude_json = default_claude_json_path();
     let vscode_path = install::default_vscode_settings_path();
+    let gemini_path = install::default_gemini_settings_path();
 
     let uninstall_claude = matches!(target.as_str(), "claude" | "all");
     let uninstall_vscode = matches!(target.as_str(), "vscode" | "all");
+    let uninstall_gemini = matches!(target.as_str(), "gemini" | "all");
+
+    if !uninstall_claude && !uninstall_vscode && !uninstall_gemini {
+        eprintln!(
+            "unknown target '{}'. Valid values: claude, vscode, gemini, all",
+            target
+        );
+        std::process::exit(1);
+    }
 
     if uninstall_claude {
         let had_hook = install::is_hook_installed(&claude_path);
@@ -550,6 +611,39 @@ fn cmd_uninstall(target: String) {
             }
             None => {
                 eprintln!("cannot determine VS Code settings path on this system");
+                std::process::exit(1);
+            }
+        }
+    }
+
+    if uninstall_gemini {
+        match gemini_path {
+            Some(ref p) => {
+                let had_hook = install::is_gemini_hook_installed(p);
+                let had_mcp = install::is_gemini_mcp_registered(p);
+                match install::uninstall_gemini(p) {
+                    Ok(()) => {
+                        if had_hook {
+                            println!("ecotokens hook removed (Gemini) ← {}", p.display());
+                        }
+                        if had_mcp {
+                            println!(
+                                "ecotokens MCP server unregistered (Gemini) ← {}",
+                                p.display()
+                            );
+                        }
+                        if !had_hook && !had_mcp {
+                            println!("ecotokens: nothing to uninstall (gemini)");
+                        }
+                    }
+                    Err(e) => {
+                        eprintln!("uninstall error (gemini): {e}");
+                        std::process::exit(1);
+                    }
+                }
+            }
+            None => {
+                eprintln!("cannot determine Gemini settings path on this system");
                 std::process::exit(1);
             }
         }
@@ -617,8 +711,14 @@ fn cmd_config(json: bool, embed_provider: Option<String>, embed_url: Option<Stri
         println!("mcp_registered        : {}", mcp_registered);
         println!("vscode_mcp_registered : {}", vscode_mcp_registered);
         println!("debug                 : {}", settings.debug);
-        println!("threshold_lines       : {}", settings.summary_threshold_lines);
-        println!("threshold_bytes       : {}", settings.summary_threshold_bytes);
+        println!(
+            "threshold_lines       : {}",
+            settings.summary_threshold_lines
+        );
+        println!(
+            "threshold_bytes       : {}",
+            settings.summary_threshold_bytes
+        );
         println!("exclusions            : {:?}", settings.exclusions);
         println!("embed_provider        : {}", provider_str);
         println!("ai_summary_enabled    : {}", settings.ai_summary_enabled);
@@ -705,13 +805,7 @@ fn cmd_index(path: Option<PathBuf>, index_dir: Option<PathBuf>, reset: bool) {
             // Draw 100%
             if let Some(ref mut terminal) = terminal_opt {
                 let _ = terminal.draw(|f| {
-                    tui::progress::render_progress(
-                        f,
-                        f.area(),
-                        total,
-                        total.max(1),
-                        "Indexing…",
-                    );
+                    tui::progress::render_progress(f, f.area(), total, total.max(1), "Indexing…");
                 });
             }
             let result = handle.join().expect("indexing thread panicked");
@@ -731,7 +825,10 @@ fn cmd_index(path: Option<PathBuf>, index_dir: Option<PathBuf>, reset: bool) {
 
         match result {
             Ok(stats) => {
-                println!("Indexed {} files, {} chunks", stats.file_count, stats.chunk_count)
+                println!(
+                    "Indexed {} files, {} chunks",
+                    stats.file_count, stats.chunk_count
+                )
             }
             Err(e) => {
                 eprintln!("index error: {e}");
@@ -749,7 +846,10 @@ fn cmd_index(path: Option<PathBuf>, index_dir: Option<PathBuf>, reset: bool) {
         };
         match search::index::index_directory(opts) {
             Ok(stats) => {
-                println!("Indexed {} files, {} chunks", stats.file_count, stats.chunk_count)
+                println!(
+                    "Indexed {} files, {} chunks",
+                    stats.file_count, stats.chunk_count
+                )
             }
             Err(e) => {
                 eprintln!("index error: {e}");
@@ -1013,11 +1113,8 @@ fn cmd_watch(
         match daemonize::Daemonize::new().start() {
             Ok(_) => {
                 // We are now in the daemon child process.
-                let bg_state = config::BackgroundState::new(
-                    watch_path_temp,
-                    idx_dir_temp,
-                    Some(log_path_str),
-                );
+                let bg_state =
+                    config::BackgroundState::new(watch_path_temp, idx_dir_temp, Some(log_path_str));
                 let _ = bg_state.save();
             }
             Err(e) => {
@@ -1100,12 +1197,7 @@ fn cmd_watch(
         let watch_path_clone = watch_path.clone();
         let idx_dir_clone = idx_dir.clone();
         let watcher_handle = std::thread::spawn(move || {
-            daemon::watcher::watch_directory(
-                &watch_path_clone,
-                &idx_dir_clone,
-                event_tx,
-                stop_rx,
-            )
+            daemon::watcher::watch_directory(&watch_path_clone, &idx_dir_clone, event_tx, stop_rx)
         });
 
         let index_report = index_result.ok().map(|stats| tui::watch::IndexReport {
@@ -1163,7 +1255,10 @@ fn cmd_watch(
         index_report
     } else {
         // Non-interactive mode: blocking initial index.
-        eprintln!("ecotokens watch: initial indexing of {} files…", total_files);
+        eprintln!(
+            "ecotokens watch: initial indexing of {} files…",
+            total_files
+        );
         let start = std::time::Instant::now();
         let result = search::index::index_directory(opts);
         let elapsed = start.elapsed().as_secs_f64();
@@ -1180,12 +1275,7 @@ fn cmd_watch(
         let watch_path_clone = watch_path.clone();
         let idx_dir_clone = idx_dir.clone();
         let watcher_handle = std::thread::spawn(move || {
-            daemon::watcher::watch_directory(
-                &watch_path_clone,
-                &idx_dir_clone,
-                event_tx,
-                stop_rx,
-            )
+            daemon::watcher::watch_directory(&watch_path_clone, &idx_dir_clone, event_tx, stop_rx)
         });
 
         // Background mode: log events to watch.log
@@ -1201,8 +1291,7 @@ fn cmd_watch(
 
         while let Ok(e) = event_rx.recv() {
             if let Some(ref path) = log_file {
-                let line =
-                    format!("[{}] {} {}\n", e.timestamp, e.path.display(), e.status);
+                let line = format!("[{}] {} {}\n", e.timestamp, e.path.display(), e.status);
                 let _ = std::fs::OpenOptions::new()
                     .create(true)
                     .append(true)
@@ -1241,32 +1330,64 @@ fn main() {
     let cli = Cli::parse();
     match cli.command {
         Commands::Hook => hook::handle(),
+        Commands::HookGemini => hook::handle_gemini(),
         Commands::Filter { args, debug } => cmd_filter(args, debug),
-        Commands::Gain { period, json, model } => cmd_gain(period, json, model),
-        Commands::Install { with_mcp, target, ai_summary, ai_summary_model } => {
-            cmd_install(with_mcp, target, ai_summary, ai_summary_model)
-        }
+        Commands::Gain {
+            period,
+            json,
+            model,
+        } => cmd_gain(period, json, model),
+        Commands::Install {
+            with_mcp,
+            target,
+            ai_summary,
+            ai_summary_model,
+        } => cmd_install(with_mcp, target, ai_summary, ai_summary_model),
         Commands::Uninstall { target } => cmd_uninstall(target),
-        Commands::Config { json, embed_provider, embed_url } => {
-            cmd_config(json, embed_provider, embed_url)
-        }
-        Commands::Index { path, index_dir, reset } => cmd_index(path, index_dir, reset),
-        Commands::Outline { path, kinds, depth, json } => cmd_outline(path, kinds, depth, json),
+        Commands::Config {
+            json,
+            embed_provider,
+            embed_url,
+        } => cmd_config(json, embed_provider, embed_url),
+        Commands::Index {
+            path,
+            index_dir,
+            reset,
+        } => cmd_index(path, index_dir, reset),
+        Commands::Outline {
+            path,
+            kinds,
+            depth,
+            json,
+        } => cmd_outline(path, kinds, depth, json),
         Commands::Symbol { id, index_dir } => cmd_symbol(id, index_dir),
-        Commands::Search { query, top_k, index_dir, json } => {
-            cmd_search(query, top_k, index_dir, json)
-        }
+        Commands::Search {
+            query,
+            top_k,
+            index_dir,
+            json,
+        } => cmd_search(query, top_k, index_dir, json),
         Commands::Trace { action } => match action {
-            TraceAction::Callers { symbol, index_dir, json } => {
-                cmd_trace_callers(symbol, index_dir, json)
-            }
-            TraceAction::Callees { symbol, depth, index_dir, json } => {
-                cmd_trace_callees(symbol, depth, index_dir, json)
-            }
+            TraceAction::Callers {
+                symbol,
+                index_dir,
+                json,
+            } => cmd_trace_callers(symbol, index_dir, json),
+            TraceAction::Callees {
+                symbol,
+                depth,
+                index_dir,
+                json,
+            } => cmd_trace_callees(symbol, depth, index_dir, json),
         },
-        Commands::Watch { path, index_dir, background, status, stop, json } => {
-            cmd_watch(path, index_dir, background, status, stop, json)
-        }
+        Commands::Watch {
+            path,
+            index_dir,
+            background,
+            status,
+            stop,
+            json,
+        } => cmd_watch(path, index_dir, background, status, stop, json),
         Commands::Mcp { index_dir } => cmd_mcp(index_dir),
     }
 }

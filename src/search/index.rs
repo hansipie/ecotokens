@@ -33,7 +33,14 @@ pub fn build_schema() -> (Schema, Field, Field, Field, Field, Field) {
     let kind = builder.add_text_field("kind", STRING | STORED); // "bm25" | "symbol"
     let line_start = builder.add_u64_field("line_start", STORED);
     let symbol_id = builder.add_text_field("symbol_id", STRING | STORED);
-    (builder.build(), file_path, content, kind, line_start, symbol_id)
+    (
+        builder.build(),
+        file_path,
+        content,
+        kind,
+        line_start,
+        symbol_id,
+    )
 }
 
 pub fn open_or_create_index(index_dir: &Path, reset: bool) -> tantivy::Result<Index> {
@@ -54,7 +61,8 @@ pub fn open_or_create_index(index_dir: &Path, reset: bool) -> tantivy::Result<In
 /// de chaque chunk dans `{index_dir}/embeddings.json`.
 pub fn index_directory(opts: IndexOptions) -> tantivy::Result<IndexStats> {
     let index = open_or_create_index(&opts.index_dir, opts.reset)?;
-    let (_, file_path_field, content_field, kind_field, line_start_field, _symbol_id_field) = build_schema();
+    let (_, file_path_field, content_field, kind_field, line_start_field, _symbol_id_field) =
+        build_schema();
 
     let mut writer: IndexWriter = index.writer(50_000_000)?;
 
@@ -91,7 +99,8 @@ pub fn index_directory(opts: IndexOptions) -> tantivy::Result<IndexStats> {
             Err(_) => continue,
         };
 
-        let rel_path = path.strip_prefix(&opts.path)
+        let rel_path = path
+            .strip_prefix(&opts.path)
             .map(|p| p.to_string_lossy().into_owned())
             .unwrap_or_else(|_| path.to_string_lossy().into_owned());
 
@@ -117,9 +126,7 @@ pub fn index_directory(opts: IndexOptions) -> tantivy::Result<IndexStats> {
         // Symbolic indexing (tree-sitter for code, regex for docs)
         let ext = path.extension().and_then(|e| e.to_str()).unwrap_or("");
         let mut symbols = match ext {
-            "rs" | "py" | "js" | "ts" | "jsx" | "tsx" => {
-                parse_symbols(path).unwrap_or_default()
-            }
+            "rs" | "py" | "js" | "ts" | "jsx" | "tsx" => parse_symbols(path).unwrap_or_default(),
             "md" | "markdown" | "toml" | "json" | "yaml" | "yml" => {
                 index_text_doc(path, &rel_path).unwrap_or_default()
             }
@@ -153,7 +160,10 @@ pub fn index_directory(opts: IndexOptions) -> tantivy::Result<IndexStats> {
         let _ = save_embeddings(&opts.index_dir, &embeddings);
     }
 
-    Ok(IndexStats { file_count, chunk_count })
+    Ok(IndexStats {
+        file_count,
+        chunk_count,
+    })
 }
 
 /// Count files that would be considered indexable during indexing.
@@ -174,5 +184,8 @@ pub fn count_indexable_files(path: &Path) -> u64 {
 }
 
 fn is_indexable_extension(ext: &str) -> bool {
-    matches!(ext, "rs" | "py" | "js" | "ts" | "md" | "toml" | "json" | "yaml" | "yml" | "txt")
+    matches!(
+        ext,
+        "rs" | "py" | "js" | "ts" | "md" | "toml" | "json" | "yaml" | "yml" | "txt"
+    )
 }

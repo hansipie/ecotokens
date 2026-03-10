@@ -28,7 +28,8 @@ pub fn mask(text: &str) -> (String, bool) {
     }
 
     // PEM private key block
-    let re_pem = regex!(r"(?s)-----BEGIN [A-Z ]* PRIVATE KEY-----.*?-----END [A-Z ]* PRIVATE KEY-----");
+    let re_pem =
+        regex!(r"(?s)-----BEGIN [A-Z ]* PRIVATE KEY-----.*?-----END [A-Z ]* PRIVATE KEY-----");
     if re_pem.is_match(&out) {
         out = re_pem.replace_all(&out, "[PRIVATE_KEY]").into_owned();
         redacted = true;

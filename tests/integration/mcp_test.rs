@@ -48,7 +48,10 @@ fn send_jsonrpc(
 
     let mut line = String::new();
     stdout.read_line(&mut line).unwrap();
-    assert!(!line.is_empty(), "expected response from MCP server, got empty line");
+    assert!(
+        !line.is_empty(),
+        "expected response from MCP server, got empty line"
+    );
     serde_json::from_str(line.trim()).expect(&format!("failed to parse response JSON: {line}"))
 }
 
@@ -92,10 +95,16 @@ fn mcp_server_responds_to_initialize() {
     let mut stdout = BufReader::new(child.stdout.take().unwrap());
 
     let resp = send_jsonrpc(&mut stdin, &mut stdout, &init_request());
-    assert!(resp.get("result").is_some(), "initialize should return result, got: {resp}");
+    assert!(
+        resp.get("result").is_some(),
+        "initialize should return result, got: {resp}"
+    );
     let result = &resp["result"];
     assert!(
-        result["serverInfo"]["name"].as_str().unwrap_or("").contains("ecotokens"),
+        result["serverInfo"]["name"]
+            .as_str()
+            .unwrap_or("")
+            .contains("ecotokens"),
         "server name should contain ecotokens, got: {result}"
     );
 
@@ -365,12 +374,9 @@ fn mcp_unknown_tool_returns_error() {
     });
     let resp = send_jsonrpc(&mut stdin, &mut stdout, &call);
     // Unknown tool should return error or result with isError=true
-    let has_error = resp.get("error").is_some()
-        || resp["result"]["isError"].as_bool().unwrap_or(false);
-    assert!(
-        has_error,
-        "unknown tool should return error, got: {resp}"
-    );
+    let has_error =
+        resp.get("error").is_some() || resp["result"]["isError"].as_bool().unwrap_or(false);
+    assert!(has_error, "unknown tool should return error, got: {resp}");
 
     drop(stdin);
     let _ = child.kill();

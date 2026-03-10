@@ -61,7 +61,13 @@ fn compact_diff(output: &str) -> String {
 
     // Compact output is still too long — truncate to DIFF_MAX_LINES
     let head: Vec<&str> = filtered.iter().take(DIFF_MAX_LINES / 2).copied().collect();
-    let tail: Vec<&str> = filtered.iter().rev().take(DIFF_MAX_LINES / 2).rev().copied().collect();
+    let tail: Vec<&str> = filtered
+        .iter()
+        .rev()
+        .take(DIFF_MAX_LINES / 2)
+        .rev()
+        .copied()
+        .collect();
     let omitted = total_filtered.saturating_sub(DIFF_MAX_LINES);
     format!(
         "{}\n[ecotokens] ... {} diff lines omitted ({} total) ...\n{}",
@@ -89,7 +95,10 @@ fn filter_git_log(output: &str) -> String {
             after_commit_header = true;
             message_lines = 0;
             result.push(*line);
-        } else if line.starts_with("Author:") || line.starts_with("Date:") || line.starts_with("Merge:") {
+        } else if line.starts_with("Author:")
+            || line.starts_with("Date:")
+            || line.starts_with("Merge:")
+        {
             result.push(*line);
         } else if after_commit_header && message_lines < 2 {
             // Keep short commit message (up to 2 lines)

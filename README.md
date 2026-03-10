@@ -1,20 +1,22 @@
 # ecotokens
 
-Token-saving companion for [Claude Code](https://claude.ai/code) and [GitHub Copilot](https://github.com/features/copilot) (VS Code). ecotokens intercepts tool outputs before they reach the model, filters the noise, and records how many tokens you saved.
+Token-saving companion for [Claude Code](https://claude.ai/code), [Gemini CLI](https://github.com/google-gemini/gemini-cli), and [GitHub Copilot](https://github.com/features/copilot) (VS Code). ecotokens intercepts tool outputs before they reach the model, filters the noise, and records how many tokens you saved.
 
 ## How it works
 
 ecotokens works in two complementary modes:
 
-**Hook mode (Claude Code only)** — installs as a `PreToolUse` hook. When Claude runs a shell command, ecotokens:
+**Hook mode (Claude Code + Gemini CLI)** — installs as a hook that fires before every shell command. When the AI runs a shell command, ecotokens:
 
 1. Runs the command and captures its output
 2. Applies a family-specific filter (git, cargo, python, …)
 3. Optionally summarizes large outputs via a local AI model (Ollama)
-4. Returns the compressed output to Claude
+4. Returns the compressed output to the model
 5. Records the before/after token counts in a local metrics store
 
-**MCP server mode (Claude Code + GitHub Copilot in VS Code)** — exposes tools the model can call directly: codebase search, symbol lookup, call graph tracing, and `ecotokens_run` (runs any shell command and returns token-optimized output).
+Claude Code uses the `PreToolUse` hook (`~/.claude/settings.json`). Gemini CLI uses the `BeforeTool` hook (`~/.gemini/settings.json`).
+
+**MCP server mode (Claude Code + Gemini CLI + GitHub Copilot in VS Code)** — exposes tools the model can call directly: codebase search, symbol lookup, call graph tracing, and `ecotokens_run` (runs any shell command and returns token-optimized output).
 
 The result: the model sees clean, concise output — and you keep your context window.
 
@@ -39,11 +41,25 @@ ecotokens install --target vscode
 
 This writes the MCP server entry into `~/.config/Code/User/settings.json`. Copilot in Agent mode will then have access to all ecotokens tools.
 
-### Both at once
+### Gemini CLI
+
+Requires [Gemini CLI](https://github.com/google-gemini/gemini-cli) ≥ 0.1.0.
+
+```bash
+cargo install --path .
+ecotokens install --target gemini                # hook only
+ecotokens install --target gemini --with-mcp     # hook + MCP server
+```
+
+This writes a `BeforeTool` hook entry and (optionally) an MCP server entry into `~/.gemini/settings.json`.
+
+### All targets at once
 
 ```bash
 ecotokens install --target all --with-mcp
 ```
+
+`--target all` covers Claude Code, Gemini CLI, and VS Code in a single command.
 
 ### With AI summarization
 
@@ -60,9 +76,10 @@ This writes `ai_summary_enabled` and `ai_summary_model` to `~/.config/ecotokens/
 ### Uninstall
 
 ```bash
-ecotokens uninstall                   # Claude Code
-ecotokens uninstall --target vscode   # VS Code
-ecotokens uninstall --target all      # both
+ecotokens uninstall                    # Claude Code
+ecotokens uninstall --target vscode    # VS Code
+ecotokens uninstall --target gemini    # Gemini CLI
+ecotokens uninstall --target all       # all targets
 ```
 
 ## Commands
@@ -165,7 +182,7 @@ ai_summary_model      : llama3.2:3b (default)
 
 ## MCP server
 
-When registered (via `--with-mcp` for Claude Code, or `--target vscode` for Copilot), ecotokens exposes these tools:
+When registered (via `--with-mcp` for Claude Code or Gemini CLI, or `--target vscode` for Copilot), ecotokens exposes these tools:
 
 | Tool | Description |
 |------|-------------|
@@ -215,7 +232,7 @@ Ollama must be running locally. The model is called with a 3-second timeout to a
 ## Requirements
 
 - Rust ≥ 1.75 (stable)
-- Claude Code with hook support, and/or VS Code ≥ 1.99 with GitHub Copilot
+- One or more of: Claude Code (with hook support), Gemini CLI ≥ 0.1.0, VS Code ≥ 1.99 with GitHub Copilot
 - Ollama (optional, for semantic search embeddings and AI summarization)
 
 ## License

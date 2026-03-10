@@ -31,7 +31,10 @@ pub fn filter_grep(output: &str) -> String {
     let total_matches: usize = file_matches.values().map(|v| v.len()).sum();
     let file_count = file_matches.len();
 
-    let mut result = vec![format!("🔍 {} matches in {} files:", total_matches, file_count)];
+    let mut result = vec![format!(
+        "🔍 {} matches in {} files:",
+        total_matches, file_count
+    )];
 
     for file in &order {
         let matches = &file_matches[file];

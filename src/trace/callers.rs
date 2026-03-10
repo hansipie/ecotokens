@@ -5,15 +5,12 @@ use tantivy::query::TermQuery;
 use tantivy::schema::{IndexRecordOption, Value};
 use tantivy::{Index, ReloadPolicy, TantivyDocument, Term};
 
-use crate::search::index::build_schema;
 use super::{CallEdge, TraceError};
+use crate::search::index::build_schema;
 
 /// Find all callers of the given symbol name in the indexed codebase.
 /// Searches symbol source code for call expressions matching `symbol_name(`.
-pub fn find_callers(
-    symbol_name: &str,
-    index_dir: &Path,
-) -> Result<Vec<CallEdge>, TraceError> {
+pub fn find_callers(symbol_name: &str, index_dir: &Path) -> Result<Vec<CallEdge>, TraceError> {
     let index = match Index::open_in_dir(index_dir) {
         Ok(i) => i,
         Err(_) => return Err(TraceError::IndexNotFound),
@@ -51,7 +48,13 @@ pub fn find_callers(
             .unwrap_or("");
 
         // Check if this symbol's name matches the target (skip self)
-        let sym_name = sid.split("::").last().unwrap_or(sid).split('#').next().unwrap_or("");
+        let sym_name = sid
+            .split("::")
+            .last()
+            .unwrap_or(sid)
+            .split('#')
+            .next()
+            .unwrap_or("");
         if sym_name == symbol_name {
             continue;
         }

@@ -116,9 +116,7 @@ pub fn cosine_similarity(a: &[f32], b: &[f32]) -> f32 {
 
 /// Charge la table d'embeddings depuis le fichier JSON dans le répertoire d'index.
 /// Retourne une map `"file_path:chunk_idx" → Vec<f32>`.
-pub fn load_embeddings(
-    index_dir: &std::path::Path,
-) -> std::collections::HashMap<String, Vec<f32>> {
+pub fn load_embeddings(index_dir: &std::path::Path) -> std::collections::HashMap<String, Vec<f32>> {
     let path = index_dir.join("embeddings.json");
     let Ok(data) = std::fs::read_to_string(&path) else {
         return std::collections::HashMap::new();

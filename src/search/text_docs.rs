@@ -51,7 +51,10 @@ fn extract_toml(content: &str, rel_path: &str) -> Vec<Symbol> {
     for (line_idx, line) in content.lines().enumerate() {
         let trimmed = line.trim();
         if trimmed.starts_with('[') && trimmed.ends_with(']') && !trimmed.starts_with("[[") {
-            let name = trimmed.trim_matches(|c| c == '[' || c == ']').trim().to_string();
+            let name = trimmed
+                .trim_matches(|c| c == '[' || c == ']')
+                .trim()
+                .to_string();
             if name.is_empty() {
                 continue;
             }

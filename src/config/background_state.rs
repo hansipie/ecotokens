@@ -96,9 +96,10 @@ impl BackgroundState {
                 .status()?;
 
             if !status.success() {
-                return Err(std::io::Error::other(
-                    format!("Failed to stop process {}", self.pid),
-                ));
+                return Err(std::io::Error::other(format!(
+                    "Failed to stop process {}",
+                    self.pid
+                )));
             }
         }
 
@@ -111,9 +112,10 @@ impl BackgroundState {
                 .status()?;
 
             if !status.success() {
-                return Err(std::io::Error::other(
-                    format!("Failed to stop process {}", self.pid),
-                ));
+                return Err(std::io::Error::other(format!(
+                    "Failed to stop process {}",
+                    self.pid
+                )));
             }
         }
 

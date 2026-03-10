@@ -30,13 +30,17 @@ fn podman_logs_deduplicates_repeated_lines() {
 fn docker_logs_short_passes_through() {
     let input = "Starting service\nService ready\n";
     let out = filter_container("docker logs myapp", input);
-    assert!(out.contains("Starting service"), "short logs should pass through");
+    assert!(
+        out.contains("Starting service"),
+        "short logs should pass through"
+    );
     assert!(out.contains("Service ready"), "all lines should be present");
 }
 
 #[test]
 fn kubectl_get_short_passes_through() {
-    let input = "NAME    READY   STATUS    RESTARTS   AGE\nmyapp   1/1     Running   0          5m\n";
+    let input =
+        "NAME    READY   STATUS    RESTARTS   AGE\nmyapp   1/1     Running   0          5m\n";
     let out = filter_container("kubectl get pods", input);
     assert!(out.contains("Running"), "pod status should be kept");
 }
@@ -48,7 +52,10 @@ fn kubectl_get_many_rows_truncated() {
         input.push_str(&format!("pod-{}   1/1     Running   0          5m\n", i));
     }
     let out = filter_container("kubectl get pods", &input);
-    assert!(out.contains("[ecotokens]"), "should have summary marker for many rows");
+    assert!(
+        out.contains("[ecotokens]"),
+        "should have summary marker for many rows"
+    );
     assert!(out.contains("omitted"), "should say rows were omitted");
 }
 
@@ -76,7 +83,10 @@ fn docker_images_compact_format() {
         ));
     }
     let out = filter_container("docker images", &input);
-    assert!(out.contains("myapp/service0:latest"), "should use repo:tag format");
+    assert!(
+        out.contains("myapp/service0:latest"),
+        "should use repo:tag format"
+    );
     assert!(out.contains("250MB"), "size should be present");
     assert!(!out.contains("abc0def456"), "image ID should be removed");
 }
@@ -91,6 +101,9 @@ fn podman_images_compact_format() {
         ));
     }
     let out = filter_container("podman images", &input);
-    assert!(out.contains("registry/image0:v1.0"), "should use repo:tag format");
+    assert!(
+        out.contains("registry/image0:v1.0"),
+        "should use repo:tag format"
+    );
     assert!(out.contains("180MB"), "size should be present");
 }
