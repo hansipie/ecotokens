@@ -485,18 +485,32 @@ fn cmd_install(with_mcp: bool, target: String, ai_summary: bool, ai_summary_mode
             Some(ref p) => match install::install_vscode_mcp(p) {
                 Ok(()) => {
                     println!(
-                        "ecotokens MCP server registered (VS Code) → {}",
+                        "ecotokens MCP server registered (VS Code settings.json) → {}",
                         p.display()
                     )
                 }
                 Err(e) => {
-                    eprintln!("install error (vscode): {e}");
+                    eprintln!("install error (vscode settings.json): {e}");
                     std::process::exit(1);
                 }
             },
             None => {
                 eprintln!("cannot determine VS Code settings path on this system");
                 std::process::exit(1);
+            }
+        }
+        if let Some(mcp_json_path) = install::default_vscode_mcp_json_path() {
+            match install::install_vscode_mcp_json(&mcp_json_path) {
+                Ok(()) => {
+                    println!(
+                        "ecotokens MCP server registered (VS Code mcp.json) → {}",
+                        mcp_json_path.display()
+                    )
+                }
+                Err(e) => {
+                    eprintln!("install error (vscode mcp.json): {e}");
+                    std::process::exit(1);
+                }
             }
         }
     }
@@ -589,30 +603,52 @@ fn cmd_uninstall(target: String) {
     }
 
     if uninstall_vscode {
+        let mcp_json_path = install::default_vscode_mcp_json_path();
+        let had_settings = vscode_path
+            .as_deref()
+            .is_some_and(install::is_vscode_mcp_registered);
+        let had_json = mcp_json_path
+            .as_deref()
+            .is_some_and(install::is_vscode_mcp_json_registered);
+
         match vscode_path {
-            Some(ref p) => {
-                let had_vscode = install::is_vscode_mcp_registered(p);
-                match install::uninstall_vscode_mcp(p) {
-                    Ok(()) => {
-                        if had_vscode {
-                            println!(
-                                "ecotokens MCP server unregistered (VS Code) ← {}",
-                                p.display()
-                            );
-                        } else {
-                            println!("ecotokens: nothing to uninstall (vscode)");
-                        }
-                    }
-                    Err(e) => {
-                        eprintln!("uninstall error (vscode): {e}");
-                        std::process::exit(1);
+            Some(ref p) => match install::uninstall_vscode_mcp(p) {
+                Ok(()) => {
+                    if had_settings {
+                        println!(
+                            "ecotokens MCP server unregistered (VS Code settings.json) ← {}",
+                            p.display()
+                        );
                     }
                 }
-            }
+                Err(e) => {
+                    eprintln!("uninstall error (vscode settings.json): {e}");
+                    std::process::exit(1);
+                }
+            },
             None => {
                 eprintln!("cannot determine VS Code settings path on this system");
                 std::process::exit(1);
             }
+        }
+        if let Some(ref p) = mcp_json_path {
+            match install::uninstall_vscode_mcp_json(p) {
+                Ok(()) => {
+                    if had_json {
+                        println!(
+                            "ecotokens MCP server unregistered (VS Code mcp.json) ← {}",
+                            p.display()
+                        );
+                    }
+                }
+                Err(e) => {
+                    eprintln!("uninstall error (vscode mcp.json): {e}");
+                    std::process::exit(1);
+                }
+            }
+        }
+        if !had_settings && !had_json {
+            println!("ecotokens: nothing to uninstall (vscode)");
         }
     }
 
@@ -755,17 +791,8 @@ fn cmd_index(path: Option<PathBuf>, index_dir: Option<PathBuf>, reset: bool) {
         use std::sync::atomic::{AtomicUsize, Ordering};
         use std::sync::Arc;
 
-        // First pass: count indexable files.
-        let total = {
-            let walker = ignore::WalkBuilder::new(&target)
-                .hidden(false)
-                .git_ignore(true)
-                .build();
-            walker
-                .filter_map(|e| e.ok())
-                .filter(|e| e.path().is_file())
-                .count() as u64
-        };
+        // First pass: count indexable files (same filter as the indexer uses).
+        let total = search::index::count_indexable_files(&target);
 
         let counter = Arc::new(AtomicUsize::new(0));
         let opts = search::index::IndexOptions {
@@ -813,8 +840,7 @@ fn cmd_index(path: Option<PathBuf>, index_dir: Option<PathBuf>, reset: bool) {
                     tui::progress::render_progress(f, f.area(), total, total.max(1), "Indexing…");
                 });
             }
-            let result = handle.join().expect("indexing thread panicked");
-            result
+            handle.join().expect("indexing thread panicked")
         };
 
         // _guard drops here, restoring terminal before printing result

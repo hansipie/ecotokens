@@ -168,7 +168,9 @@ pub fn install_vscode_mcp(vscode_settings_path: &Path) -> InstallResult {
     let mut v = read_settings(vscode_settings_path);
 
     let servers = v["mcp"]["servers"].as_object().cloned().unwrap_or_default();
-    if servers.contains_key(VSCODE_MCP_KEY) {
+
+    let needs_install = servers.get(VSCODE_MCP_KEY).is_none();
+    if !needs_install {
         return Ok(());
     }
 
@@ -200,10 +202,56 @@ pub fn uninstall_vscode_mcp(vscode_settings_path: &Path) -> InstallResult {
 /// Check if the ecotokens MCP server is registered in VS Code's user settings.json.
 pub fn is_vscode_mcp_registered(vscode_settings_path: &Path) -> bool {
     let v = read_settings(vscode_settings_path);
-    v["mcp"]["servers"]
-        .as_object()
-        .map(|m| m.contains_key(VSCODE_MCP_KEY))
-        .unwrap_or(false)
+    let server = &v["mcp"]["servers"][VSCODE_MCP_KEY];
+    server.is_object()
+}
+
+// ============================================================================
+// VS Code mcp.json Support (Copilot 1.x+ dedicated file, format: servers.*)
+// ============================================================================
+
+/// Return the default path to VS Code's dedicated `mcp.json` (Copilot 1.x+).
+pub fn default_vscode_mcp_json_path() -> Option<std::path::PathBuf> {
+    dirs::config_dir().map(|d| d.join("Code").join("User").join("mcp.json"))
+}
+
+/// Register the ecotokens MCP server in VS Code's `mcp.json` (idempotent).
+/// The `mcp.json` format uses `servers` at the root (no `mcp` wrapper).
+pub fn install_vscode_mcp_json(path: &Path) -> InstallResult {
+    let mut v = read_settings(path);
+    let servers = v["servers"].as_object().cloned().unwrap_or_default();
+    if servers.contains_key(VSCODE_MCP_KEY) {
+        return Ok(());
+    }
+    let mut new_servers = servers;
+    new_servers.insert(
+        VSCODE_MCP_KEY.to_string(),
+        serde_json::json!({
+            "type": "stdio",
+            "command": "ecotokens",
+            "args": ["mcp"]
+        }),
+    );
+    v["servers"] = serde_json::Value::Object(new_servers);
+    write_settings(path, &v)
+}
+
+/// Check if the ecotokens MCP server is registered in VS Code's `mcp.json`.
+pub fn is_vscode_mcp_json_registered(path: &Path) -> bool {
+    let v = read_settings(path);
+    v["servers"][VSCODE_MCP_KEY].is_object()
+}
+
+/// Remove the ecotokens MCP entry from VS Code's `mcp.json` (idempotent).
+pub fn uninstall_vscode_mcp_json(path: &Path) -> InstallResult {
+    if !path.exists() {
+        return Ok(());
+    }
+    let mut v = read_settings(path);
+    if let Some(servers) = v["servers"].as_object_mut() {
+        servers.remove(VSCODE_MCP_KEY);
+    }
+    write_settings(path, &v)
 }
 
 // ============================================================================
