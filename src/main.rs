@@ -747,14 +747,6 @@ fn cmd_config(json: bool, embed_provider: Option<String>, embed_url: Option<Stri
         println!("mcp_registered        : {}", mcp_registered);
         println!("vscode_mcp_registered : {}", vscode_mcp_registered);
         println!("debug                 : {}", settings.debug);
-        println!(
-            "threshold_lines       : {}",
-            settings.summary_threshold_lines
-        );
-        println!(
-            "threshold_bytes       : {}",
-            settings.summary_threshold_bytes
-        );
         println!("exclusions            : {:?}", settings.exclusions);
         println!("embed_provider        : {}", provider_str);
         println!("ai_summary_enabled    : {}", settings.ai_summary_enabled);
@@ -772,8 +764,6 @@ fn cmd_config(json: bool, embed_provider: Option<String>, embed_url: Option<Stri
                 .as_deref()
                 .unwrap_or("http://localhost:11434 (default)")
         );
-        println!("ai_summary_min_tokens : {}", settings.ai_summary_min_tokens);
-        println!("ai_summary_timeout_ms : {}", settings.ai_summary_timeout_ms);
     }
 }
 
