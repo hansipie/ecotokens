@@ -128,10 +128,8 @@ pub fn aggregate(items: &[Interception], period: Period, model: &str) -> Report 
     for item in &filtered {
         if let Some(root) = &item.git_root {
             let root = root.trim();
-            if root.is_empty() {
-                continue;
-            }
-            let entry = by_project.entry(root.to_string()).or_insert(ProjectStats {
+            let key = if root.is_empty() { "(unknown)" } else { root };
+            let entry = by_project.entry(key.to_string()).or_insert(ProjectStats {
                 count: 0,
                 tokens_before: 0,
                 tokens_after: 0,

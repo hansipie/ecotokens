@@ -11,9 +11,6 @@ use super::tools::*;
 #[derive(Debug, Clone)]
 pub struct EcotokensServer {
     index_dir: PathBuf,
-    /// Git root detected once at server startup; used as best-effort workspace for metrics
-    /// attribution when the caller does not supply an explicit cwd.
-    workspace_root: Option<PathBuf>,
     #[allow(dead_code)]
     tool_router: ToolRouter<Self>,
 }
@@ -22,35 +19,8 @@ impl EcotokensServer {
     pub fn new(index_dir: PathBuf) -> Self {
         Self {
             index_dir,
-            workspace_root: Self::detect_workspace_root(),
             tool_router: Self::tool_router(),
         }
-    }
-
-    /// Detect the workspace root at server startup.
-    ///
-    /// Priority:
-    /// 1. `ECOTOKENS_WORKSPACE_ROOT` env var (set by VS Code via MCP server config)
-    /// 2. Git root of the server process's current directory
-    fn detect_workspace_root() -> Option<PathBuf> {
-        if let Ok(root) = std::env::var("ECOTOKENS_WORKSPACE_ROOT") {
-            if let Ok(canonical) = std::fs::canonicalize(&root) {
-                if canonical.is_dir() {
-                    return Some(canonical);
-                }
-            }
-        }
-        let cwd = std::env::current_dir().ok()?;
-        let output = std::process::Command::new("git")
-            .args(["rev-parse", "--show-toplevel"])
-            .current_dir(&cwd)
-            .output()
-            .ok()?;
-        let root = String::from_utf8_lossy(&output.stdout).trim().to_string();
-        if root.is_empty() {
-            return None;
-        }
-        std::fs::canonicalize(root).ok()
     }
 
     fn resolve_run_cwd(&self, cwd: Option<&str>) -> Result<PathBuf, String> {
@@ -183,21 +153,11 @@ impl EcotokensServer {
         };
         let duration_ms = start.elapsed().as_millis() as u32;
 
-        // Resolve the cwd to use for metrics git-root attribution.
-        // Priority: explicit cwd param > ECOTOKENS_WORKSPACE_ROOT (already folded into
-        // resolve_run_cwd) > workspace_root detected at server startup.
-        // This ensures commands run by Copilot (which never supplies cwd) are still
-        // attributed to the correct project in `ecotokens gain`.
-        let metrics_cwd = if params.cwd.is_some()
-            || std::env::var("ECOTOKENS_WORKSPACE_ROOT").is_ok()
-        {
-            Some(cwd.as_path())
-        } else {
-            self.workspace_root.as_deref()
-        };
-
+        // Always use the resolved run cwd for metrics attribution — it is already
+        // the most specific directory available (explicit param > ECOTOKENS_WORKSPACE_ROOT
+        // > current_dir fallback from resolve_run_cwd).
         let (filtered, _before, _after) =
-            crate::filter::run_filter_pipeline_with_cwd(command, &raw, duration_ms, metrics_cwd);
+            crate::filter::run_filter_pipeline_with_cwd(command, &raw, duration_ms, Some(cwd.as_path()));
         filtered
     }
 }
