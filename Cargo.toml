@@ -43,13 +43,13 @@ tokio = { version = "1", features = ["rt", "macros", "io-util"] }
 # P3 daemon — file watcher
 notify = "6"
 
-# Daemonization for background watch
-[target.'cfg(unix)'.dependencies]
-daemonize = "0.5"
-
 # Optional
 tiktoken-rs = { version = "0.5", optional = true }
 reqwest = { version = "0.12", features = ["json", "blocking", "rustls-tls"], default-features = false, optional = true }
+
+# Daemonization for background watch
+[target.'cfg(unix)'.dependencies]
+daemonize = "0.5"
 
 [dev-dependencies]
 tempfile = "3"
