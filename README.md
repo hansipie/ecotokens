@@ -16,9 +16,17 @@ ecotokens works in two complementary modes:
 
 Claude Code uses the `PreToolUse` hook (`~/.claude/settings.json`). Gemini CLI uses the `BeforeTool` hook (`~/.gemini/settings.json`).
 
+For a focused view of the runtime path, see [`docs/hook-filter-metrics-flow.md`](docs/hook-filter-metrics-flow.md).
+
 **MCP server mode (Claude Code + Gemini CLI + GitHub Copilot in VS Code)** — exposes tools the model can call directly: codebase search, symbol lookup, call graph tracing, and `ecotokens_run` (runs any shell command and returns token-optimized output).
 
 The result: the model sees clean, concise output — and you keep your context window.
+
+## Quick install
+
+```bash
+cargo install --git https://github.com/hansipie/ecotokens
+```
 
 ## Installation
 
