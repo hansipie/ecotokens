@@ -1,0 +1,116 @@
+name: Release
+
+on:
+  push:
+    tags:
+      - 'v[0-9]+.[0-9]+.[0-9]+'
+
+permissions:
+  contents: write
+
+jobs:
+  build:
+    name: Build ${{ matrix.target }}
+    runs-on: ${{ matrix.os }}
+    strategy:
+      fail-fast: false
+      matrix:
+        include:
+          # Linux (glibc) – most servers & desktops
+          - target: x86_64-unknown-linux-gnu
+            os: ubuntu-latest
+            archive: tar.gz
+
+          # Linux (musl) – fully static, Alpine, containers
+          - target: x86_64-unknown-linux-musl
+            os: ubuntu-latest
+            archive: tar.gz
+            apt: musl-tools
+
+          # ARM64 Linux (Raspberry Pi, AWS Graviton…)
+          - target: aarch64-unknown-linux-musl
+            os: ubuntu-latest
+            archive: tar.gz
+            apt: gcc-aarch64-linux-gnu musl-tools
+            linker: aarch64-linux-gnu-gcc
+
+          # macOS (Intel)
+          - target: x86_64-apple-darwin
+            os: macos-latest
+            archive: tar.gz
+
+          # macOS (Apple Silicon)
+          - target: aarch64-apple-darwin
+            os: macos-latest
+            archive: tar.gz
+
+          # Windows
+          - target: x86_64-pc-windows-msvc
+            os: windows-latest
+            archive: zip
+
+    steps:
+      - uses: actions/checkout@v4
+
+      - uses: dtolnay/rust-toolchain@stable
+        with:
+          targets: ${{ matrix.target }}
+
+      - uses: Swatinem/rust-cache@v2
+        with:
+          key: release-${{ matrix.target }}
+
+      - name: Install system deps
+        if: matrix.apt != ''
+        run: sudo apt-get install -y ${{ matrix.apt }}
+
+      - name: Set cross-linker
+        if: matrix.linker != ''
+        run: |
+          mkdir -p .cargo
+          printf '[target.${{ matrix.target }}]\nlinker = "${{ matrix.linker }}"\n' >> .cargo/config.toml
+
+      - name: Build release binary
+        run: cargo build --release --target ${{ matrix.target }}
+
+      # ── Package ──────────────────────────────────────────────────────────
+      - name: Package (tar.gz)
+        if: matrix.archive == 'tar.gz'
+        shell: bash
+        run: |
+          BIN=target/${{ matrix.target }}/release/ecotokens
+          ASSET=ecotokens-${{ github.ref_name }}-${{ matrix.target }}.tar.gz
+          tar czf "$ASSET" -C "$(dirname "$BIN")" "$(basename "$BIN")"
+          echo "ASSET=$ASSET" >> "$GITHUB_ENV"
+
+      - name: Package (zip, Windows)
+        if: matrix.archive == 'zip'
+        shell: pwsh
+        run: |
+          $bin = "target/${{ matrix.target }}/release/ecotokens.exe"
+          $asset = "ecotokens-${{ github.ref_name }}-${{ matrix.target }}.zip"
+          Compress-Archive -Path $bin -DestinationPath $asset
+          "ASSET=$asset" | Out-File -Append $Env:GITHUB_ENV
+
+      - name: Upload artifact
+        uses: actions/upload-artifact@v4
+        with:
+          name: ${{ matrix.target }}
+          path: ${{ env.ASSET }}
+
+  # ── Create GitHub Release and attach all assets ──────────────────────────
+  release:
+    name: Publish release
+    needs: build
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/download-artifact@v4
+        with:
+          path: artifacts
+          merge-multiple: true
+
+      - name: Create release
+        uses: softprops/action-gh-release@v2
+        with:
+          generate_release_notes: true
+          files: artifacts/*
