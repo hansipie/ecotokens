@@ -100,7 +100,7 @@ fn by_project_groups_by_git_root() {
 }
 
 #[test]
-fn by_project_ignores_blank_git_root() {
+fn by_project_blank_git_root_groups_under_unknown() {
     let mut items = make_items();
     let mut empty_root = make_interception_ago(5, CommandFamily::Git, 1200, 600);
     empty_root.git_root = Some("   ".to_string());
@@ -109,12 +109,16 @@ fn by_project_ignores_blank_git_root() {
     let report = aggregate(&items, Period::All, "claude-sonnet-4-6");
     assert!(
         !report.by_project.contains_key(""),
-        "blank git_root should not create unnamed project"
+        "blank git_root should not create an empty-string key"
+    );
+    assert!(
+        report.by_project.contains_key("(unknown)"),
+        "blank git_root should be grouped under (unknown)"
     );
     assert_eq!(
         report.by_project.len(),
-        1,
-        "only /repo should be present in by_project"
+        2,
+        "/repo and (unknown) should both be present in by_project"
     );
 }
 

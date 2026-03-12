@@ -187,17 +187,6 @@ pub fn count_indexable_files(path: &Path) -> u64 {
 fn is_indexable_extension(ext: &str) -> bool {
     matches!(
         ext,
-        "rs"
-            | "py"
-            | "js"
-            | "ts"
-            | "jsx"
-            | "tsx"
-            | "md"
-            | "toml"
-            | "json"
-            | "yaml"
-            | "yml"
-            | "txt"
+        "rs" | "py" | "js" | "ts" | "jsx" | "tsx" | "md" | "toml" | "json" | "yaml" | "yml" | "txt"
     )
 }

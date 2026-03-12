@@ -88,23 +88,42 @@ fn project_label(name: &str) -> String {
     }
 }
 
-/// Returns family names (sorted by descending savings) for a given project.
+/// Returns true when an interception belongs to `project`.
+/// `"(unknown)"` matches items with a blank or absent `git_root`.
+fn matches_project(item: &Interception, project: &str) -> bool {
+    if project == "(unknown)" {
+        item.git_root
+            .as_deref()
+            .map(|s| s.trim().is_empty())
+            .unwrap_or(true)
+    } else {
+        item.git_root.as_deref() == Some(project)
+    }
+}
+
+/// Returns family names (sorted by descending average savings) for a given project.
 pub fn sorted_family_keys_for_project(items: &[Interception], project: &str) -> Vec<String> {
     use std::collections::HashMap;
-    let mut map: HashMap<String, f32> = HashMap::new();
-    for item in items
-        .iter()
-        .filter(|i| i.git_root.as_deref() == Some(project))
-    {
+    let mut map: HashMap<String, (f32, u64)> = HashMap::new();
+    for item in items.iter().filter(|i| matches_project(i, project)) {
         if let Some(family) = serde_json::to_value(&item.command_family)
             .ok()
             .and_then(|v| v.as_str().map(|s| s.to_string()))
         {
-            map.entry(family).or_insert(item.savings_pct);
+            let entry = map.entry(family).or_insert((0.0, 0));
+            entry.0 += item.savings_pct;
+            entry.1 += 1;
         }
     }
-    let mut families: Vec<(String, f32)> = map.into_iter().collect();
-    families.sort_by(|a, b| b.1.partial_cmp(&a.1).unwrap_or(std::cmp::Ordering::Equal));
+    let mut families: Vec<(String, f32)> = map
+        .into_iter()
+        .map(|(k, (sum, n))| (k, if n > 0 { sum / n as f32 } else { 0.0 }))
+        .collect();
+    families.sort_by(|a, b| {
+        b.1.partial_cmp(&a.1)
+            .unwrap_or(std::cmp::Ordering::Equal)
+            .then_with(|| a.0.cmp(&b.0))
+    });
     families.into_iter().map(|(k, _)| k).collect()
 }
 
@@ -112,7 +131,7 @@ pub fn sorted_family_keys_for_project(items: &[Interception], project: &str) -> 
 ///   - top:    summary stats (interceptions, tokens, savings %, cost USD)
 ///   - middle: one Gauge per command family, sorted by savings desc
 ///   - detail: last interception content for selected family (split or diff)
-///   - bottom: Sparkline of tokens saved over the last 14 days
+///   - bottom: Sparkline of tokens saved (adaptive width — one column per day)
 #[allow(clippy::too_many_arguments)]
 pub fn render_gain(
     frame: &mut Frame,
@@ -126,6 +145,7 @@ pub fn render_gain(
     detail_mode: DetailMode,
     selected_project: Option<usize>,
     project_filter: Option<&str>,
+    history_scroll: usize,
 ) {
     // Outer layout: stats | pool(family+detail) | sparkline
     let outer = Layout::default()
@@ -148,7 +168,7 @@ pub fn render_gain(
         let sel_proj = selected_project
             .and_then(|i| project_names.get(i))
             .map(String::as_str);
-        render_project_log_panel(frame, pool[1], sel_proj, items);
+        render_project_log_panel(frame, pool[1], sel_proj, items, history_scroll);
         render_sparkline(frame, outer[2], items, sparkline_mode);
         return;
     }
@@ -170,7 +190,7 @@ pub fn render_gain(
     let display_items: &[Interception] = if let Some(proj) = project_filter {
         filtered_items = items
             .iter()
-            .filter(|i| i.git_root.as_deref() == Some(proj))
+            .filter(|i| matches_project(i, proj))
             .cloned()
             .collect();
         &filtered_items
@@ -188,7 +208,14 @@ pub fn render_gain(
     let sel_name = selected_family
         .and_then(|i| family_names.get(i))
         .map(String::as_str);
-    render_detail(frame, pool[1], sel_name, display_items, detail_mode);
+    render_detail(
+        frame,
+        pool[1],
+        sel_name,
+        display_items,
+        detail_mode,
+        history_scroll,
+    );
     render_sparkline(frame, outer[2], items, sparkline_mode);
 }
 
@@ -234,9 +261,9 @@ fn render_families(
 ) -> Vec<String> {
     let title = if let Some(proj) = project_filter {
         let basename = project_label(proj);
-        format!(" By family  ·  project: {basename}  [↑↓/jk] nav  [b] projects ")
+        format!(" By family  ·  project: {basename}  [j/u] nav  [b] projects ")
     } else {
-        " By family  ·  global  [↑↓/jk] nav  [b] projects ".to_string()
+        " By family  ·  global  [j/u] nav  [b] projects ".to_string()
     };
     let block = Block::default().borders(Borders::ALL).title(title);
 
@@ -245,7 +272,7 @@ fn render_families(
     let families: Vec<(&str, f32)> = if let Some(proj) = project_filter {
         use std::collections::HashMap;
         let mut map: HashMap<String, (f32, u64)> = HashMap::new();
-        for item in items.iter().filter(|i| i.git_root.as_deref() == Some(proj)) {
+        for item in items.iter().filter(|i| matches_project(i, proj)) {
             if let Some(family) = serde_json::to_value(&item.command_family)
                 .ok()
                 .and_then(|v| v.as_str().map(|s| s.to_string()))
@@ -259,7 +286,11 @@ fn render_families(
             .into_iter()
             .map(|(k, (sum, n))| (k, if n > 0 { sum / n as f32 } else { 0.0 }))
             .collect();
-        sorted.sort_by(|a, b| b.1.partial_cmp(&a.1).unwrap_or(std::cmp::Ordering::Equal));
+        sorted.sort_by(|a, b| {
+            b.1.partial_cmp(&a.1)
+                .unwrap_or(std::cmp::Ordering::Equal)
+                .then_with(|| a.0.cmp(&b.0))
+        });
         families_owned = sorted;
         families_owned
             .iter()
@@ -277,7 +308,11 @@ fn render_families(
             .iter()
             .map(|(k, v)| (k, v.savings_pct))
             .collect();
-        sorted.sort_by(|a, b| b.1.partial_cmp(&a.1).unwrap_or(std::cmp::Ordering::Equal));
+        sorted.sort_by(|a, b| {
+            b.1.partial_cmp(&a.1)
+                .unwrap_or(std::cmp::Ordering::Equal)
+                .then_with(|| a.0.cmp(b.0))
+        });
         families_owned = sorted.into_iter().map(|(k, v)| (k.clone(), v)).collect();
         families_owned
             .iter()
@@ -340,7 +375,7 @@ fn render_projects(
 ) -> Vec<String> {
     let block = Block::default()
         .borders(Borders::ALL)
-        .title(" By project  [↑↓/jk] nav  [b] families ");
+        .title(" By project  [j/u] nav  [b] families ");
 
     if report.by_project.is_empty() {
         let paragraph = Paragraph::new("No data yet.").block(block);
@@ -360,7 +395,11 @@ fn render_projects(
             (k, pct)
         })
         .collect();
-    projects.sort_by(|a, b| b.1.partial_cmp(&a.1).unwrap_or(std::cmp::Ordering::Equal));
+    projects.sort_by(|a, b| {
+        b.1.partial_cmp(&a.1)
+            .unwrap_or(std::cmp::Ordering::Equal)
+            .then_with(|| a.0.cmp(b.0))
+    });
 
     let n = projects.len() as u16;
     let inner = block.inner(area);
@@ -406,13 +445,14 @@ fn render_project_log_panel(
     area: Rect,
     project_name: Option<&str>,
     items: &[Interception],
+    history_scroll: usize,
 ) {
     let Some(name) = project_name else {
         let block = Block::default()
             .borders(Borders::ALL)
             .title(" Project history ");
         let p = Paragraph::new(Span::styled(
-            " ↑↓ / j k: select a project",
+            " j u: select a project",
             Style::default().fg(Color::DarkGray),
         ))
         .block(block);
@@ -424,15 +464,23 @@ fn render_project_log_panel(
 
     let history: Vec<&Interception> = items
         .iter()
-        .filter(|i| i.git_root.as_deref() == Some(name))
+        .filter(|i| matches_project(i, name))
         .rev()
-        .take(20)
         .collect();
     let n = history.len();
+    // How many rows fit inside the block (subtract 2 for borders).
+    let visible = (area.height as usize).saturating_sub(2);
+    let scroll = history_scroll.min(n.saturating_sub(1));
+    let history: Vec<&Interception> = history.into_iter().skip(scroll).take(visible).collect();
 
+    let scroll_hint = if n > visible {
+        format!("[{}/{}]  [i/k] ", scroll + 1, n)
+    } else {
+        format!("{} entries ", n)
+    };
     let block = Block::default()
         .borders(Borders::ALL)
-        .title(format!(" Project history: {label} · {n}/20 "));
+        .title(format!(" Project history: {label} · {scroll_hint}"));
     let inner = block.inner(area);
     frame.render_widget(block, area);
 
@@ -460,11 +508,12 @@ fn render_detail(
     family_name: Option<&str>,
     items: &[Interception],
     detail_mode: DetailMode,
+    history_scroll: usize,
 ) {
     let Some(name) = family_name else {
         let block = Block::default().borders(Borders::ALL).title(" Detail ");
         let p = Paragraph::new(Span::styled(
-            " ↑↓ / j k: select a family  [d] diff/log  [b] projects",
+            " j u: select a family  [d] diff/log  [b] projects",
             Style::default().fg(Color::DarkGray),
         ))
         .block(block);
@@ -473,7 +522,7 @@ fn render_detail(
     };
 
     if detail_mode == DetailMode::Log {
-        render_log_panel(frame, area, name, items);
+        render_log_panel(frame, area, name, items, history_scroll);
         return;
     }
 
@@ -627,7 +676,13 @@ fn render_diff_panel(frame: &mut Frame, area: Rect, name: &str, item: &Intercept
     frame.render_widget(Paragraph::new(lines).wrap(Wrap { trim: false }), inner);
 }
 
-fn render_log_panel(frame: &mut Frame, area: Rect, name: &str, items: &[Interception]) {
+fn render_log_panel(
+    frame: &mut Frame,
+    area: Rect,
+    name: &str,
+    items: &[Interception],
+    history_scroll: usize,
+) {
     let family_items: Vec<&Interception> = items
         .iter()
         .filter(|i| {
@@ -638,12 +693,20 @@ fn render_log_panel(frame: &mut Frame, area: Rect, name: &str, items: &[Intercep
         })
         .collect();
 
-    let history: Vec<&Interception> = family_items.iter().rev().take(15).copied().collect();
+    let history: Vec<&Interception> = family_items.iter().rev().copied().collect();
     let n = history.len();
+    let visible = (area.height as usize).saturating_sub(2);
+    let scroll = history_scroll.min(n.saturating_sub(1));
+    let history: Vec<&Interception> = history.into_iter().skip(scroll).take(visible).collect();
 
+    let scroll_hint = if n > visible {
+        format!("[{}/{}]  [i/k]  [d] split ", scroll + 1, n)
+    } else {
+        format!("{} entries  [d] split ", n)
+    };
     let block = Block::default()
         .borders(Borders::ALL)
-        .title(format!(" History: {name} · {n}/15  [d] split "));
+        .title(format!(" History: {name} · {scroll_hint}"));
     let inner = block.inner(area);
     frame.render_widget(block, area);
 
@@ -652,12 +715,10 @@ fn render_log_panel(frame: &mut Frame, area: Rect, name: &str, items: &[Intercep
         .map(|item| {
             let ts = item.timestamp.get(..16).unwrap_or(&item.timestamp);
             let cmd: String = item.command.chars().take(30).collect();
-            let saved = item.tokens_before.saturating_sub(item.tokens_after);
             let text = format!(
                 "{ts:<16}  {cmd:<30}  {:>6} → {:>6}  -{:.1}%",
                 item.tokens_before, item.tokens_after, item.savings_pct
             );
-            let _ = saved;
             Line::from(Span::styled(text, Style::default().fg(Color::Green)))
         })
         .collect();
@@ -665,17 +726,19 @@ fn render_log_panel(frame: &mut Frame, area: Rect, name: &str, items: &[Intercep
     frame.render_widget(Paragraph::new(lines), inner);
 }
 
-// ── Sparkline (14 days) ───────────────────────────────────────────────────────
+// ── Sparkline (adaptive width) ──────────────────────────────────────────────
 
 fn render_sparkline(frame: &mut Frame, area: Rect, items: &[Interception], mode: SparklineMode) {
-    let raw = build_sparkline_data(items);
+    // Use available width (minus 2 for borders) so every column shows one day.
+    let days = (area.width as usize).saturating_sub(2).max(14);
+    let raw = build_sparkline_data(items, days);
     let data = match mode {
         SparklineMode::Linear => raw,
         SparklineMode::Log => log_scale(&raw),
         SparklineMode::Capped => cap_scale(&raw),
     };
 
-    let title = format!(" Savings (14 days) · {} [s] ", mode.label());
+    let title = format!(" Savings ({days} days) · {} [s] ", mode.label());
     let sparkline = Sparkline::default()
         .block(Block::default().borders(Borders::ALL).title(title))
         .style(Style::default().fg(Color::Green))
@@ -707,17 +770,19 @@ fn cap_scale(data: &[u64]) -> Vec<u64> {
     data.iter().map(|&v| v.min(cap)).collect()
 }
 
-/// Bucket tokens_saved per day over the last 14 days.
-fn build_sparkline_data(items: &[Interception]) -> Vec<u64> {
-    let mut buckets = vec![0u64; 14];
+/// Bucket tokens_saved per day over the last `days` days.
+fn build_sparkline_data(items: &[Interception], days: usize) -> Vec<u64> {
+    let days = days.min(365);
+    let mut buckets = vec![0u64; days];
     let now = Utc::now().date_naive();
+    let days_i = days as i64;
 
     for item in items {
         if let Ok(ts) = DateTime::parse_from_rfc3339(&item.timestamp) {
             let date = ts.with_timezone(&Utc).date_naive();
             let diff = (now - date).num_days();
-            if (0..14).contains(&diff) {
-                let idx = (13 - diff) as usize; // most recent = last bucket
+            if (0..days_i).contains(&diff) {
+                let idx = (days_i - 1 - diff) as usize; // most recent = last bucket
                 let saved = (item.tokens_before as u64).saturating_sub(item.tokens_after as u64);
                 buckets[idx] = buckets[idx].saturating_add(saved);
             }

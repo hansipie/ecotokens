@@ -55,6 +55,7 @@ fn gain_renders_savings_label() {
                 Default::default(),
                 None,
                 None,
+                0,
             )
         })
         .unwrap();
@@ -85,6 +86,7 @@ fn gain_renders_cost_avoided_label() {
                 Default::default(),
                 None,
                 None,
+                0,
             )
         })
         .unwrap();
@@ -114,6 +116,7 @@ fn gain_renders_without_panic_on_empty_data() {
                 Default::default(),
                 None,
                 None,
+                0,
             )
         })
         .unwrap();
@@ -125,7 +128,7 @@ fn gain_renders_without_panic_on_empty_data() {
 }
 
 #[test]
-fn gain_sparkline_present_for_14_days() {
+fn gain_sparkline_present_adaptive() {
     // One interception per day spread across the last 14 days
     let items: Vec<Interception> = (0i64..14)
         .map(|days_ago| {
@@ -151,6 +154,7 @@ fn gain_sparkline_present_for_14_days() {
                 Default::default(),
                 None,
                 None,
+                0,
             )
         })
         .unwrap();
@@ -185,6 +189,7 @@ fn gain_shows_family_breakdown() {
                 Default::default(),
                 None,
                 None,
+                0,
             )
         })
         .unwrap();
@@ -216,6 +221,7 @@ fn gain_detail_no_content_shows_fallback() {
                 Default::default(),
                 None,
                 None,
+                0,
             )
         })
         .unwrap();
@@ -247,6 +253,7 @@ fn gain_detail_with_content_renders_text() {
                 Default::default(),
                 None,
                 None,
+                0,
             )
         })
         .unwrap();
@@ -280,6 +287,7 @@ fn gain_diff_mode_renders_diff_markers() {
                 DetailMode::Diff,
                 None,
                 None,
+                0,
             )
         })
         .unwrap();
@@ -313,6 +321,7 @@ fn gain_log_mode_renders_history() {
                 DetailMode::Log,
                 None,
                 None,
+                0,
             )
         })
         .unwrap();
@@ -344,6 +353,7 @@ fn gain_selected_ignored_in_by_project_mode() {
                 Default::default(),
                 None,
                 None,
+                0,
             )
         })
         .unwrap();
@@ -375,6 +385,7 @@ fn gain_project_log_mode_renders_history() {
                 Default::default(),
                 Some(0),
                 None,
+                0,
             )
         })
         .unwrap();
@@ -415,15 +426,12 @@ fn gain_project_history_panel_refreshes_between_draws() {
                 Default::default(),
                 Some(0),
                 None,
+                0,
             )
         })
         .unwrap();
 
     let first_content = buffer_text(&terminal);
-    assert!(
-        first_content.contains("1/20"),
-        "first draw should show one history entry, got: {first_content:?}"
-    );
     assert!(
         first_content.contains("git status"),
         "first draw should include first command, got: {first_content:?}"
@@ -445,14 +453,15 @@ fn gain_project_history_panel_refreshes_between_draws() {
                 Default::default(),
                 Some(0),
                 None,
+                0,
             )
         })
         .unwrap();
 
     let second_content = buffer_text(&terminal);
     assert!(
-        second_content.contains("2/20"),
-        "second draw should show refreshed history count, got: {second_content:?}"
+        second_content.contains("2 entries"),
+        "second draw should show updated entry count, got: {second_content:?}"
     );
     assert!(
         second_content.contains("git log -n 1") || second_content.contains("git log"),

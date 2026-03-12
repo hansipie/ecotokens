@@ -303,12 +303,13 @@ fn cmd_gain(period: String, json: bool, model: Option<String>) {
             let mut selected_family: Option<usize> = None;
             let mut selected_project: Option<usize> = None;
             let mut project_filter: Option<String> = None;
+            let mut history_scroll: usize = 0;
             let mut last_reload = std::time::Instant::now();
             // Precomputed once at load time, updated only on reload.
             let mut sorted_projects: Vec<(String, f32)> = sorted_projects_from(&report);
             loop {
-                // Reload data every 2 seconds regardless of incoming key events
-                if last_reload.elapsed() >= std::time::Duration::from_secs(2) {
+                // Reload data every 10 seconds regardless of incoming key events
+                if last_reload.elapsed() >= std::time::Duration::from_secs(10) {
                     items = read_from(&path).unwrap_or_default();
                     report = aggregate(&items, p.clone(), model_str);
                     sorted_projects = sorted_projects_from(&report);
@@ -333,9 +334,10 @@ fn cmd_gain(period: String, json: bool, model: Option<String>) {
                         detail_mode,
                         selected_project,
                         project_filter.as_deref(),
+                        history_scroll,
                     );
                 });
-                if poll(std::time::Duration::from_millis(100)).unwrap_or(false) {
+                if poll(std::time::Duration::from_millis(500)).unwrap_or(false) {
                     if let Ok(Event::Key(key)) = read() {
                         if is_quit_key(&key) {
                             break;
@@ -343,6 +345,7 @@ fn cmd_gain(period: String, json: bool, model: Option<String>) {
                         if key.code == KeyCode::Char('b') {
                             project_filter = None;
                             gain_mode = gain_mode.toggle();
+                            history_scroll = 0;
                         }
                         if key.code == KeyCode::Char('s') {
                             sparkline_mode = sparkline_mode.next();
@@ -351,16 +354,18 @@ fn cmd_gain(period: String, json: bool, model: Option<String>) {
                             && gain_mode == tui::gain::GainMode::Family
                         {
                             detail_mode = detail_mode.toggle();
+                            history_scroll = 0;
                         }
                         if gain_mode == tui::gain::GainMode::Family && family_count > 0 {
                             match key.code {
-                                KeyCode::Down | KeyCode::Char('j') => {
+                                KeyCode::Char('j') => {
                                     selected_family = Some(match selected_family {
                                         None => 0,
                                         Some(i) => (i + 1) % family_count,
                                     });
+                                    history_scroll = 0;
                                 }
-                                KeyCode::Up | KeyCode::Char('k') => {
+                                KeyCode::Char('u') => {
                                     selected_family = Some(match selected_family {
                                         None => family_count - 1,
                                         Some(i) => {
@@ -371,19 +376,21 @@ fn cmd_gain(period: String, json: bool, model: Option<String>) {
                                             }
                                         }
                                     });
+                                    history_scroll = 0;
                                 }
                                 _ => {}
                             }
                         }
                         if gain_mode == tui::gain::GainMode::Project && project_count > 0 {
                             match key.code {
-                                KeyCode::Down | KeyCode::Char('j') => {
+                                KeyCode::Char('j') => {
                                     selected_project = Some(match selected_project {
                                         None => 0,
                                         Some(i) => (i + 1) % project_count,
                                     });
+                                    history_scroll = 0;
                                 }
-                                KeyCode::Up | KeyCode::Char('k') => {
+                                KeyCode::Char('u') => {
                                     selected_project = Some(match selected_project {
                                         None => project_count - 1,
                                         Some(i) => {
@@ -394,6 +401,27 @@ fn cmd_gain(period: String, json: bool, model: Option<String>) {
                                             }
                                         }
                                     });
+                                    history_scroll = 0;
+                                }
+                                KeyCode::Char('k') => {
+                                    history_scroll = history_scroll.saturating_add(1);
+                                }
+                                KeyCode::Char('i') => {
+                                    history_scroll = history_scroll.saturating_sub(1);
+                                }
+                                _ => {}
+                            }
+                        }
+                        // i/k scroll the history panel in Family Log mode.
+                        if gain_mode == tui::gain::GainMode::Family
+                            && detail_mode == tui::gain::DetailMode::Log
+                        {
+                            match key.code {
+                                KeyCode::Char('k') => {
+                                    history_scroll = history_scroll.saturating_add(1);
+                                }
+                                KeyCode::Char('i') => {
+                                    history_scroll = history_scroll.saturating_sub(1);
                                 }
                                 _ => {}
                             }
@@ -407,6 +435,7 @@ fn cmd_gain(period: String, json: bool, model: Option<String>) {
                                     project_filter = Some(name.clone());
                                     gain_mode = tui::gain::GainMode::Family;
                                     selected_family = None;
+                                    history_scroll = 0;
                                 }
                             }
                         }

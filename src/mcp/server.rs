@@ -156,8 +156,12 @@ impl EcotokensServer {
         // Always use the resolved run cwd for metrics attribution — it is already
         // the most specific directory available (explicit param > ECOTOKENS_WORKSPACE_ROOT
         // > current_dir fallback from resolve_run_cwd).
-        let (filtered, _before, _after) =
-            crate::filter::run_filter_pipeline_with_cwd(command, &raw, duration_ms, Some(cwd.as_path()));
+        let (filtered, _before, _after) = crate::filter::run_filter_pipeline_with_cwd(
+            command,
+            &raw,
+            duration_ms,
+            Some(cwd.as_path()),
+        );
         filtered
     }
 }
