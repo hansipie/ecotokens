@@ -2,6 +2,10 @@
 
 Token-saving companion for [Claude Code](https://claude.ai/code), [Gemini CLI](https://github.com/google-gemini/gemini-cli), and [GitHub Copilot](https://github.com/features/copilot) (VS Code). ecotokens intercepts tool outputs before they reach the model, filters the noise, and records how many tokens you saved.
 
+<p align="center">
+  <img src="docs/demo.gif" alt="ecotokens demo" width="800">
+</p>
+
 ## How it works
 
 ecotokens works in two complementary modes:
