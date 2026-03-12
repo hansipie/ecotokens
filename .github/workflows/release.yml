@@ -19,23 +19,10 @@ jobs:
       fail-fast: false
       matrix:
         include:
-          # Linux (glibc) – most servers & desktops
+          # Linux x86_64 (glibc)
           - target: x86_64-unknown-linux-gnu
             os: ubuntu-latest
             archive: tar.gz
-
-          # Linux (musl) – fully static, Alpine, containers
-          - target: x86_64-unknown-linux-musl
-            os: ubuntu-latest
-            archive: tar.gz
-            apt: musl-tools
-
-          # ARM64 Linux (Raspberry Pi, AWS Graviton…)
-          - target: aarch64-unknown-linux-musl
-            os: ubuntu-latest
-            archive: tar.gz
-            apt: gcc-aarch64-linux-gnu musl-tools
-            linker: aarch64-linux-gnu-gcc
 
           # macOS (Intel)
           - target: x86_64-apple-darwin
@@ -47,10 +34,12 @@ jobs:
             os: macos-latest
             archive: tar.gz
 
-          # Windows
-          - target: x86_64-pc-windows-msvc
-            os: windows-latest
+          # Windows x86_64 (GNU, cross-compiled via MinGW)
+          - target: x86_64-pc-windows-gnu
+            os: ubuntu-latest
             archive: zip
+            apt: gcc-mingw-w64-x86-64
+            linker: x86_64-w64-mingw32-gcc
 
     steps:
       - uses: actions/checkout@v4
@@ -73,10 +62,6 @@ jobs:
           mkdir -p .cargo
           printf '[target.${{ matrix.target }}]\nlinker = "${{ matrix.linker }}"\n' >> .cargo/config.toml
 
-      - name: Disable _FORTIFY_SOURCE for musl targets
-        if: contains(matrix.target, 'musl')
-        run: echo "CFLAGS=-U_FORTIFY_SOURCE" >> "$GITHUB_ENV"
-
       - name: Build release binary
         run: cargo build --release --target ${{ matrix.target }}
 
@@ -90,14 +75,14 @@ jobs:
           tar czf "$ASSET" -C "$(dirname "$BIN")" "$(basename "$BIN")"
           echo "ASSET=$ASSET" >> "$GITHUB_ENV"
 
-      - name: Package (zip, Windows)
+      - name: Package (zip)
         if: matrix.archive == 'zip'
-        shell: pwsh
+        shell: bash
         run: |
-          $bin = "target/${{ matrix.target }}/release/ecotokens.exe"
-          $asset = "ecotokens-${{ github.ref_name }}-${{ matrix.target }}.zip"
-          Compress-Archive -Path $bin -DestinationPath $asset
-          "ASSET=$asset" | Out-File -Append $Env:GITHUB_ENV
+          BIN=target/${{ matrix.target }}/release/ecotokens.exe
+          ASSET=ecotokens-${{ github.ref_name }}-${{ matrix.target }}.zip
+          zip -j "$ASSET" "$BIN"
+          echo "ASSET=$ASSET" >> "$GITHUB_ENV"
 
       - name: Upload artifact
         uses: actions/upload-artifact@v4
