@@ -46,13 +46,13 @@ All tests must pass on a clean clone before you make any change.
 
 ```
 src/
-  main.rs           # CLI entry point — commands, keyboard handlers
+  main.rs           # CLI entry point — commands, keyboard handlers, TUI event loop
   filter/           # Output filters per command family (git, cargo, python, …)
   metrics/          # Token store and report aggregation
   search/           # BM25 + symbolic index, query, outline, trace
   tui/              # Ratatui panels (gain, outline, trace, watch, progress)
   hook/             # PreToolUse hook handler
-  install/          # Hook + MCP registration in ~/.claude/settings.json
+  install/          # Hook + MCP registration for Claude Code, Gemini CLI, and VS Code
   config/           # User settings (embed provider, thresholds, exclusions)
   masking/          # PII / secret redaction before filtering
   daemon/           # File watcher for live index updates

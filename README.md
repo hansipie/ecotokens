@@ -109,13 +109,14 @@ ecotokens gain --period 7d
 ecotokens gain --period today --model claude-sonnet-4-5
 ```
 
-Interactive TUI showing token savings per command family and per project, with a 14-day sparkline.
+Interactive TUI showing token savings per command family and per project, with a sparkline.
 
 **Keybindings:**
 
 | Key | Action |
 |-----|--------|
-| `↑` / `↓` or `j` / `k` | Navigate |
+| `j` / `u` | Navigate up / down in list |
+| `k` / `i` | Scroll history log down / up (family log view) |
 | `b` | Toggle family / project view |
 | `d` | Cycle detail mode (split / diff / log) — family view only |
 | `s` | Cycle sparkline scale (linear / log / capped) |
