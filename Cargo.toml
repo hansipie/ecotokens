@@ -10,7 +10,7 @@ keywords = ["claude", "tokens", "cli", "productivity", "ai"]
 categories = ["command-line-utilities", "development-tools"]
 
 [features]
-default = ["embeddings", "ai-summary"]
+default = ["embeddings"]
 exact-tokens = ["tiktoken-rs"]
 embeddings = ["reqwest"]
 ai-summary = ["reqwest"]
