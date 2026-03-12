@@ -73,6 +73,10 @@ jobs:
           mkdir -p .cargo
           printf '[target.${{ matrix.target }}]\nlinker = "${{ matrix.linker }}"\n' >> .cargo/config.toml
 
+      - name: Disable _FORTIFY_SOURCE for musl targets
+        if: contains(matrix.target, 'musl')
+        run: echo "CFLAGS=-U_FORTIFY_SOURCE" >> "$GITHUB_ENV"
+
       - name: Build release binary
         run: cargo build --release --target ${{ matrix.target }}
 
