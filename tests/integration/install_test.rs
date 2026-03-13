@@ -1,3 +1,7 @@
+#[path = "../helpers.rs"]
+mod helpers;
+use helpers::ecotokens_bin;
+
 use ecotokens::install::{
     install_gemini_hook, install_gemini_mcp, install_hook, install_vscode_mcp,
     install_vscode_mcp_json, is_gemini_hook_installed, is_gemini_mcp_registered,
@@ -558,10 +562,6 @@ fn vscode_mcp_json_uninstall_on_missing_file_is_ok() {
 }
 
 // ── T039t — ecotokens index CLI ───────────────────────────────────────────────
-
-fn ecotokens_bin() -> String {
-    env!("CARGO_BIN_EXE_ecotokens").to_string()
-}
 
 #[test]
 fn index_path_flag_indexes_given_directory() {

@@ -3,7 +3,7 @@ use ecotokens::filter::cargo::filter_cargo;
 #[test]
 fn successful_build_shows_stats_only() {
     let input =
-        "   Compiling ecotokens v0.1.0\n    Finished dev [unoptimized] target(s) in 1.23s\n";
+        "   Compiling ecotokens v0.2.0\n    Finished dev [unoptimized] target(s) in 1.23s\n";
     let out = filter_cargo("cargo build", input);
     assert!(out.contains("Finished"), "stats line should be kept");
 }

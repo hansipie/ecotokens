@@ -14,15 +14,8 @@ fn make_symbol(name: &str, line: u64) -> Symbol {
     }
 }
 
-fn buffer_text(terminal: &Terminal<TestBackend>) -> String {
-    terminal
-        .backend()
-        .buffer()
-        .content
-        .iter()
-        .map(|c| c.symbol())
-        .collect()
-}
+mod helpers;
+use helpers::buffer_text;
 
 // ── T051at ────────────────────────────────────────────────────────────────────
 

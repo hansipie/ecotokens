@@ -3,15 +3,8 @@ use ecotokens::tui::trace::render_trace;
 use ratatui::backend::TestBackend;
 use ratatui::Terminal;
 
-fn buffer_text(terminal: &Terminal<TestBackend>) -> String {
-    terminal
-        .backend()
-        .buffer()
-        .content
-        .iter()
-        .map(|c| c.symbol())
-        .collect()
-}
+mod helpers;
+use helpers::buffer_text;
 
 // ── T058at — TUI trace tests ────────────────────────────────────────────────
 

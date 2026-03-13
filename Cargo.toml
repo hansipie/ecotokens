@@ -1,6 +1,6 @@
 [package]
 name = "ecotokens"
-version = "0.1.0"
+version = "0.2.0"
 edition = "2021"
 description = "Token-saving companion for Claude Code"
 license = "MIT"
@@ -226,3 +226,19 @@ path = "tests/filter/network_test.rs"
 [[test]]
 name = "db_test"
 path = "tests/filter/db_test.rs"
+
+[[test]]
+name = "detect_test"
+path = "tests/duplicates/detect_test.rs"
+
+[[test]]
+name = "proposals_test"
+path = "tests/duplicates/proposals_test.rs"
+
+[[test]]
+name = "mcp_duplicates_test"
+path = "tests/duplicates/mcp_test.rs"
+
+[[test]]
+name = "duplicates_integration_test"
+path = "tests/duplicates/integration_test.rs"

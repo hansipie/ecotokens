@@ -10,6 +10,7 @@ use std::path::PathBuf;
 
 mod config;
 mod daemon;
+mod duplicates;
 mod filter;
 mod hook;
 mod install;
@@ -150,6 +151,17 @@ enum Commands {
     Mcp {
         #[arg(long)]
         index_dir: Option<PathBuf>,
+    },
+    /// Detect code duplications in the indexed codebase and propose refactoring
+    Duplicates {
+        #[arg(long, default_value = "70.0", help = "Minimum similarity %")]
+        threshold: f32,
+        #[arg(long, default_value = "5", help = "Minimum block size in lines")]
+        min_lines: usize,
+        #[arg(long)]
+        index_dir: Option<PathBuf>,
+        #[arg(long)]
+        json: bool,
     },
 }
 
@@ -1368,6 +1380,68 @@ fn cmd_mcp(index_dir: Option<PathBuf>) {
     });
 }
 
+#[derive(serde::Serialize)]
+struct DuplicatesJsonOutput {
+    scanned_symbols: usize,
+    threshold: f32,
+    min_lines: usize,
+    index_stale: bool,
+    groups: Vec<duplicates::DuplicateGroup>,
+}
+
+fn cmd_duplicates(
+    threshold: f32,
+    min_lines: usize,
+    index_dir: Option<PathBuf>,
+    json: bool,
+) {
+    if !(0.0..=100.0).contains(&threshold) {
+        eprintln!("Error: threshold must be between 0 and 100.");
+        std::process::exit(2);
+    }
+    let idx_dir = index_dir.unwrap_or_else(default_index_dir);
+
+    // Staleness check
+    let cwd = std::env::current_dir().unwrap_or_else(|_| PathBuf::from("."));
+    let stale = duplicates::staleness::check_staleness(&idx_dir, &cwd);
+    let index_stale = stale.is_some();
+    if stale.is_some() {
+        eprintln!(
+            "Warning: index may be stale. Run `ecotokens index` to update."
+        );
+    }
+
+    let opts = duplicates::DetectionOptions {
+        index_dir: idx_dir,
+        threshold,
+        min_lines,
+    };
+    match duplicates::detect::detect_duplicates(&opts) {
+        Ok(groups) => {
+            if json {
+                let scanned = groups.iter().map(|g| g.segments.len()).sum();
+                let output = DuplicatesJsonOutput {
+                    scanned_symbols: scanned,
+                    threshold,
+                    min_lines,
+                    index_stale,
+                    groups,
+                };
+                println!("{}", serde_json::to_string_pretty(&output).unwrap());
+            } else {
+                print!(
+                    "{}",
+                    duplicates::proposals::format_duplicates_plain(&groups, threshold, min_lines)
+                );
+            }
+        }
+        Err(e) => {
+            eprintln!("Error: {e}");
+            std::process::exit(1);
+        }
+    }
+}
+
 fn main() {
     let cli = Cli::parse();
     match cli.command {
@@ -1431,5 +1505,11 @@ fn main() {
             json,
         } => cmd_watch(path, index_dir, background, status, stop, json),
         Commands::Mcp { index_dir } => cmd_mcp(index_dir),
+        Commands::Duplicates {
+            threshold,
+            min_lines,
+            index_dir,
+            json,
+        } => cmd_duplicates(threshold, min_lines, index_dir, json),
     }
 }
