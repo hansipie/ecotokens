@@ -1004,9 +1004,13 @@ fn cmd_search(query: String, top_k: usize, index_dir: Option<PathBuf>, json: boo
     }
 }
 
-fn cmd_trace_callers(symbol: String, index_dir: Option<PathBuf>, json: bool) {
-    let idx_dir = index_dir.unwrap_or_else(default_index_dir);
-    match trace::callers::find_callers(&symbol, &idx_dir) {
+fn display_trace_result(
+    edges: Result<Vec<trace::CallEdge>, trace::TraceError>,
+    symbol: &str,
+    direction: &str,
+    json: bool,
+) {
+    match edges {
         Ok(edges) => {
             if json {
                 println!("{}", serde_json::to_string_pretty(&edges).unwrap());
@@ -1022,7 +1026,7 @@ fn cmd_trace_callers(symbol: String, index_dir: Option<PathBuf>, json: bool) {
                 if let Ok(mut terminal) = Terminal::new(backend) {
                     loop {
                         let _ = terminal.draw(|f| {
-                            tui::trace::render_trace(f, f.area(), &edges, &symbol, "callers");
+                            tui::trace::render_trace(f, f.area(), &edges, symbol, direction);
                         });
                         if let Ok(Event::Key(key)) = read() {
                             if is_quit_key(&key) {
@@ -1044,44 +1048,16 @@ fn cmd_trace_callers(symbol: String, index_dir: Option<PathBuf>, json: bool) {
     }
 }
 
+fn cmd_trace_callers(symbol: String, index_dir: Option<PathBuf>, json: bool) {
+    let idx_dir = index_dir.unwrap_or_else(default_index_dir);
+    let result = trace::callers::find_callers(&symbol, &idx_dir);
+    display_trace_result(result, &symbol, "callers", json);
+}
+
 fn cmd_trace_callees(symbol: String, depth: u32, index_dir: Option<PathBuf>, json: bool) {
     let idx_dir = index_dir.unwrap_or_else(default_index_dir);
-    match trace::callees::find_callees(&symbol, &idx_dir, depth) {
-        Ok(edges) => {
-            if json {
-                println!("{}", serde_json::to_string_pretty(&edges).unwrap());
-            } else if std::io::IsTerminal::is_terminal(&std::io::stdout()) {
-                if let Err(e) = enable_raw_mode() {
-                    eprintln!("failed to enable raw mode: {e}");
-                }
-                if let Err(e) = std::io::stdout().execute(EnterAlternateScreen) {
-                    eprintln!("failed to enter alternate screen: {e}");
-                }
-                let _guard = TerminalGuard::stdout();
-                let backend = CrosstermBackend::new(std::io::stdout());
-                if let Ok(mut terminal) = Terminal::new(backend) {
-                    loop {
-                        let _ = terminal.draw(|f| {
-                            tui::trace::render_trace(f, f.area(), &edges, &symbol, "callees");
-                        });
-                        if let Ok(Event::Key(key)) = read() {
-                            if is_quit_key(&key) {
-                                break;
-                            }
-                        }
-                    }
-                }
-            } else {
-                for e in &edges {
-                    println!("{} {}:{}", e.name, e.file_path, e.line);
-                }
-            }
-        }
-        Err(e) => {
-            eprintln!("trace error: {e}");
-            std::process::exit(1);
-        }
-    }
+    let result = trace::callees::find_callees(&symbol, &idx_dir, depth);
+    display_trace_result(result, &symbol, "callees", json);
 }
 
 fn cmd_watch(
