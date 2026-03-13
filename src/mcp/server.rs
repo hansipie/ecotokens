@@ -74,6 +74,7 @@ impl EcotokensServer {
             path: PathBuf::from(&params.path),
             depth: params.depth,
             kinds: params.kinds,
+            base: None,
         };
         match crate::search::outline::outline_path(opts) {
             Ok(symbols) => serde_json::to_string_pretty(&symbols).unwrap_or_default(),

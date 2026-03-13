@@ -914,11 +914,18 @@ fn cmd_index(path: Option<PathBuf>, index_dir: Option<PathBuf>, reset: bool) {
 }
 
 fn cmd_outline(path: PathBuf, kinds: Option<Vec<String>>, depth: Option<u32>, json: bool) {
-    let opts = search::outline::OutlineOptions { path, depth, kinds };
+    let opts = search::outline::OutlineOptions { path, depth, kinds, base: None };
     match search::outline::outline_path(opts) {
         Ok(symbols) => {
             if json {
-                println!("{}", serde_json::to_string_pretty(&symbols).unwrap());
+                let slim: Vec<_> = symbols.iter().map(|s| serde_json::json!({
+                    "id": s.id,
+                    "name": s.name,
+                    "kind": s.kind,
+                    "file_path": s.file_path,
+                    "line_start": s.line_start,
+                })).collect();
+                println!("{}", serde_json::to_string_pretty(&slim).unwrap());
             } else if std::io::IsTerminal::is_terminal(&std::io::stdout()) {
                 if let Err(e) = enable_raw_mode() {
                     eprintln!("failed to enable raw mode: {e}");
