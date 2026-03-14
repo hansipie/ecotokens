@@ -2,7 +2,7 @@
 
 ## What this project does
 
-**ecotokens** is a token-saving companion for Claude Code, Gemini CLI, and GitHub Copilot (VS Code). It intercepts bash/shell command outputs before they reach the model, compresses them with family-specific filters, and records how many tokens were saved. It also exposes an MCP server with tools for semantic code search, symbol lookup, and call graph tracing.
+**ecotokens** is a token-saving companion for Claude Code and Gemini CLI. It intercepts bash/shell command outputs before they reach the model, compresses them with family-specific filters, and records how many tokens were saved.
 
 ## Commands
 
@@ -27,12 +27,10 @@ cargo fmt
 # Pre-push one-liner
 cargo fmt --check && cargo clippy -- -D warnings && cargo test
 
-# Install ecotokens as MCP server
+# Install ecotokens hook
 ecotokens install --target claude    # Claude Code only
-ecotokens install --target vscode    # VS Code / GitHub Copilot (writes mcp.servers in settings.json)
 ecotokens install --target gemini    # Gemini CLI (writes BeforeTool hook + mcpServers in ~/.gemini/settings.json)
-ecotokens install --target all       # all three targets
-ecotokens uninstall --target vscode  # remove VS Code registration
+ecotokens install --target all       # all targets
 ecotokens uninstall --target gemini  # remove Gemini registration
 ```
 
@@ -52,7 +50,7 @@ The project is organized into 12 modules, each with a `mod.rs` exporting its pub
 | `mcp/` | JSON-RPC stdio server (rmcp crate) exposing 4 tools |
 | `config/` | TOML settings at `~/.config/ecotokens/settings.toml`; all fields optional with defaults |
 | `masking/` | Regex-based PII/secret redaction (AWS keys, GitHub PATs, JWTs, `.env` secrets, etc.) |
-| `install/` | Idempotent hook + MCP registration for Claude Code (`~/.claude/settings.json` + `~/.claude.json`), Gemini CLI (`~/.gemini/settings.json`), and VS Code (`~/.config/Code/User/settings.json` under `mcp.servers`) |
+| `install/` | Idempotent hook + MCP registration for Claude Code (`~/.claude/settings.json` + `~/.claude.json`) and Gemini CLI (`~/.gemini/settings.json`) |
 | `daemon/` | `notify`-based file watcher; debounces 500 ms before reindexing |
 
 **Data flow:**

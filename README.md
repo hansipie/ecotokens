@@ -2,7 +2,7 @@
   <img src="assets/banner.png" alt="ecotokens">
 </p>
 
-Token-saving companion for [Claude Code](https://claude.ai/code), [Gemini CLI](https://github.com/google-gemini/gemini-cli), and [GitHub Copilot](https://github.com/features/copilot) (VS Code). ecotokens intercepts tool outputs before they reach the model, filters the noise, and records how many tokens you saved.
+Token-saving companion for [Claude Code](https://claude.ai/code) and [Gemini CLI](https://github.com/google-gemini/gemini-cli). ecotokens intercepts tool outputs before they reach the model, filters the noise, and records how many tokens you saved.
 
 <p align="center">
   <img src="docs/demo.gif" alt="ecotokens demo" width="800">
@@ -10,9 +10,7 @@ Token-saving companion for [Claude Code](https://claude.ai/code), [Gemini CLI](h
 
 ## How it works
 
-ecotokens works in two complementary modes:
-
-**Hook mode (Claude Code + Gemini CLI)** — installs as a hook that fires before every shell command. When the AI runs a shell command, ecotokens:
+ecotokens installs as a hook that fires before every shell command. When the AI runs a shell command, ecotokens:
 
 1. Runs the command and captures its output
 2. Applies a family-specific filter (git, cargo, python, …)
@@ -23,8 +21,6 @@ ecotokens works in two complementary modes:
 Claude Code uses the `PreToolUse` hook (`~/.claude/settings.json`). Gemini CLI uses the `BeforeTool` hook (`~/.gemini/settings.json`).
 
 For a focused view of the runtime path, see [`docs/hook-filter-metrics-flow.md`](docs/hook-filter-metrics-flow.md).
-
-**MCP server mode (Claude Code + Gemini CLI + GitHub Copilot in VS Code)** — exposes tools the model can call directly: codebase search, symbol lookup, call graph tracing, and `ecotokens_run` (runs any shell command and returns token-optimized output).
 
 The result: the model sees clean, concise output — and you keep your context window.
 
@@ -40,20 +36,8 @@ cargo install --git https://github.com/hansipie/ecotokens
 
 ```bash
 cargo install --path .
-ecotokens install                # hook only
-ecotokens install --with-mcp     # hook + MCP server (search, outline, trace, run)
+ecotokens install
 ```
-
-### GitHub Copilot (VS Code)
-
-Requires VS Code ≥ 1.99 with the GitHub Copilot extension.
-
-```bash
-cargo install --path .
-ecotokens install --target vscode
-```
-
-This writes the MCP server entry into `~/.config/Code/User/settings.json`. Copilot in Agent mode will then have access to all ecotokens tools.
 
 ### Gemini CLI
 
@@ -61,19 +45,18 @@ Requires [Gemini CLI](https://github.com/google-gemini/gemini-cli) ≥ 0.1.0.
 
 ```bash
 cargo install --path .
-ecotokens install --target gemini                # hook only
-ecotokens install --target gemini --with-mcp     # hook + MCP server
+ecotokens install --target gemini
 ```
 
-This writes a `BeforeTool` hook entry and (optionally) an MCP server entry into `~/.gemini/settings.json`.
+This writes a `BeforeTool` hook entry into `~/.gemini/settings.json`.
 
 ### All targets at once
 
 ```bash
-ecotokens install --target all --with-mcp
+ecotokens install --target all
 ```
 
-`--target all` covers Claude Code, Gemini CLI, and VS Code in a single command.
+`--target all` covers Claude Code and Gemini CLI in a single command.
 
 ### With AI summarization
 
@@ -82,7 +65,6 @@ Enable AI-powered output compression via Ollama at install time:
 ```bash
 ecotokens install --ai-summary                          # use default model (llama3.2:3b)
 ecotokens install --ai-summary-model qwen2.5:3b         # specify model (implies --ai-summary)
-ecotokens install --with-mcp --ai-summary-model llama3.2:3b  # combined
 ```
 
 This writes `ai_summary_enabled` and `ai_summary_model` to `~/.config/ecotokens/config.json`. Ollama must be running and the model must be pulled (`ollama pull llama3.2:3b`).
@@ -91,7 +73,6 @@ This writes `ai_summary_enabled` and `ai_summary_model` to `~/.config/ecotokens/
 
 ```bash
 ecotokens uninstall                    # Claude Code
-ecotokens uninstall --target vscode    # VS Code
 ecotokens uninstall --target gemini    # Gemini CLI
 ecotokens uninstall --target all       # all targets
 ```
@@ -114,7 +95,6 @@ ecotokens uninstall --target all       # all targets
 | `ecotokens trace callees SYMBOL` | Find callees of a symbol |
 | `ecotokens watch [--path DIR]` | Watch a directory and keep the index up to date |
 | `ecotokens duplicates` | Detect near-duplicate code blocks in the indexed codebase |
-| `ecotokens mcp` | Start the MCP server (JSON-RPC over stdio) |
 
 ## Gain dashboard
 
@@ -170,15 +150,13 @@ _Less code is less tokens_
 `ecotokens duplicates` scans the indexed codebase for near-identical code blocks and reports them grouped by similarity.
 
 ```bash
-ecotokens duplicates                          # default: threshold=70%, min_lines=5, top_k=10
+ecotokens duplicates                          # default: threshold=70%, min_lines=5
 ecotokens duplicates --threshold 80           # only report ≥ 80% similarity
 ecotokens duplicates --min-lines 10           # ignore blocks shorter than 10 lines
-ecotokens duplicates --top-k 20              # return up to 20 groups
+ecotokens duplicates --json                   # JSON output
 ```
 
 Each group shows the file paths, line ranges, similarity score, and a refactoring proposal (exact duplicate, near duplicate, or subset).
-
-The `ecotokens_duplicates` MCP tool exposes the same feature directly to the model.
 
 ## Configuration
 
@@ -191,15 +169,12 @@ Output includes:
 
 ```
 hook_installed        : true
-mcp_registered        : true
-vscode_mcp_registered : false
 debug                 : false
-threshold_lines       : 500
-threshold_bytes       : 51200
 exclusions            : []
 embed_provider        : ollama (http://localhost:11434)
 ai_summary_enabled    : false
 ai_summary_model      : llama3.2:3b (default)
+ai_summary_url        : http://localhost:11434 (default)
 ```
 
 ## Supported command families
@@ -214,20 +189,6 @@ ai_summary_model      : llama3.2:3b (default)
 | `markdown` | `.md` files |
 | `config` | `.toml`, `.json`, `.yaml` |
 | `generic` | Everything else (truncated to 200 lines / 50 KB) |
-
-## MCP server
-
-When registered (via `--with-mcp` for Claude Code or Gemini CLI, or `--target vscode` for Copilot), ecotokens exposes these tools:
-
-| Tool | Description |
-|------|-------------|
-| `ecotokens_search` | Semantic + BM25 search over the indexed codebase |
-| `ecotokens_outline` | List symbols in a file or directory |
-| `ecotokens_symbol` | Retrieve a symbol's source by stable ID |
-| `ecotokens_trace_callers` | Find callers of a symbol (call graph) |
-| `ecotokens_trace_callees` | Find callees of a symbol (call graph) |
-| `ecotokens_run` | Execute a shell command and return token-optimized output |
-| `ecotokens_duplicates` | Detect near-duplicate code blocks in the indexed codebase |
 
 ## Embeddings (optional)
 
@@ -268,7 +229,7 @@ Ollama must be running locally. The model is called with a 3-second timeout to a
 ## Requirements
 
 - Rust ≥ 1.75 (stable)
-- One or more of: Claude Code (with hook support), Gemini CLI ≥ 0.1.0, VS Code ≥ 1.99 with GitHub Copilot
+- One or more of: Claude Code (with hook support), Gemini CLI ≥ 0.1.0
 - Ollama (optional, for semantic search embeddings and AI summarization)
 
 ## License

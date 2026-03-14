@@ -5,7 +5,6 @@ pub type InstallResult = std::io::Result<()>;
 const HOOK_COMMAND: &str = "ecotokens hook";
 const GEMINI_HOOK_COMMAND: &str = "ecotokens hook-gemini";
 const HOOK_MATCHER: &str = "Bash";
-const VSCODE_MCP_KEY: &str = "ecotokens";
 
 fn read_settings(path: &Path) -> serde_json::Value {
     if path.exists() {
@@ -44,13 +43,8 @@ fn ecotokens_hook_entry() -> serde_json::Value {
 }
 
 /// Install the PreToolUse hook into ~/.claude/settings.json (idempotent).
-/// If `with_mcp` is true, also registers the MCP server in `claude_json_path`
-/// (~/.claude.json), which is the file Claude Code reads for MCP configuration.
-pub fn install_hook(
-    settings_path: &Path,
-    claude_json_path: &Path,
-    with_mcp: bool,
-) -> InstallResult {
+pub fn install_hook(settings_path: &Path, claude_json_path: &Path) -> InstallResult {
+    let _ = claude_json_path; // kept for signature compatibility with uninstall callers
     let mut v = read_settings(settings_path);
 
     let hooks = v["hooks"]["PreToolUse"]
@@ -74,23 +68,7 @@ pub fn install_hook(
     }
 
     v["hooks"]["PreToolUse"] = serde_json::Value::Array(new_hooks);
-    write_settings(settings_path, &v)?;
-
-    if with_mcp {
-        let mcp_entry = serde_json::json!({
-            "command": "ecotokens",
-            "args": ["mcp"],
-            "type": "stdio"
-        });
-        let mut cv = read_settings(claude_json_path);
-        let servers = cv["mcpServers"].as_object().cloned().unwrap_or_default();
-        let mut new_servers = servers;
-        new_servers.insert("ecotokens".to_string(), mcp_entry);
-        cv["mcpServers"] = serde_json::Value::Object(new_servers);
-        write_settings(claude_json_path, &cv)?;
-    }
-
-    Ok(())
+    write_settings(settings_path, &v)
 }
 
 /// Check if the ecotokens hook is present in settings.json.
@@ -156,102 +134,6 @@ pub fn uninstall_hook(settings_path: &Path, claude_json_path: &Path) -> InstallR
     }
 
     Ok(())
-}
-
-/// Return the default path to VS Code's user settings.json (cross-platform).
-pub fn default_vscode_settings_path() -> Option<std::path::PathBuf> {
-    dirs::config_dir().map(|d| d.join("Code").join("User").join("settings.json"))
-}
-
-/// Register the ecotokens MCP server in VS Code's user settings.json (idempotent).
-pub fn install_vscode_mcp(vscode_settings_path: &Path) -> InstallResult {
-    let mut v = read_settings(vscode_settings_path);
-
-    let servers = v["mcp"]["servers"].as_object().cloned().unwrap_or_default();
-
-    let needs_install = servers.get(VSCODE_MCP_KEY).is_none();
-    if !needs_install {
-        return Ok(());
-    }
-
-    let mut new_servers = servers;
-    new_servers.insert(
-        VSCODE_MCP_KEY.to_string(),
-        serde_json::json!({
-            "type": "stdio",
-            "command": "ecotokens",
-            "args": ["mcp"]
-        }),
-    );
-    v["mcp"]["servers"] = serde_json::Value::Object(new_servers);
-    write_settings(vscode_settings_path, &v)
-}
-
-/// Remove the ecotokens MCP entry from VS Code's user settings.json (idempotent).
-pub fn uninstall_vscode_mcp(vscode_settings_path: &Path) -> InstallResult {
-    if !vscode_settings_path.exists() {
-        return Ok(());
-    }
-    let mut v = read_settings(vscode_settings_path);
-    if let Some(servers) = v["mcp"]["servers"].as_object_mut() {
-        servers.remove(VSCODE_MCP_KEY);
-    }
-    write_settings(vscode_settings_path, &v)
-}
-
-/// Check if the ecotokens MCP server is registered in VS Code's user settings.json.
-pub fn is_vscode_mcp_registered(vscode_settings_path: &Path) -> bool {
-    let v = read_settings(vscode_settings_path);
-    let server = &v["mcp"]["servers"][VSCODE_MCP_KEY];
-    server.is_object()
-}
-
-// ============================================================================
-// VS Code mcp.json Support (Copilot 1.x+ dedicated file, format: servers.*)
-// ============================================================================
-
-/// Return the default path to VS Code's dedicated `mcp.json` (Copilot 1.x+).
-pub fn default_vscode_mcp_json_path() -> Option<std::path::PathBuf> {
-    dirs::config_dir().map(|d| d.join("Code").join("User").join("mcp.json"))
-}
-
-/// Register the ecotokens MCP server in VS Code's `mcp.json` (idempotent).
-/// The `mcp.json` format uses `servers` at the root (no `mcp` wrapper).
-pub fn install_vscode_mcp_json(path: &Path) -> InstallResult {
-    let mut v = read_settings(path);
-    let servers = v["servers"].as_object().cloned().unwrap_or_default();
-    if servers.contains_key(VSCODE_MCP_KEY) {
-        return Ok(());
-    }
-    let mut new_servers = servers;
-    new_servers.insert(
-        VSCODE_MCP_KEY.to_string(),
-        serde_json::json!({
-            "type": "stdio",
-            "command": "ecotokens",
-            "args": ["mcp"]
-        }),
-    );
-    v["servers"] = serde_json::Value::Object(new_servers);
-    write_settings(path, &v)
-}
-
-/// Check if the ecotokens MCP server is registered in VS Code's `mcp.json`.
-pub fn is_vscode_mcp_json_registered(path: &Path) -> bool {
-    let v = read_settings(path);
-    v["servers"][VSCODE_MCP_KEY].is_object()
-}
-
-/// Remove the ecotokens MCP entry from VS Code's `mcp.json` (idempotent).
-pub fn uninstall_vscode_mcp_json(path: &Path) -> InstallResult {
-    if !path.exists() {
-        return Ok(());
-    }
-    let mut v = read_settings(path);
-    if let Some(servers) = v["servers"].as_object_mut() {
-        servers.remove(VSCODE_MCP_KEY);
-    }
-    write_settings(path, &v)
 }
 
 // ============================================================================
@@ -323,31 +205,6 @@ pub fn is_gemini_hook_installed(settings_path: &Path) -> bool {
             })
         })
         .unwrap_or(false)
-}
-
-/// Install MCP server entry for ecotokens into ~/.gemini/settings.json.
-/// Gemini uses the mcpServers section just like Claude Code.
-pub fn install_gemini_mcp(settings_path: &Path) -> InstallResult {
-    let mut v = read_settings(settings_path);
-
-    let servers = v["mcpServers"].as_object().cloned().unwrap_or_default();
-    if servers.contains_key("ecotokens") {
-        return Ok(());
-    }
-
-    let mut new_servers = servers;
-    new_servers.insert(
-        "ecotokens".to_string(),
-        serde_json::json!({
-            "command": "ecotokens",
-            "args": ["mcp"],
-            "type": "stdio"
-        }),
-    );
-    v["mcpServers"] = serde_json::Value::Object(new_servers);
-    write_settings(settings_path, &v)?;
-
-    Ok(())
 }
 
 /// Check if the ecotokens MCP server is registered in ~/.gemini/settings.json.
