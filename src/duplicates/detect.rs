@@ -5,9 +5,9 @@ use tantivy::query::TermQuery;
 use tantivy::schema::{IndexRecordOption, Value};
 use tantivy::{Index, ReloadPolicy, TantivyDocument, Term};
 
-use crate::search::index::build_schema;
 use super::{CodeSegment, DetectionOptions, DuplicateGroup, SimilarityScore};
 use crate::duplicates::proposals::generate_proposals;
+use crate::search::index::build_schema;
 
 #[derive(Debug)]
 pub enum DetectError {
@@ -102,9 +102,8 @@ pub fn detect_duplicates(opts: &DetectionOptions) -> Result<Vec<DuplicateGroup>,
 
     for i in 0..n {
         for j in (i + 1)..n {
-            let ratio = TextDiff::from_lines(&segments[i].content, &segments[j].content)
-                .ratio()
-                * 100.0;
+            let ratio =
+                TextDiff::from_lines(&segments[i].content, &segments[j].content).ratio() * 100.0;
             if ratio >= opts.threshold {
                 let ri = find(&mut parent, i);
                 let rj = find(&mut parent, j);

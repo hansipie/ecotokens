@@ -103,9 +103,7 @@ fn test_mcp_duplicates_tool() {
     child.kill().ok();
     child.wait().ok();
 
-    let content = resp["result"]["content"][0]["text"]
-        .as_str()
-        .unwrap_or("");
+    let content = resp["result"]["content"][0]["text"].as_str().unwrap_or("");
     assert!(
         content.contains("group") || content.contains("duplicate") || content.contains("similar"),
         "response should contain duplicate info: {content}"

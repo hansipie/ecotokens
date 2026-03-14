@@ -89,7 +89,10 @@ fn test_no_duplicates() {
         min_lines: 5,
     };
     let groups = ecotokens::duplicates::detect::detect_duplicates(&opts).unwrap();
-    assert!(groups.is_empty(), "dissimilar functions should produce no groups");
+    assert!(
+        groups.is_empty(),
+        "dissimilar functions should produce no groups"
+    );
 }
 
 #[test]
@@ -116,7 +119,10 @@ fn test_union_find_merges_similar_group() {
     assert!(!groups.is_empty(), "should detect at least one group");
     // All 3 similar functions should be in the same group
     let total_segs: usize = groups.iter().map(|g| g.segments.len()).sum();
-    assert_eq!(total_segs, 3, "all 3 similar functions should be grouped together");
+    assert_eq!(
+        total_segs, 3,
+        "all 3 similar functions should be grouped together"
+    );
 }
 
 #[test]

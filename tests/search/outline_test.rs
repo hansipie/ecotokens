@@ -127,7 +127,11 @@ fn outline_without_base_absolute_path_id_mismatch() {
     let root = TempDir::new().unwrap();
     let src_dir = root.path().join("src");
     fs::create_dir(&src_dir).unwrap();
-    fs::write(src_dir.join("lib.rs"), "pub fn compute(x: u32) -> u32 { x * 2 }\n").unwrap();
+    fs::write(
+        src_dir.join("lib.rs"),
+        "pub fn compute(x: u32) -> u32 { x * 2 }\n",
+    )
+    .unwrap();
 
     // Indexer avec project_root comme base (comme le fait `ecotokens index`)
     let idx = TempDir::new().unwrap();
@@ -193,7 +197,11 @@ fn outline_ids_match_index_lookup() {
     let root = TempDir::new().unwrap();
     let src_dir = root.path().join("src");
     fs::create_dir(&src_dir).unwrap();
-    fs::write(src_dir.join("lib.rs"), "pub fn compute(x: u32) -> u32 { x * 2 }\n").unwrap();
+    fs::write(
+        src_dir.join("lib.rs"),
+        "pub fn compute(x: u32) -> u32 { x * 2 }\n",
+    )
+    .unwrap();
 
     // Indexer avec project_root comme base
     let idx = TempDir::new().unwrap();

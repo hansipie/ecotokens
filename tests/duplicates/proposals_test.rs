@@ -1,5 +1,5 @@
-use ecotokens::duplicates::{CodeSegment, ProposalKind};
 use ecotokens::duplicates::proposals::generate_proposals;
+use ecotokens::duplicates::{CodeSegment, ProposalKind};
 
 fn make_seg(file: &str, line: u64, content: &str) -> CodeSegment {
     let lines = content.lines().count() as u64;
@@ -15,17 +15,23 @@ fn make_seg(file: &str, line: u64, content: &str) -> CodeSegment {
 #[test]
 fn test_exact_duplicate_proposal() {
     let content = "fn foo() {\n    let x = 1;\n    let y = 2;\n    let z = x + y;\n    println!(\"{z}\");\n}\n";
-    let segs = vec![
-        make_seg("a.rs", 1, content),
-        make_seg("b.rs", 10, content),
-    ];
+    let segs = vec![make_seg("a.rs", 1, content), make_seg("b.rs", 10, content)];
     let proposals = generate_proposals(&segs, 100.0);
     assert_eq!(proposals.len(), 1);
     assert!(matches!(proposals[0].kind, ProposalKind::ExactDuplicate));
     let text = &proposals[0].text;
-    assert!(text.to_lowercase().contains("exact"), "text should mention 'exact': {text}");
-    assert!(text.contains("a.rs"), "text should contain first file path: {text}");
-    assert!(text.contains("b.rs"), "text should contain second file path: {text}");
+    assert!(
+        text.to_lowercase().contains("exact"),
+        "text should mention 'exact': {text}"
+    );
+    assert!(
+        text.contains("a.rs"),
+        "text should contain first file path: {text}"
+    );
+    assert!(
+        text.contains("b.rs"),
+        "text should contain second file path: {text}"
+    );
 }
 
 #[test]
@@ -37,7 +43,10 @@ fn test_near_duplicate_proposal() {
     assert_eq!(proposals.len(), 1);
     assert!(matches!(proposals[0].kind, ProposalKind::NearDuplicate));
     let text = &proposals[0].text;
-    assert!(text.to_lowercase().contains("near-duplicate"), "text should mention 'near-duplicate': {text}");
+    assert!(
+        text.to_lowercase().contains("near-duplicate"),
+        "text should mention 'near-duplicate': {text}"
+    );
 }
 
 #[test]
@@ -50,5 +59,8 @@ fn test_subset_proposal() {
     assert!(matches!(proposals[0].kind, ProposalKind::SubsetOf));
     let text = &proposals[0].text;
     // Should reference the larger segment's file
-    assert!(text.contains("b.rs"), "text should reference larger segment's file: {text}");
+    assert!(
+        text.contains("b.rs"),
+        "text should reference larger segment's file: {text}"
+    );
 }

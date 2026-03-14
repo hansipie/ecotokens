@@ -914,17 +914,27 @@ fn cmd_index(path: Option<PathBuf>, index_dir: Option<PathBuf>, reset: bool) {
 }
 
 fn cmd_outline(path: PathBuf, kinds: Option<Vec<String>>, depth: Option<u32>, json: bool) {
-    let opts = search::outline::OutlineOptions { path, depth, kinds, base: None };
+    let opts = search::outline::OutlineOptions {
+        path,
+        depth,
+        kinds,
+        base: None,
+    };
     match search::outline::outline_path(opts) {
         Ok(symbols) => {
             if json {
-                let slim: Vec<_> = symbols.iter().map(|s| serde_json::json!({
-                    "id": s.id,
-                    "name": s.name,
-                    "kind": s.kind,
-                    "file_path": s.file_path,
-                    "line_start": s.line_start,
-                })).collect();
+                let slim: Vec<_> = symbols
+                    .iter()
+                    .map(|s| {
+                        serde_json::json!({
+                            "id": s.id,
+                            "name": s.name,
+                            "kind": s.kind,
+                            "file_path": s.file_path,
+                            "line_start": s.line_start,
+                        })
+                    })
+                    .collect();
                 println!("{}", serde_json::to_string_pretty(&slim).unwrap());
             } else if std::io::IsTerminal::is_terminal(&std::io::stdout()) {
                 if let Err(e) = enable_raw_mode() {
@@ -1372,12 +1382,7 @@ struct DuplicatesJsonOutput {
     groups: Vec<duplicates::DuplicateGroup>,
 }
 
-fn cmd_duplicates(
-    threshold: f32,
-    min_lines: usize,
-    index_dir: Option<PathBuf>,
-    json: bool,
-) {
+fn cmd_duplicates(threshold: f32, min_lines: usize, index_dir: Option<PathBuf>, json: bool) {
     if !(0.0..=100.0).contains(&threshold) {
         eprintln!("Error: threshold must be between 0 and 100.");
         std::process::exit(2);
@@ -1389,9 +1394,7 @@ fn cmd_duplicates(
     let stale = duplicates::staleness::check_staleness(&idx_dir, &cwd);
     let index_stale = stale.is_some();
     if stale.is_some() {
-        eprintln!(
-            "Warning: index may be stale. Run `ecotokens index` to update."
-        );
+        eprintln!("Warning: index may be stale. Run `ecotokens index` to update.");
     }
 
     let opts = duplicates::DetectionOptions {

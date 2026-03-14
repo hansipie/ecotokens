@@ -114,8 +114,10 @@ impl EcotokensServer {
         }
     }
 
-    #[tool(description = "Detect duplicate or structurally similar code segments \
-        in the indexed codebase and return human-readable refactoring proposals.")]
+    #[tool(
+        description = "Detect duplicate or structurally similar code segments \
+        in the indexed codebase and return human-readable refactoring proposals."
+    )]
     fn ecotokens_duplicates(&self, Parameters(params): Parameters<DuplicatesParams>) -> String {
         let opts = crate::duplicates::DetectionOptions {
             index_dir: self.index_dir.clone(),

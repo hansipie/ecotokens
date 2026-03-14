@@ -109,10 +109,9 @@ where
             .as_f64()
             .map(|n| Some(n as f32))
             .ok_or_else(|| serde::de::Error::custom("expected number")),
-        Some(serde_json::Value::String(s)) => s
-            .parse::<f32>()
-            .map(Some)
-            .map_err(serde::de::Error::custom),
+        Some(serde_json::Value::String(s)) => {
+            s.parse::<f32>().map(Some).map_err(serde::de::Error::custom)
+        }
         Some(other) => Err(serde::de::Error::custom(format!(
             "expected number or string, got {other}"
         ))),

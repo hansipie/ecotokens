@@ -65,7 +65,11 @@ fn is_subset(shorter: &str, longer: &str) -> bool {
     longer_trimmed.contains(shorter_trimmed)
 }
 
-pub fn format_duplicates_plain(groups: &[DuplicateGroup], threshold: f32, min_lines: usize) -> String {
+pub fn format_duplicates_plain(
+    groups: &[DuplicateGroup],
+    threshold: f32,
+    min_lines: usize,
+) -> String {
     if groups.is_empty() {
         return format!(
             "No duplicates found (threshold: {threshold:.0}%, min_lines: {min_lines}).\n"
