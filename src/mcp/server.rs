@@ -74,6 +74,7 @@ impl EcotokensServer {
             path: PathBuf::from(&params.path),
             depth: params.depth,
             kinds: params.kinds,
+            base: None,
         };
         match crate::search::outline::outline_path(opts) {
             Ok(symbols) => serde_json::to_string_pretty(&symbols).unwrap_or_default(),
@@ -110,6 +111,30 @@ impl EcotokensServer {
         ) {
             Ok(edges) => serde_json::to_string_pretty(&edges).unwrap_or_default(),
             Err(e) => format!("{{\"error\": \"{e}\"}}"),
+        }
+    }
+
+    #[tool(
+        description = "Detect duplicate or structurally similar code segments \
+        in the indexed codebase and return human-readable refactoring proposals."
+    )]
+    fn ecotokens_duplicates(&self, Parameters(params): Parameters<DuplicatesParams>) -> String {
+        let opts = crate::duplicates::DetectionOptions {
+            index_dir: self.index_dir.clone(),
+            threshold: params.threshold.unwrap_or(70.0),
+            min_lines: params.min_lines.unwrap_or(5),
+        };
+        let top_k = params.top_k.unwrap_or(10);
+        match crate::duplicates::detect::detect_duplicates(&opts) {
+            Ok(mut groups) => {
+                groups.truncate(top_k);
+                crate::duplicates::proposals::format_duplicates_plain(
+                    &groups,
+                    opts.threshold,
+                    opts.min_lines,
+                )
+            }
+            Err(e) => format!("Error: {e}"),
         }
     }
 
@@ -176,7 +201,8 @@ impl ServerHandler for EcotokensServer {
                 "ecotokens: token-saving companion for Claude Code and GitHub Copilot. \
                 Tools: search (BM25 codebase search), outline (list symbols), \
                 symbol (source by ID), trace callers/callees (call graph), \
-                run (execute shell commands with token-optimized output).",
+                run (execute shell commands with token-optimized output), \
+                duplicates (code duplication detection).",
             )
     }
 }

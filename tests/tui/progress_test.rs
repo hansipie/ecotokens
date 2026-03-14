@@ -5,15 +5,8 @@ use ratatui::Terminal;
 use std::fs;
 use tempfile::TempDir;
 
-fn buffer_text(terminal: &Terminal<TestBackend>) -> String {
-    terminal
-        .backend()
-        .buffer()
-        .content
-        .iter()
-        .map(|c| c.symbol())
-        .collect()
-}
+mod helpers;
+use helpers::buffer_text;
 
 // ── T052t ─────────────────────────────────────────────────────────────────────
 

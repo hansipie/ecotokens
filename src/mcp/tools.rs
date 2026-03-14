@@ -97,3 +97,36 @@ pub struct RunParams {
     )]
     pub cwd: Option<String>,
 }
+
+fn de_opt_f32<'de, D>(d: D) -> Result<Option<f32>, D::Error>
+where
+    D: serde::Deserializer<'de>,
+{
+    let v = Option::<serde_json::Value>::deserialize(d)?;
+    match v {
+        None => Ok(None),
+        Some(serde_json::Value::Number(n)) => n
+            .as_f64()
+            .map(|n| Some(n as f32))
+            .ok_or_else(|| serde::de::Error::custom("expected number")),
+        Some(serde_json::Value::String(s)) => {
+            s.parse::<f32>().map(Some).map_err(serde::de::Error::custom)
+        }
+        Some(other) => Err(serde::de::Error::custom(format!(
+            "expected number or string, got {other}"
+        ))),
+    }
+}
+
+#[derive(Debug, Deserialize, schemars::JsonSchema)]
+pub struct DuplicatesParams {
+    #[schemars(description = "Minimum similarity percentage to report (0–100, default: 70)")]
+    #[serde(default, deserialize_with = "de_opt_f32")]
+    pub threshold: Option<f32>,
+    #[schemars(description = "Minimum code block size in lines (default: 5)")]
+    #[serde(default, deserialize_with = "de_opt_usize")]
+    pub min_lines: Option<usize>,
+    #[schemars(description = "Maximum number of duplicate groups to return (default: 10)")]
+    #[serde(default, deserialize_with = "de_opt_usize")]
+    pub top_k: Option<usize>,
+}

@@ -166,7 +166,7 @@ fn my_panel_renders_title() {
 ```rust
 #[test]
 fn cargo_build_keeps_error_lines() {
-    let input = "   Compiling foo v0.1.0\nerror[E0308]: type mismatch\n";
+    let input = "   Compiling foo v0.2.0\nerror[E0308]: type mismatch\n";
     let output = filter_cargo("cargo build", input);
     assert!(output.contains("error[E0308]"));
     assert!(!output.contains("Compiling foo"));

@@ -1,4 +1,4 @@
-use std::path::PathBuf;
+use std::path::{Path, PathBuf};
 
 use super::symbols::{parse_symbols, Symbol};
 use super::text_docs::index_text_doc;
@@ -7,13 +7,21 @@ pub struct OutlineOptions {
     pub path: PathBuf,
     pub depth: Option<u32>,
     pub kinds: Option<Vec<String>>,
+    /// Base directory used to compute relative paths in symbol IDs.
+    /// Defaults to the current working directory when `None`.
+    pub base: Option<PathBuf>,
 }
 
 /// Return the list of symbols for a file or directory, sorted by line_start.
 /// For directories, `depth` limits the recursion (None = unlimited).
 /// `kinds` filters by symbol kind (None = all kinds).
 pub fn outline_path(opts: OutlineOptions) -> Result<Vec<Symbol>, Box<dyn std::error::Error>> {
-    let mut symbols = collect_symbols(&opts.path, opts.depth.unwrap_or(u32::MAX), 0)?;
+    let cwd = opts
+        .base
+        .unwrap_or_else(|| std::env::current_dir().unwrap_or_default())
+        .canonicalize()
+        .unwrap_or_else(|_| std::env::current_dir().unwrap_or_default());
+    let mut symbols = collect_symbols(&opts.path, opts.depth.unwrap_or(u32::MAX), 0, &cwd)?;
 
     if let Some(ref kinds) = opts.kinds {
         symbols.retain(|s| kinds.contains(&s.kind));
@@ -31,20 +39,35 @@ fn collect_symbols(
     path: &PathBuf,
     max_depth: u32,
     current_depth: u32,
+    cwd: &Path,
 ) -> Result<Vec<Symbol>, Box<dyn std::error::Error>> {
     let mut result = Vec::new();
 
     if path.is_file() {
-        let rel = path.file_name().and_then(|n| n.to_str()).unwrap_or("");
+        let abs_path = path.canonicalize().unwrap_or_else(|_| path.to_path_buf());
+        let rel_path = abs_path
+            .strip_prefix(cwd)
+            .unwrap_or(&abs_path)
+            .to_string_lossy()
+            .to_string();
+        let filename = path.file_name().and_then(|n| n.to_str()).unwrap_or("");
         let ext = path.extension().and_then(|e| e.to_str()).unwrap_or("");
 
         match ext {
             "rs" | "py" | "js" | "ts" | "jsx" | "tsx" => {
-                let syms = parse_symbols(path)?;
+                let mut syms = parse_symbols(path)?;
+                for sym in &mut syms {
+                    if sym.file_path == filename {
+                        if let Some(suffix) = sym.id.strip_prefix(&format!("{filename}::")) {
+                            sym.id = format!("{rel_path}::{suffix}");
+                        }
+                        sym.file_path = rel_path.clone();
+                    }
+                }
                 result.extend(syms);
             }
             "md" | "markdown" | "toml" | "json" | "yaml" | "yml" => {
-                let syms = index_text_doc(path, rel)?;
+                let syms = index_text_doc(path, &rel_path)?;
                 result.extend(syms);
             }
             _ => {}
@@ -53,18 +76,7 @@ fn collect_symbols(
         for entry in std::fs::read_dir(path)? {
             let entry = entry?;
             let child = entry.path();
-            let mut child_syms = collect_symbols(&child, max_depth, current_depth + 1)?;
-            // Prefix file_path with directory relative prefix
-            let prefix = path.file_name().and_then(|n| n.to_str()).unwrap_or("");
-            if !prefix.is_empty() {
-                for s in &mut child_syms {
-                    if !s.file_path.contains('/') {
-                        s.file_path = format!("{prefix}/{}", s.file_path);
-                        s.id = format!("{prefix}/{}", s.id);
-                    }
-                }
-            }
-            result.extend(child_syms);
+            result.extend(collect_symbols(&child, max_depth, current_depth + 1, cwd)?);
         }
     }
 

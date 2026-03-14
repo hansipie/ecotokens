@@ -113,6 +113,7 @@ ecotokens uninstall --target all       # all targets
 | `ecotokens trace callers SYMBOL` | Find callers of a symbol |
 | `ecotokens trace callees SYMBOL` | Find callees of a symbol |
 | `ecotokens watch [--path DIR]` | Watch a directory and keep the index up to date |
+| `ecotokens duplicates` | Detect near-duplicate code blocks in the indexed codebase |
 | `ecotokens mcp` | Start the MCP server (JSON-RPC over stdio) |
 
 ## Gain dashboard
@@ -159,6 +160,21 @@ ecotokens watch --status           # show status of background process
 ecotokens watch --status --json    # JSON status output
 ecotokens watch --stop             # stop the background process
 ```
+
+## Duplicates command
+
+`ecotokens duplicates` scans the indexed codebase for near-identical code blocks and reports them grouped by similarity.
+
+```bash
+ecotokens duplicates                          # default: threshold=70%, min_lines=5, top_k=10
+ecotokens duplicates --threshold 80           # only report ≥ 80% similarity
+ecotokens duplicates --min-lines 10           # ignore blocks shorter than 10 lines
+ecotokens duplicates --top-k 20              # return up to 20 groups
+```
+
+Each group shows the file paths, line ranges, similarity score, and a refactoring proposal (exact duplicate, near duplicate, or subset).
+
+The `ecotokens_duplicates` MCP tool exposes the same feature directly to the model.
 
 ## Configuration
 
@@ -207,6 +223,7 @@ When registered (via `--with-mcp` for Claude Code or Gemini CLI, or `--target vs
 | `ecotokens_trace_callers` | Find callers of a symbol (call graph) |
 | `ecotokens_trace_callees` | Find callees of a symbol (call graph) |
 | `ecotokens_run` | Execute a shell command and return token-optimized output |
+| `ecotokens_duplicates` | Detect near-duplicate code blocks in the indexed codebase |
 
 ## Embeddings (optional)
 

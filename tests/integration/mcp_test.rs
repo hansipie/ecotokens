@@ -1,15 +1,11 @@
+#[path = "../helpers.rs"]
+mod helpers;
+use helpers::ecotokens_bin;
+
 use std::fs;
 use std::io::{BufRead, BufReader, Write};
 use std::process::{Command, Stdio};
 use tempfile::TempDir;
-
-fn ecotokens_bin() -> String {
-    let mut path = std::env::current_exe().unwrap();
-    path.pop(); // remove test binary name
-    path.pop(); // remove "deps"
-    path.push("ecotokens");
-    path.to_string_lossy().into_owned()
-}
 
 fn setup_indexed_fixture() -> (TempDir, TempDir) {
     let src = TempDir::new().unwrap();

@@ -5,15 +5,8 @@ use ecotokens::tui::gain::{render_gain, DetailMode, GainMode};
 use ratatui::backend::TestBackend;
 use ratatui::Terminal;
 
-fn buffer_text(terminal: &Terminal<TestBackend>) -> String {
-    terminal
-        .backend()
-        .buffer()
-        .content
-        .iter()
-        .map(|c| c.symbol())
-        .collect()
-}
+mod helpers;
+use helpers::buffer_text;
 
 fn make_interception(tokens_before: u32, tokens_after: u32, family: CommandFamily) -> Interception {
     Interception::new(
