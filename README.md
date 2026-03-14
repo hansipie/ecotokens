@@ -161,7 +161,11 @@ ecotokens watch --status --json    # JSON status output
 ecotokens watch --stop             # stop the background process
 ```
 
-## Duplicates command
+## Bonus Tools
+
+_Less code is less tokens_
+
+### Duplicates command
 
 `ecotokens duplicates` scans the indexed codebase for near-identical code blocks and reports them grouped by similarity.
 
