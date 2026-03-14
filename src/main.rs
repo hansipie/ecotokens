@@ -27,7 +27,7 @@ const DEFAULT_MODEL: &str = "sonnet";
 #[command(
     name = "ecotokens",
     version,
-    about = "Token-saving companion for Claude Code, Gemini CLI, and GitHub Copilot"
+    about = "Token-saving companion for Claude Code and Gemini CLI"
 )]
 struct Cli {
     #[command(subcommand)]
@@ -70,7 +70,7 @@ enum Commands {
     },
     /// Remove ecotokens hook from ~/.claude/settings.json or ~/.gemini/settings.json
     Uninstall {
-        /// Target to uninstall from: claude, vscode, gemini, or all (default: claude)
+        /// Target to uninstall from: claude, gemini, or all (default: claude)
         #[arg(long, default_value = "claude")]
         target: String,
     },
@@ -541,16 +541,14 @@ fn cmd_install(target: String, ai_summary: bool, ai_summary_model: Option<String
 fn cmd_uninstall(target: String) {
     let claude_path = default_settings_path();
     let claude_json = default_claude_json_path();
-    let vscode_path = install::default_vscode_settings_path();
     let gemini_path = install::default_gemini_settings_path();
 
     let uninstall_claude = matches!(target.as_str(), "claude" | "all");
-    let uninstall_vscode = matches!(target.as_str(), "vscode" | "all");
     let uninstall_gemini = matches!(target.as_str(), "gemini" | "all");
 
-    if !uninstall_claude && !uninstall_vscode && !uninstall_gemini {
+    if !uninstall_claude && !uninstall_gemini {
         eprintln!(
-            "unknown target '{}'. Valid values: claude, vscode, gemini, all",
+            "unknown target '{}'. Valid values: claude, gemini, all",
             target
         );
         std::process::exit(1);
@@ -578,56 +576,6 @@ fn cmd_uninstall(target: String) {
                 eprintln!("uninstall error (claude): {e}");
                 std::process::exit(1);
             }
-        }
-    }
-
-    if uninstall_vscode {
-        let mcp_json_path = install::default_vscode_mcp_json_path();
-        let had_settings = vscode_path
-            .as_deref()
-            .is_some_and(install::is_vscode_mcp_registered);
-        let had_json = mcp_json_path
-            .as_deref()
-            .is_some_and(install::is_vscode_mcp_json_registered);
-
-        match vscode_path {
-            Some(ref p) => match install::uninstall_vscode_mcp(p) {
-                Ok(()) => {
-                    if had_settings {
-                        println!(
-                            "ecotokens MCP server unregistered (VS Code settings.json) ← {}",
-                            p.display()
-                        );
-                    }
-                }
-                Err(e) => {
-                    eprintln!("uninstall error (vscode settings.json): {e}");
-                    std::process::exit(1);
-                }
-            },
-            None => {
-                eprintln!("cannot determine VS Code settings path on this system");
-                std::process::exit(1);
-            }
-        }
-        if let Some(ref p) = mcp_json_path {
-            match install::uninstall_vscode_mcp_json(p) {
-                Ok(()) => {
-                    if had_json {
-                        println!(
-                            "ecotokens MCP server unregistered (VS Code mcp.json) ← {}",
-                            p.display()
-                        );
-                    }
-                }
-                Err(e) => {
-                    eprintln!("uninstall error (vscode mcp.json): {e}");
-                    std::process::exit(1);
-                }
-            }
-        }
-        if !had_settings && !had_json {
-            println!("ecotokens: nothing to uninstall (vscode)");
         }
     }
 
