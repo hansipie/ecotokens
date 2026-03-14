@@ -3,8 +3,7 @@ mod helpers;
 use helpers::ecotokens_bin;
 
 use ecotokens::install::{
-    install_gemini_hook, install_gemini_mcp, install_hook, install_vscode_mcp,
-    install_vscode_mcp_json, is_gemini_hook_installed, is_gemini_mcp_registered,
+    install_gemini_hook, install_hook, is_gemini_hook_installed, is_gemini_mcp_registered,
     is_vscode_mcp_json_registered, is_vscode_mcp_registered, uninstall_gemini, uninstall_hook,
     uninstall_vscode_mcp, uninstall_vscode_mcp_json,
 };
@@ -27,7 +26,7 @@ fn install_writes_hook_to_settings() {
     let settings_path = temp_claude_settings(&dir);
     let claude_json = temp_claude_json(&dir);
 
-    let result = install_hook(&settings_path, &claude_json, false);
+    let result = install_hook(&settings_path, &claude_json);
     assert!(result.is_ok(), "install should succeed: {result:?}");
 
     let content = std::fs::read_to_string(&settings_path).unwrap();
@@ -44,8 +43,8 @@ fn install_is_idempotent() {
     let settings_path = temp_claude_settings(&dir);
     let claude_json = temp_claude_json(&dir);
 
-    install_hook(&settings_path, &claude_json, false).unwrap();
-    install_hook(&settings_path, &claude_json, false).unwrap();
+    install_hook(&settings_path, &claude_json).unwrap();
+    install_hook(&settings_path, &claude_json).unwrap();
 
     let content = std::fs::read_to_string(&settings_path).unwrap();
     let v: serde_json::Value = serde_json::from_str(&content).unwrap();
@@ -85,7 +84,7 @@ fn uninstall_removes_only_ecotokens_entry() {
     )
     .unwrap();
 
-    install_hook(&settings_path, &claude_json, false).unwrap();
+    install_hook(&settings_path, &claude_json).unwrap();
     uninstall_hook(&settings_path, &claude_json).unwrap();
 
     let content = std::fs::read_to_string(&settings_path).unwrap();
@@ -113,130 +112,10 @@ fn config_dir_created_on_install() {
     let dir = TempDir::new().unwrap();
     let settings_path = temp_claude_settings(&dir);
     let claude_json = temp_claude_json(&dir);
-    install_hook(&settings_path, &claude_json, false).unwrap();
+    install_hook(&settings_path, &claude_json).unwrap();
     assert!(
         settings_path.exists(),
         "settings.json should exist after install"
-    );
-}
-
-// ── T062t — install --with-mcp ────────────────────────────────────────────────
-
-#[test]
-fn install_with_mcp_adds_mcp_entry() {
-    let dir = TempDir::new().unwrap();
-    let settings_path = temp_claude_settings(&dir);
-    let claude_json = temp_claude_json(&dir);
-
-    install_hook(&settings_path, &claude_json, true).unwrap();
-
-    // MCP must be in ~/.claude.json, NOT in settings.json
-    let cv: serde_json::Value =
-        serde_json::from_str(&std::fs::read_to_string(&claude_json).unwrap()).unwrap();
-    assert!(
-        cv["mcpServers"]["ecotokens"].is_object(),
-        "mcpServers.ecotokens should be in ~/.claude.json after --with-mcp"
-    );
-    assert_eq!(
-        cv["mcpServers"]["ecotokens"]["command"]
-            .as_str()
-            .unwrap_or(""),
-        "ecotokens",
-        "MCP command should be 'ecotokens'"
-    );
-    assert_eq!(
-        cv["mcpServers"]["ecotokens"]["args"][0]
-            .as_str()
-            .unwrap_or(""),
-        "mcp",
-        "MCP first arg should be 'mcp'"
-    );
-
-    // settings.json must NOT contain mcpServers
-    let sv: serde_json::Value =
-        serde_json::from_str(&std::fs::read_to_string(&settings_path).unwrap()).unwrap();
-    assert!(
-        sv["mcpServers"].is_null()
-            || !sv["mcpServers"]
-                .as_object()
-                .map_or(false, |m| m.contains_key("ecotokens")),
-        "mcpServers.ecotokens should NOT be in settings.json"
-    );
-}
-
-#[test]
-fn install_with_mcp_is_idempotent() {
-    let dir = TempDir::new().unwrap();
-    let settings_path = temp_claude_settings(&dir);
-    let claude_json = temp_claude_json(&dir);
-
-    install_hook(&settings_path, &claude_json, true).unwrap();
-    install_hook(&settings_path, &claude_json, true).unwrap();
-
-    let cv: serde_json::Value =
-        serde_json::from_str(&std::fs::read_to_string(&claude_json).unwrap()).unwrap();
-    let servers = cv["mcpServers"].as_object().unwrap();
-    let ecotokens_count = servers.keys().filter(|k| k.as_str() == "ecotokens").count();
-    assert_eq!(ecotokens_count, 1, "should not duplicate MCP entry");
-}
-
-#[test]
-fn install_with_mcp_preserves_existing_hooks() {
-    let dir = TempDir::new().unwrap();
-    let settings_path = temp_claude_settings(&dir);
-    let claude_json = temp_claude_json(&dir);
-
-    // Pre-populate with another hook
-    let initial = serde_json::json!({
-        "hooks": {
-            "PreToolUse": [{
-                "matcher": "OtherTool",
-                "hooks": [{"type": "command", "command": "other-hook"}]
-            }]
-        }
-    });
-    std::fs::write(
-        &settings_path,
-        serde_json::to_string_pretty(&initial).unwrap(),
-    )
-    .unwrap();
-
-    install_hook(&settings_path, &claude_json, true).unwrap();
-
-    let sv: serde_json::Value =
-        serde_json::from_str(&std::fs::read_to_string(&settings_path).unwrap()).unwrap();
-    let hooks = sv["hooks"]["PreToolUse"].as_array().unwrap();
-    assert!(
-        hooks.len() >= 2,
-        "both hooks should be present in settings.json"
-    );
-
-    let cv: serde_json::Value =
-        serde_json::from_str(&std::fs::read_to_string(&claude_json).unwrap()).unwrap();
-    assert!(
-        cv["mcpServers"]["ecotokens"].is_object(),
-        "MCP entry should be in ~/.claude.json"
-    );
-}
-
-#[test]
-fn install_without_mcp_does_not_add_mcp_entry() {
-    let dir = TempDir::new().unwrap();
-    let settings_path = temp_claude_settings(&dir);
-    let claude_json = temp_claude_json(&dir);
-
-    install_hook(&settings_path, &claude_json, false).unwrap();
-
-    assert!(
-        !claude_json.exists() || {
-            let cv: serde_json::Value =
-                serde_json::from_str(&std::fs::read_to_string(&claude_json).unwrap_or_default())
-                    .unwrap_or(serde_json::json!({}));
-            !cv["mcpServers"]
-                .as_object()
-                .map_or(false, |m| m.contains_key("ecotokens"))
-        },
-        "mcpServers.ecotokens should NOT be written without --with-mcp"
     );
 }
 
@@ -246,7 +125,14 @@ fn uninstall_removes_mcp_entry_from_claude_json() {
     let settings_path = temp_claude_settings(&dir);
     let claude_json = temp_claude_json(&dir);
 
-    install_hook(&settings_path, &claude_json, true).unwrap();
+    // Simulate a previously-installed MCP entry
+    let initial = serde_json::json!({
+        "mcpServers": {
+            "ecotokens": { "command": "ecotokens", "args": ["mcp"], "type": "stdio" }
+        }
+    });
+    std::fs::write(&claude_json, serde_json::to_string_pretty(&initial).unwrap()).unwrap();
+
     uninstall_hook(&settings_path, &claude_json).unwrap();
 
     let cv: serde_json::Value =
@@ -265,10 +151,11 @@ fn uninstall_preserves_other_mcp_entries() {
     let settings_path = temp_claude_settings(&dir);
     let claude_json = temp_claude_json(&dir);
 
-    // Pre-populate ~/.claude.json with another MCP server
+    // Pre-populate ~/.claude.json with another MCP server + ecotokens
     let initial = serde_json::json!({
         "mcpServers": {
-            "other-tool": { "command": "other-tool mcp", "type": "stdio" }
+            "other-tool": { "command": "other-tool mcp", "type": "stdio" },
+            "ecotokens": { "command": "ecotokens", "args": ["mcp"], "type": "stdio" }
         }
     });
     std::fs::write(
@@ -277,7 +164,6 @@ fn uninstall_preserves_other_mcp_entries() {
     )
     .unwrap();
 
-    install_hook(&settings_path, &claude_json, true).unwrap();
     uninstall_hook(&settings_path, &claude_json).unwrap();
 
     let cv: serde_json::Value =
@@ -294,7 +180,7 @@ fn uninstall_preserves_other_mcp_entries() {
     );
 }
 
-// ── VS Code MCP installation ──────────────────────────────────────────────────
+// ── VS Code MCP uninstall (cleanup of previously registered MCP) ──────────────
 
 fn temp_vscode_settings(dir: &TempDir) -> std::path::PathBuf {
     let path = dir.path().join("Code").join("User").join("settings.json");
@@ -303,106 +189,20 @@ fn temp_vscode_settings(dir: &TempDir) -> std::path::PathBuf {
 }
 
 #[test]
-fn vscode_install_writes_mcp_entry() {
-    let dir = TempDir::new().unwrap();
-    let vscode_path = temp_vscode_settings(&dir);
-
-    install_vscode_mcp(&vscode_path).expect("install_vscode_mcp should succeed");
-
-    let content = std::fs::read_to_string(&vscode_path).unwrap();
-    let v: serde_json::Value = serde_json::from_str(&content).unwrap();
-    assert!(
-        v["mcp"]["servers"]["ecotokens"].is_object(),
-        "mcp.servers.ecotokens should be present: {v}"
-    );
-    assert_eq!(
-        v["mcp"]["servers"]["ecotokens"]["command"]
-            .as_str()
-            .unwrap_or(""),
-        "ecotokens",
-        "command should be 'ecotokens'"
-    );
-    assert_eq!(
-        v["mcp"]["servers"]["ecotokens"]["args"][0]
-            .as_str()
-            .unwrap_or(""),
-        "mcp",
-        "first arg should be 'mcp'"
-    );
-    assert!(
-        v["mcp"]["servers"]["ecotokens"]["env"].is_null()
-            || v["mcp"]["servers"]["ecotokens"]["env"]["ECOTOKENS_WORKSPACE_ROOT"].is_null(),
-        "env.ECOTOKENS_WORKSPACE_ROOT should NOT be present"
-    );
-}
-
-#[test]
-fn vscode_install_is_idempotent() {
-    let dir = TempDir::new().unwrap();
-    let vscode_path = temp_vscode_settings(&dir);
-
-    install_vscode_mcp(&vscode_path).unwrap();
-    install_vscode_mcp(&vscode_path).unwrap();
-
-    let v: serde_json::Value =
-        serde_json::from_str(&std::fs::read_to_string(&vscode_path).unwrap()).unwrap();
-    let count = v["mcp"]["servers"]
-        .as_object()
-        .map(|m| m.keys().filter(|k| k.as_str() == "ecotokens").count())
-        .unwrap_or(0);
-    assert_eq!(count, 1, "should not duplicate the MCP entry");
-}
-
-#[test]
-fn vscode_install_preserves_existing_settings() {
-    let dir = TempDir::new().unwrap();
-    let vscode_path = temp_vscode_settings(&dir);
-
-    // Pre-populate with unrelated setting
-    let initial = serde_json::json!({
-        "editor.fontSize": 14,
-        "mcp": {
-            "servers": {
-                "other-tool": { "type": "stdio", "command": "other-tool", "args": ["mcp"] }
-            }
-        }
-    });
-    std::fs::write(
-        &vscode_path,
-        serde_json::to_string_pretty(&initial).unwrap(),
-    )
-    .unwrap();
-
-    install_vscode_mcp(&vscode_path).unwrap();
-
-    let v: serde_json::Value =
-        serde_json::from_str(&std::fs::read_to_string(&vscode_path).unwrap()).unwrap();
-    assert!(
-        v["mcp"]["servers"]["ecotokens"].is_object(),
-        "ecotokens should be added"
-    );
-    assert!(
-        v["mcp"]["servers"]["other-tool"].is_object(),
-        "other-tool should be preserved"
-    );
-    assert_eq!(
-        v["editor.fontSize"].as_u64().unwrap_or(0),
-        14,
-        "unrelated settings preserved"
-    );
-}
-
-#[test]
 fn vscode_uninstall_removes_mcp_entry() {
     let dir = TempDir::new().unwrap();
     let vscode_path = temp_vscode_settings(&dir);
 
-    install_vscode_mcp(&vscode_path).unwrap();
+    // Simulate a previously-installed MCP entry
+    let initial = serde_json::json!({
+        "mcp": { "servers": { "ecotokens": { "type": "stdio", "command": "ecotokens", "args": ["mcp"] } } }
+    });
+    std::fs::write(&vscode_path, serde_json::to_string_pretty(&initial).unwrap()).unwrap();
+
     assert!(
         is_vscode_mcp_registered(&vscode_path),
-        "should be registered after install"
+        "should be registered before uninstall"
     );
-
     uninstall_vscode_mcp(&vscode_path).unwrap();
     assert!(
         !is_vscode_mcp_registered(&vscode_path),
@@ -418,7 +218,8 @@ fn vscode_uninstall_preserves_other_mcp_entries() {
     let initial = serde_json::json!({
         "mcp": {
             "servers": {
-                "other-tool": { "type": "stdio", "command": "other-tool", "args": ["mcp"] }
+                "other-tool": { "type": "stdio", "command": "other-tool", "args": ["mcp"] },
+                "ecotokens": { "type": "stdio", "command": "ecotokens", "args": ["mcp"] }
             }
         }
     });
@@ -428,7 +229,6 @@ fn vscode_uninstall_preserves_other_mcp_entries() {
     )
     .unwrap();
 
-    install_vscode_mcp(&vscode_path).unwrap();
     uninstall_vscode_mcp(&vscode_path).unwrap();
 
     let v: serde_json::Value =
@@ -463,61 +263,19 @@ fn temp_vscode_mcp_json(dir: &TempDir) -> std::path::PathBuf {
 }
 
 #[test]
-fn vscode_mcp_json_install_writes_servers_entry() {
-    let dir = TempDir::new().unwrap();
-    let path = temp_vscode_mcp_json(&dir);
-
-    install_vscode_mcp_json(&path).expect("install_vscode_mcp_json should succeed");
-
-    let v: serde_json::Value =
-        serde_json::from_str(&std::fs::read_to_string(&path).unwrap()).unwrap();
-    assert!(
-        v["servers"]["ecotokens"].is_object(),
-        "servers.ecotokens should be present: {v}"
-    );
-    assert_eq!(
-        v["servers"]["ecotokens"]["command"].as_str().unwrap_or(""),
-        "ecotokens"
-    );
-    assert_eq!(
-        v["servers"]["ecotokens"]["args"][0].as_str().unwrap_or(""),
-        "mcp"
-    );
-    assert!(
-        v["servers"]["ecotokens"]["env"].is_null()
-            || v["servers"]["ecotokens"]["env"]["ECOTOKENS_WORKSPACE_ROOT"].is_null(),
-        "env.ECOTOKENS_WORKSPACE_ROOT should NOT be present"
-    );
-}
-
-#[test]
-fn vscode_mcp_json_install_is_idempotent() {
-    let dir = TempDir::new().unwrap();
-    let path = temp_vscode_mcp_json(&dir);
-
-    install_vscode_mcp_json(&path).unwrap();
-    install_vscode_mcp_json(&path).unwrap();
-
-    let v: serde_json::Value =
-        serde_json::from_str(&std::fs::read_to_string(&path).unwrap()).unwrap();
-    let count = v["servers"]
-        .as_object()
-        .map(|m| m.keys().filter(|k| k.as_str() == "ecotokens").count())
-        .unwrap_or(0);
-    assert_eq!(count, 1, "should not duplicate the MCP entry");
-}
-
-#[test]
 fn vscode_mcp_json_uninstall_removes_entry() {
     let dir = TempDir::new().unwrap();
     let path = temp_vscode_mcp_json(&dir);
 
-    install_vscode_mcp_json(&path).unwrap();
+    let initial = serde_json::json!({
+        "servers": { "ecotokens": { "type": "stdio", "command": "ecotokens", "args": ["mcp"] } }
+    });
+    std::fs::write(&path, serde_json::to_string_pretty(&initial).unwrap()).unwrap();
+
     assert!(
         is_vscode_mcp_json_registered(&path),
-        "should be registered after install"
+        "should be registered before uninstall"
     );
-
     uninstall_vscode_mcp_json(&path).unwrap();
     assert!(
         !is_vscode_mcp_json_registered(&path),
@@ -532,12 +290,12 @@ fn vscode_mcp_json_uninstall_preserves_other_entries() {
 
     let initial = serde_json::json!({
         "servers": {
-            "other-tool": { "type": "stdio", "command": "other-tool", "args": ["mcp"] }
+            "other-tool": { "type": "stdio", "command": "other-tool", "args": ["mcp"] },
+            "ecotokens": { "type": "stdio", "command": "ecotokens", "args": ["mcp"] }
         }
     });
     std::fs::write(&path, serde_json::to_string_pretty(&initial).unwrap()).unwrap();
 
-    install_vscode_mcp_json(&path).unwrap();
     uninstall_vscode_mcp_json(&path).unwrap();
 
     let v: serde_json::Value =
@@ -698,48 +456,6 @@ fn gemini_install_hook_is_idempotent() {
 }
 
 #[test]
-fn gemini_install_mcp_writes_mcp_servers() {
-    let dir = TempDir::new().unwrap();
-    let path = temp_gemini_settings(&dir);
-
-    install_gemini_mcp(&path).expect("install_gemini_mcp should succeed");
-
-    let v: serde_json::Value =
-        serde_json::from_str(&std::fs::read_to_string(&path).unwrap()).unwrap();
-    assert!(
-        v["mcpServers"]["ecotokens"].is_object(),
-        "mcpServers.ecotokens must be present"
-    );
-    assert_eq!(
-        v["mcpServers"]["ecotokens"]["command"].as_str().unwrap(),
-        "ecotokens"
-    );
-    assert_eq!(
-        v["mcpServers"]["ecotokens"]["args"][0].as_str().unwrap(),
-        "mcp"
-    );
-}
-
-#[test]
-fn gemini_install_mcp_is_idempotent() {
-    let dir = TempDir::new().unwrap();
-    let path = temp_gemini_settings(&dir);
-
-    install_gemini_mcp(&path).unwrap();
-    install_gemini_mcp(&path).unwrap();
-
-    let v: serde_json::Value =
-        serde_json::from_str(&std::fs::read_to_string(&path).unwrap()).unwrap();
-    let count = v["mcpServers"]
-        .as_object()
-        .unwrap()
-        .keys()
-        .filter(|k| k.as_str() == "ecotokens")
-        .count();
-    assert_eq!(count, 1, "should not duplicate MCP entry");
-}
-
-#[test]
 fn gemini_is_hook_installed_returns_false_before_install() {
     let dir = TempDir::new().unwrap();
     let path = temp_gemini_settings(&dir);
@@ -762,20 +478,16 @@ fn gemini_is_mcp_registered_returns_false_before_install() {
 }
 
 #[test]
-fn gemini_is_mcp_registered_returns_true_after_install() {
-    let dir = TempDir::new().unwrap();
-    let path = temp_gemini_settings(&dir);
-    install_gemini_mcp(&path).unwrap();
-    assert!(is_gemini_mcp_registered(&path));
-}
-
-#[test]
 fn gemini_uninstall_removes_hook_and_mcp() {
     let dir = TempDir::new().unwrap();
     let path = temp_gemini_settings(&dir);
 
-    install_gemini_hook(&path).unwrap();
-    install_gemini_mcp(&path).unwrap();
+    // Simulate pre-installed hook + MCP entry
+    let initial = serde_json::json!({
+        "hooks": { "BeforeTool": [{"matcher": "run_shell_command", "hooks": [{"type": "command", "command": "ecotokens hook-gemini"}]}] },
+        "mcpServers": { "ecotokens": { "command": "ecotokens", "args": ["mcp"], "type": "stdio" } }
+    });
+    std::fs::write(&path, serde_json::to_string_pretty(&initial).unwrap()).unwrap();
 
     assert!(is_gemini_hook_installed(&path));
     assert!(is_gemini_mcp_registered(&path));
@@ -791,24 +503,26 @@ fn gemini_uninstall_preserves_third_party_hooks() {
     let dir = TempDir::new().unwrap();
     let path = temp_gemini_settings(&dir);
 
-    // Pre-populate with a third-party hook
     let initial = serde_json::json!({
         "hooks": {
             "BeforeTool": [
                 {
                     "matcher": "other_tool",
                     "hooks": [{"type": "command", "command": "other-hook"}]
+                },
+                {
+                    "matcher": "run_shell_command",
+                    "hooks": [{"type": "command", "command": "ecotokens hook-gemini"}]
                 }
             ]
         },
         "mcpServers": {
-            "other-server": {"command": "other", "args": []}
+            "other-server": {"command": "other", "args": []},
+            "ecotokens": {"command": "ecotokens", "args": ["mcp"], "type": "stdio"}
         }
     });
     std::fs::write(&path, serde_json::to_string_pretty(&initial).unwrap()).unwrap();
 
-    install_gemini_hook(&path).unwrap();
-    install_gemini_mcp(&path).unwrap();
     uninstall_gemini(&path).unwrap();
 
     let v: serde_json::Value =

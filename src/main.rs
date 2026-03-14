@@ -15,7 +15,6 @@ mod filter;
 mod hook;
 mod install;
 mod masking;
-mod mcp;
 mod metrics;
 mod search;
 mod tokens;
@@ -59,9 +58,7 @@ enum Commands {
     },
     /// Install ecotokens hook in ~/.claude/settings.json or ~/.gemini/settings.json
     Install {
-        #[arg(long)]
-        with_mcp: bool,
-        /// Target AI tool to install for: claude, vscode, gemini, or all (default: claude)
+        /// Target AI tool to install for: claude, gemini, or all (default: claude)
         #[arg(long, default_value = "claude")]
         target: String,
         /// Enable AI-powered output summarization via Ollama
@@ -146,11 +143,6 @@ enum Commands {
         /// Output status as JSON
         #[arg(long)]
         json: bool,
-    },
-    /// Start MCP server (JSON-RPC over stdio)
-    Mcp {
-        #[arg(long)]
-        index_dir: Option<PathBuf>,
     },
     /// Detect code duplications in the indexed codebase and propose refactoring
     Duplicates {
@@ -485,73 +477,30 @@ fn sorted_projects_from(report: &metrics::report::Report) -> Vec<(String, f32)> 
     projects
 }
 
-fn cmd_install(with_mcp: bool, target: String, ai_summary: bool, ai_summary_model: Option<String>) {
+fn cmd_install(target: String, ai_summary: bool, ai_summary_model: Option<String>) {
     let claude_path = default_settings_path();
     let claude_json = default_claude_json_path();
-    let vscode_path = install::default_vscode_settings_path();
     let gemini_path = install::default_gemini_settings_path();
 
     let install_claude = matches!(target.as_str(), "claude" | "all");
-    let install_vscode = matches!(target.as_str(), "vscode" | "all");
     let install_gemini = matches!(target.as_str(), "gemini" | "all");
 
-    if !install_claude && !install_vscode && !install_gemini {
+    if !install_claude && !install_gemini {
         eprintln!(
-            "unknown target '{}'. Valid values: claude, vscode, gemini, all",
+            "unknown target '{}'. Valid values: claude, gemini, all",
             target
         );
         std::process::exit(1);
     }
 
     if install_claude {
-        match install::install_hook(&claude_path, &claude_json, with_mcp) {
+        match install::install_hook(&claude_path, &claude_json) {
             Ok(()) => {
                 println!("ecotokens hook installed → {}", claude_path.display());
-                if with_mcp {
-                    println!(
-                        "ecotokens MCP server registered → {}",
-                        claude_json.display()
-                    );
-                }
             }
             Err(e) => {
                 eprintln!("install error (claude): {e}");
                 std::process::exit(1);
-            }
-        }
-    }
-
-    if install_vscode {
-        match vscode_path {
-            Some(ref p) => match install::install_vscode_mcp(p) {
-                Ok(()) => {
-                    println!(
-                        "ecotokens MCP server registered (VS Code settings.json) → {}",
-                        p.display()
-                    )
-                }
-                Err(e) => {
-                    eprintln!("install error (vscode settings.json): {e}");
-                    std::process::exit(1);
-                }
-            },
-            None => {
-                eprintln!("cannot determine VS Code settings path on this system");
-                std::process::exit(1);
-            }
-        }
-        if let Some(mcp_json_path) = install::default_vscode_mcp_json_path() {
-            match install::install_vscode_mcp_json(&mcp_json_path) {
-                Ok(()) => {
-                    println!(
-                        "ecotokens MCP server registered (VS Code mcp.json) → {}",
-                        mcp_json_path.display()
-                    )
-                }
-                Err(e) => {
-                    eprintln!("install error (vscode mcp.json): {e}");
-                    std::process::exit(1);
-                }
             }
         }
     }
@@ -564,17 +513,6 @@ fn cmd_install(with_mcp: bool, target: String, ai_summary: bool, ai_summary_mode
                     Err(e) => {
                         eprintln!("install error (gemini hook): {e}");
                         std::process::exit(1);
-                    }
-                }
-                if with_mcp {
-                    match install::install_gemini_mcp(p) {
-                        Ok(()) => {
-                            println!("ecotokens MCP server registered (Gemini) → {}", p.display())
-                        }
-                        Err(e) => {
-                            eprintln!("install error (gemini mcp): {e}");
-                            std::process::exit(1);
-                        }
                     }
                 }
             }
@@ -772,21 +710,14 @@ fn cmd_config(json: bool, embed_provider: Option<String>, embed_url: Option<Stri
     };
 
     let hook_installed = install::is_hook_installed(&settings_path);
-    let mcp_registered = install::is_mcp_registered(&claude_json);
-    let vscode_mcp_registered = install::default_vscode_settings_path()
-        .map(|p| install::is_vscode_mcp_registered(&p))
-        .unwrap_or(false);
+    let _ = claude_json;
 
     if json {
         let mut v = serde_json::to_value(&settings).unwrap();
         v["hook_installed"] = serde_json::Value::Bool(hook_installed);
-        v["mcp_registered"] = serde_json::Value::Bool(mcp_registered);
-        v["vscode_mcp_registered"] = serde_json::Value::Bool(vscode_mcp_registered);
         println!("{}", serde_json::to_string_pretty(&v).unwrap());
     } else {
         println!("hook_installed        : {}", hook_installed);
-        println!("mcp_registered        : {}", mcp_registered);
-        println!("vscode_mcp_registered : {}", vscode_mcp_registered);
         println!("debug                 : {}", settings.debug);
         println!("exclusions            : {:?}", settings.exclusions);
         println!("embed_provider        : {}", provider_str);
@@ -1359,19 +1290,6 @@ fn cmd_watch(
     let _ = report; // suppress unused warning in non-interactive path
 }
 
-fn cmd_mcp(index_dir: Option<PathBuf>) {
-    let idx_dir = index_dir.unwrap_or_else(default_index_dir);
-    let rt = tokio::runtime::Builder::new_current_thread()
-        .enable_all()
-        .build()
-        .expect("failed to build tokio runtime");
-    rt.block_on(async {
-        if let Err(e) = mcp::server::run_server(idx_dir).await {
-            eprintln!("mcp error: {e}");
-            std::process::exit(1);
-        }
-    });
-}
 
 #[derive(serde::Serialize)]
 struct DuplicatesJsonOutput {
@@ -1440,11 +1358,10 @@ fn main() {
             model,
         } => cmd_gain(period, json, model),
         Commands::Install {
-            with_mcp,
             target,
             ai_summary,
             ai_summary_model,
-        } => cmd_install(with_mcp, target, ai_summary, ai_summary_model),
+        } => cmd_install(target, ai_summary, ai_summary_model),
         Commands::Uninstall { target } => cmd_uninstall(target),
         Commands::Config {
             json,
@@ -1490,7 +1407,6 @@ fn main() {
             stop,
             json,
         } => cmd_watch(path, index_dir, background, status, stop, json),
-        Commands::Mcp { index_dir } => cmd_mcp(index_dir),
         Commands::Duplicates {
             threshold,
             min_lines,

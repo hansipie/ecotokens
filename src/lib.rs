@@ -5,7 +5,6 @@ pub mod filter;
 pub mod hook;
 pub mod install;
 pub mod masking;
-pub mod mcp;
 pub mod metrics;
 pub mod search;
 pub mod tokens;
