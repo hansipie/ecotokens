@@ -130,7 +130,11 @@ fn uninstall_removes_mcp_entry_from_claude_json() {
             "ecotokens": { "command": "ecotokens", "args": ["mcp"], "type": "stdio" }
         }
     });
-    std::fs::write(&claude_json, serde_json::to_string_pretty(&initial).unwrap()).unwrap();
+    std::fs::write(
+        &claude_json,
+        serde_json::to_string_pretty(&initial).unwrap(),
+    )
+    .unwrap();
 
     uninstall_hook(&settings_path, &claude_json).unwrap();
 

@@ -518,15 +518,13 @@ fn cmd_install(target: String, ai_summary: bool, ai_summary_model: Option<String
 
     if install_gemini {
         match gemini_path {
-            Some(ref p) => {
-                match install::install_gemini_hook(p) {
-                    Ok(()) => println!("ecotokens hook installed (Gemini) → {}", p.display()),
-                    Err(e) => {
-                        eprintln!("install error (gemini hook): {e}");
-                        std::process::exit(1);
-                    }
+            Some(ref p) => match install::install_gemini_hook(p) {
+                Ok(()) => println!("ecotokens hook installed (Gemini) → {}", p.display()),
+                Err(e) => {
+                    eprintln!("install error (gemini hook): {e}");
+                    std::process::exit(1);
                 }
-            }
+            },
             None => {
                 eprintln!("cannot determine Gemini settings path on this system");
                 std::process::exit(1);
@@ -1248,7 +1246,6 @@ fn cmd_watch(
 
     let _ = report; // suppress unused warning in non-interactive path
 }
-
 
 #[derive(serde::Serialize)]
 struct DuplicatesJsonOutput {
