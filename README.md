@@ -150,10 +150,10 @@ _Less code is less tokens_
 `ecotokens duplicates` scans the indexed codebase for near-identical code blocks and reports them grouped by similarity.
 
 ```bash
-ecotokens duplicates                          # default: threshold=70%, min_lines=5, top_k=10
+ecotokens duplicates                          # default: threshold=70%, min_lines=5
 ecotokens duplicates --threshold 80           # only report ≥ 80% similarity
 ecotokens duplicates --min-lines 10           # ignore blocks shorter than 10 lines
-ecotokens duplicates --top-k 20              # return up to 20 groups
+ecotokens duplicates --json                   # JSON output
 ```
 
 Each group shows the file paths, line ranges, similarity score, and a refactoring proposal (exact duplicate, near duplicate, or subset).
@@ -170,12 +170,11 @@ Output includes:
 ```
 hook_installed        : true
 debug                 : false
-threshold_lines       : 500
-threshold_bytes       : 51200
 exclusions            : []
 embed_provider        : ollama (http://localhost:11434)
 ai_summary_enabled    : false
 ai_summary_model      : llama3.2:3b (default)
+ai_summary_url        : http://localhost:11434 (default)
 ```
 
 ## Supported command families
