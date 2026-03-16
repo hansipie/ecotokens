@@ -2,6 +2,8 @@
 
 This document describes the core runtime path used when ecotokens intercepts a shell command through a hook and turns the raw output into a persisted token-savings record.
 
+ecotokens is a **CLI-only** tool. The entire integration relies on shell hooks (`PreToolUse` / `BeforeTool`) — there is no background server, no MCP server, and no persistent process to manage.
+
 ## Overview
 
 ```mermaid
@@ -137,3 +139,4 @@ Once the metrics record is persisted, the filtered output is printed back to the
 - The hook layer decides whether to rewrite or pass through. It does not perform filtering itself.
 - The filter layer owns masking, family detection, compression, token estimation, and metrics creation.
 - The metrics layer is intentionally simple: append JSONL now, aggregate later when reports or TUIs read the file.
+- **ecotokens ne fonctionne plus comme serveur MCP.** L'intégration se fait uniquement via les hooks shell (`PreToolUse` / `BeforeTool`). Aucun serveur n'est démarré, aucun port n'est ouvert.
