@@ -175,7 +175,10 @@ fn gain_history_and_period_are_mutually_exclusive() {
         .expect("failed to run");
     assert!(!out.status.success(), "should fail when both flags are set");
     let stderr = String::from_utf8_lossy(&out.stderr);
-    assert!(stderr.contains("cannot be used with"), "should show conflict error: {stderr}");
+    assert!(
+        stderr.contains("cannot be used with"),
+        "should show conflict error: {stderr}"
+    );
 }
 
 #[test]
