@@ -72,6 +72,41 @@ fn period_start(period: &Period) -> Option<DateTime<Utc>> {
     }
 }
 
+#[derive(Debug, Clone, Serialize, Deserialize)]
+pub struct HistoryReport {
+    pub model_ref: String,
+    pub day: Report,
+    pub week: Report,
+    pub month: Report,
+}
+
+/// Aggregate interceptions for three rolling time windows at once.
+pub fn aggregate_history(items: &[Interception], model: &str) -> HistoryReport {
+    HistoryReport {
+        model_ref: model.to_string(),
+        day: aggregate(items, Period::Today, model),
+        week: aggregate(items, Period::Week, model),
+        month: aggregate(items, Period::Month, model),
+    }
+}
+
+/// Filter interceptions by period, reusing the same logic as `aggregate`.
+pub fn filter_by_period(items: &[Interception], period: &Period) -> Vec<Interception> {
+    let start = period_start(period);
+    items
+        .iter()
+        .filter(|item| {
+            if let Some(start_ts) = start {
+                if let Ok(ts) = DateTime::parse_from_rfc3339(&item.timestamp) {
+                    return ts.with_timezone(&Utc) >= start_ts;
+                }
+            }
+            true
+        })
+        .cloned()
+        .collect()
+}
+
 /// Aggregate interceptions into a Report.
 pub fn aggregate(items: &[Interception], period: Period, model: &str) -> Report {
     let start = period_start(&period);

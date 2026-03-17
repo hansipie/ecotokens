@@ -49,12 +49,17 @@ enum Commands {
     },
     /// Show token savings report
     Gain {
-        #[arg(long, default_value = "all")]
+        #[arg(long, default_value = "all", value_name = "PERIOD",
+              help = "Time window to aggregate [possible values: all, today, week, month]",
+              conflicts_with = "history")]
         period: String,
         #[arg(long)]
         json: bool,
         #[arg(long)]
         model: Option<String>,
+        /// Show savings for last 24h, 7 days, and 30 days at once
+        #[arg(long)]
+        history: bool,
     },
     /// Install ecotokens hook in ~/.claude/settings.json or ~/.gemini/settings.json
     Install {
@@ -273,8 +278,46 @@ fn cmd_filter(args: Vec<String>, debug: bool) {
     }
 }
 
-fn cmd_gain(period: String, json: bool, model: Option<String>) {
-    use metrics::report::{aggregate, Period};
+fn format_thousands(n: u64) -> String {
+    let s = n.to_string();
+    let mut result = String::new();
+    for (i, c) in s.chars().rev().enumerate() {
+        if i > 0 && i % 3 == 0 {
+            result.push(' ');
+        }
+        result.push(c);
+    }
+    result.chars().rev().collect()
+}
+
+fn print_history_table(report: &metrics::report::HistoryReport) {
+    let model = &report.model_ref;
+    println!("Savings History          [model: {model}]");
+    println!("{}", "─".repeat(65));
+    println!(
+        "{:<14} {:>6}  {:>14}  {:>9}  {:>12}",
+        "Period", "Runs", "Tokens saved", "Savings", "Cost avoided"
+    );
+    for (label, r) in [
+        ("Last 24h", &report.day),
+        ("Last 7 days", &report.week),
+        ("Last 30 days", &report.month),
+    ] {
+        let tokens_saved = r.total_tokens_before.saturating_sub(r.total_tokens_after);
+        println!(
+            "{:<14} {:>6}  {:>14}  {:>8.1}%  ${:.2}",
+            label,
+            r.total_interceptions,
+            format_thousands(tokens_saved),
+            r.total_savings_pct,
+            r.cost_avoided_usd
+        );
+    }
+    println!("{}", "─".repeat(65));
+}
+
+fn cmd_gain(period: String, json: bool, model: Option<String>, history: bool) {
+    use metrics::report::{aggregate, aggregate_history, filter_by_period, Period};
     use metrics::store::read_from;
 
     let path = match metrics::store::metrics_path() {
@@ -286,8 +329,20 @@ fn cmd_gain(period: String, json: bool, model: Option<String>) {
     };
     let model_str = model.as_deref().unwrap_or(DEFAULT_MODEL);
     let mut items = read_from(&path).unwrap_or_default();
+
+    if history {
+        let hist = aggregate_history(&items, model_str);
+        if json {
+            println!("{}", serde_json::to_string_pretty(&hist).unwrap());
+        } else {
+            print_history_table(&hist);
+        }
+        return;
+    }
+
     let p = Period::parse(&period);
     let mut report = aggregate(&items, p.clone(), model_str);
+    let mut filtered_items = filter_by_period(&items, &p);
 
     if json {
         println!("{}", serde_json::to_string_pretty(&report).unwrap());
@@ -316,12 +371,13 @@ fn cmd_gain(period: String, json: bool, model: Option<String>) {
                 if last_reload.elapsed() >= std::time::Duration::from_secs(10) {
                     items = read_from(&path).unwrap_or_default();
                     report = aggregate(&items, p.clone(), model_str);
+                    filtered_items = filter_by_period(&items, &p);
                     sorted_projects = sorted_projects_from(&report);
                     last_reload = std::time::Instant::now();
                 }
                 let ts = chrono::Utc::now().format("%H:%M:%S").to_string();
                 let family_count = match project_filter.as_deref() {
-                    Some(proj) => tui::gain::sorted_family_keys_for_project(&items, proj).len(),
+                    Some(proj) => tui::gain::sorted_family_keys_for_project(&filtered_items, proj).len(),
                     None => report.by_family.len(),
                 };
                 let project_count = report.by_project.len();
@@ -330,7 +386,7 @@ fn cmd_gain(period: String, json: bool, model: Option<String>) {
                         f,
                         f.area(),
                         &report,
-                        &items,
+                        &filtered_items,
                         Some(&ts),
                         gain_mode,
                         sparkline_mode,
@@ -1301,7 +1357,8 @@ fn main() {
             period,
             json,
             model,
-        } => cmd_gain(period, json, model),
+            history,
+        } => cmd_gain(period, json, model, history),
         Commands::Install {
             target,
             ai_summary,
