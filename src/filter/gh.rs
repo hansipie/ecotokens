@@ -66,37 +66,35 @@ fn filter_gh_pr_view(output: &str) -> String {
     strip_html_comments(&joined)
 }
 
-fn filter_gh_pr_list(output: &str) -> String {
+/// Format tab-separated gh list output as compact `#N [state] Title` lines.
+/// `min_parts` is the minimum number of tab-separated fields required to
+/// attempt formatting (3 for PR, 2 for issue).
+fn filter_gh_list(output: &str, min_parts: usize) -> String {
     let lines: Vec<&str> = output.lines().collect();
-
-    // Format: compact #123 [open] Title (author)
-    // gh pr list outputs tab-separated: NUMBER  TITLE  BRANCH  CREATED_AT
     let mut result = Vec::new();
     for line in &lines {
         if line.is_empty() {
             continue;
         }
         let parts: Vec<&str> = line.split('\t').collect();
-        if parts.len() >= 3 {
+        if parts.len() >= min_parts {
             let number = parts[0].trim();
             let title = parts[1].trim();
-            let state = if parts.len() > 3 {
-                parts[3].trim()
-            } else {
-                "open"
-            };
+            let state = if parts.len() > 3 { parts[3].trim() } else { "open" };
             result.push(format!("#{} [{}] {}", number, state, title));
         } else {
-            // Not tab-separated, keep as-is
             result.push(line.to_string());
         }
     }
-
     if result.is_empty() {
         return output.to_string();
     }
-
     result.join("\n")
+}
+
+fn filter_gh_pr_list(output: &str) -> String {
+    // gh pr list: tab-separated NUMBER  TITLE  BRANCH  CREATED_AT
+    filter_gh_list(output, 3)
 }
 
 fn filter_gh_issue_view(output: &str) -> String {
@@ -105,34 +103,8 @@ fn filter_gh_issue_view(output: &str) -> String {
 }
 
 fn filter_gh_issue_list(output: &str) -> String {
-    let lines: Vec<&str> = output.lines().collect();
-
     // gh issue list: tab-separated NUMBER  TITLE  LABELS  CREATED_AT
-    let mut result = Vec::new();
-    for line in &lines {
-        if line.is_empty() {
-            continue;
-        }
-        let parts: Vec<&str> = line.split('\t').collect();
-        if parts.len() >= 2 {
-            let number = parts[0].trim();
-            let title = parts[1].trim();
-            let state = if parts.len() > 3 {
-                parts[3].trim()
-            } else {
-                "open"
-            };
-            result.push(format!("#{} [{}] {}", number, state, title));
-        } else {
-            result.push(line.to_string());
-        }
-    }
-
-    if result.is_empty() {
-        return output.to_string();
-    }
-
-    result.join("\n")
+    filter_gh_list(output, 2)
 }
 
 fn filter_gh_run_view(output: &str) -> String {

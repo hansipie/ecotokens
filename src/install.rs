@@ -89,13 +89,16 @@ pub fn is_hook_installed(settings_path: &Path) -> bool {
         .unwrap_or(false)
 }
 
-/// Check if the ecotokens MCP server is registered in ~/.claude.json.
-pub fn is_mcp_registered(claude_json_path: &Path) -> bool {
-    let v = read_settings(claude_json_path);
+fn has_ecotokens_mcp_server(v: &serde_json::Value) -> bool {
     v["mcpServers"]
         .as_object()
         .map(|m| m.contains_key("ecotokens"))
         .unwrap_or(false)
+}
+
+/// Check if the ecotokens MCP server is registered in ~/.claude.json.
+pub fn is_mcp_registered(claude_json_path: &Path) -> bool {
+    has_ecotokens_mcp_server(&read_settings(claude_json_path))
 }
 
 /// Remove the ecotokens PreToolUse hook from ~/.claude/settings.json and
@@ -209,11 +212,7 @@ pub fn is_gemini_hook_installed(settings_path: &Path) -> bool {
 
 /// Check if the ecotokens MCP server is registered in ~/.gemini/settings.json.
 pub fn is_gemini_mcp_registered(settings_path: &Path) -> bool {
-    let v = read_settings(settings_path);
-    v["mcpServers"]
-        .as_object()
-        .map(|m| m.contains_key("ecotokens"))
-        .unwrap_or(false)
+    has_ecotokens_mcp_server(&read_settings(settings_path))
 }
 
 /// Remove the ecotokens hook and MCP server from ~/.gemini/settings.json.
