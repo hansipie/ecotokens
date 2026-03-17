@@ -2,6 +2,11 @@
 /target/
 *.rlib
 
+# Specify
+specs/
+.specify/
+.claude/
+
 # Editor / IDE
 .idea/
 .vscode/

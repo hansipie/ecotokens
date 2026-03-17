@@ -1,6 +1,6 @@
 # ecotokens Development Guidelines
 
-Auto-generated from all feature plans. Last updated: 2026-02-21
+Auto-generated from all feature plans. Last updated: 2026-03-17
 
 ## Active Technologies
 - Rust stable ≥ 1.75 + tantivy 0.22 (index read), similar 2.x (diff/similarity ratio), clap 4 (CLI), rmcp (MCP server), serde/serde_json (serialisation) (002-duplicate-detection)
@@ -24,6 +24,7 @@ cargo test [ONLY COMMANDS FOR ACTIVE TECHNOLOGIES][ONLY COMMANDS FOR ACTIVE TECH
 Rust stable (≥ 1.75, no nightly): Follow standard conventions
 
 ## Recent Changes
+- 004-savings-history-periods: Added [if applicable, e.g., PostgreSQL, CoreData, files or N/A]
 - 002-duplicate-detection: Added Rust stable ≥ 1.75 + tantivy 0.22 (index read), similar 2.x (diff/similarity ratio), clap 4 (CLI), rmcp (MCP server), serde/serde_json (serialisation)
 
 - 001-token-companion: Added Rust stable (≥ 1.75, no nightly)
