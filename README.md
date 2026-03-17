@@ -2,7 +2,7 @@
   <img src="assets/banner.png" alt="ecotokens">
 </p>
 
-Token-saving companion for [Claude Code](https://claude.ai/code) and [Gemini CLI](https://github.com/google-gemini/gemini-cli). ecotokens intercepts tool outputs before they reach the model, filters the noise, and records how many tokens you saved.
+Token-saving companion for [Claude Code](https://claude.ai/code) and [Gemini CLI](https://github.com/google-gemini/gemini-cli). Built on a *"set it and forget it!"* philosophy: one install command, zero configuration, and ecotokens works automatically from there — intercepting tool outputs before they reach the model, filtering the noise, and recording how many tokens you saved.
 
 <p align="center">
   <img src="docs/demo.gif" alt="ecotokens demo" width="800">
