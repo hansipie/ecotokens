@@ -178,7 +178,7 @@ enum Commands {
         /// Delete only interceptions of a specific command family (e.g. git, cargo, python)
         #[arg(long, value_name = "FAMILY")]
         family: Option<String>,
-        /// Delete only interceptions for a specific project (git root path)
+        /// Delete only interceptions for a specific project (git root path, or "(unknown)" for entries without a git root)
         #[arg(long, value_name = "PATH")]
         project: Option<String>,
         /// Skip the confirmation prompt
