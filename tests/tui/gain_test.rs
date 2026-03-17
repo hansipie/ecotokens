@@ -1,5 +1,5 @@
 use chrono::Utc;
-use ecotokens::metrics::report::{aggregate, Period};
+use ecotokens::metrics::report::{aggregate, aggregate_history, Period};
 use ecotokens::metrics::store::{CommandFamily, FilterMode, Interception};
 use ecotokens::tui::gain::{render_gain, DetailMode, GainMode};
 use ratatui::backend::TestBackend;
@@ -7,6 +7,39 @@ use ratatui::Terminal;
 
 mod helpers;
 use helpers::buffer_text;
+
+fn draw_gain(
+    items: &[Interception],
+    width: u16,
+    height: u16,
+    gain_mode: GainMode,
+    selected_family: Option<usize>,
+    detail_mode: DetailMode,
+    selected_project: Option<usize>,
+) -> String {
+    let report = aggregate(items, Period::All, "sonnet");
+    let backend = TestBackend::new(width, height);
+    let mut terminal = Terminal::new(backend).unwrap();
+    terminal
+        .draw(|frame| {
+            render_gain(
+                frame,
+                frame.area(),
+                &report,
+                items,
+                None,
+                gain_mode,
+                Default::default(),
+                selected_family,
+                detail_mode,
+                selected_project,
+                None,
+                0,
+            )
+        })
+        .unwrap();
+    buffer_text(&terminal)
+}
 
 fn make_interception(tokens_before: u32, tokens_after: u32, family: CommandFamily) -> Interception {
     Interception::new(
@@ -23,6 +56,54 @@ fn make_interception(tokens_before: u32, tokens_after: u32, family: CommandFamil
     )
 }
 
+// ── aggregate_history unit tests ──────────────────────────────────────────────
+
+#[test]
+fn aggregate_history_empty_returns_zeros() {
+    let report = aggregate_history(&[], "sonnet");
+    assert_eq!(report.day.total_interceptions, 0);
+    assert_eq!(report.week.total_interceptions, 0);
+    assert_eq!(report.month.total_interceptions, 0);
+    assert_eq!(report.day.cost_avoided_usd, 0.0);
+    assert_eq!(report.model_ref, "sonnet");
+}
+
+#[test]
+fn aggregate_history_json_has_expected_keys() {
+    let report = aggregate_history(&[], "sonnet");
+    let json = serde_json::to_string(&report).unwrap();
+    let v: serde_json::Value = serde_json::from_str(&json).unwrap();
+    assert!(v["day"].is_object(), "should have 'day' key: {json}");
+    assert!(v["week"].is_object(), "should have 'week' key: {json}");
+    assert!(v["month"].is_object(), "should have 'month' key: {json}");
+    assert_eq!(v["model_ref"], "sonnet");
+}
+
+#[test]
+fn aggregate_history_counts_by_period() {
+    let mut item_recent = make_interception(1000, 400, CommandFamily::Git);
+    item_recent.timestamp = (Utc::now() - chrono::Duration::days(3)).to_rfc3339();
+
+    let mut item_old = make_interception(2000, 800, CommandFamily::Git);
+    item_old.timestamp = (Utc::now() - chrono::Duration::days(20)).to_rfc3339();
+
+    let items = vec![item_recent, item_old];
+    let report = aggregate_history(&items, "sonnet");
+
+    assert_eq!(
+        report.month.total_interceptions, 2,
+        "month should include both items"
+    );
+    assert_eq!(
+        report.week.total_interceptions, 1,
+        "week should include only item from 3 days ago"
+    );
+    assert_eq!(
+        report.day.total_interceptions, 0,
+        "day should not include items older than midnight"
+    );
+}
+
 // ── T034et ────────────────────────────────────────────────────────────────────
 
 #[test]
@@ -31,28 +112,7 @@ fn gain_renders_savings_label() {
         make_interception(1000, 400, CommandFamily::Git),
         make_interception(2000, 800, CommandFamily::Cargo),
     ];
-    let report = aggregate(&items, Period::All, "sonnet");
-    let backend = TestBackend::new(100, 25);
-    let mut terminal = Terminal::new(backend).unwrap();
-    terminal
-        .draw(|frame| {
-            render_gain(
-                frame,
-                frame.area(),
-                &report,
-                &items,
-                None,
-                GainMode::Family,
-                Default::default(),
-                None,
-                Default::default(),
-                None,
-                None,
-                0,
-            )
-        })
-        .unwrap();
-    let content = buffer_text(&terminal);
+    let content = draw_gain(&items, 100, 25, GainMode::Family, None, Default::default(), None);
     assert!(
         content.contains("Savings"),
         "buffer should contain 'Savings' label: {content:?}"
@@ -62,28 +122,7 @@ fn gain_renders_savings_label() {
 #[test]
 fn gain_renders_cost_avoided_label() {
     let items = vec![make_interception(5000, 1000, CommandFamily::Git)];
-    let report = aggregate(&items, Period::All, "sonnet");
-    let backend = TestBackend::new(100, 25);
-    let mut terminal = Terminal::new(backend).unwrap();
-    terminal
-        .draw(|frame| {
-            render_gain(
-                frame,
-                frame.area(),
-                &report,
-                &items,
-                None,
-                GainMode::Family,
-                Default::default(),
-                None,
-                Default::default(),
-                None,
-                None,
-                0,
-            )
-        })
-        .unwrap();
-    let content = buffer_text(&terminal);
+    let content = draw_gain(&items, 100, 25, GainMode::Family, None, Default::default(), None);
     assert!(
         content.contains("Cost avoided"),
         "buffer should contain 'Cost avoided' label: {content:?}"
@@ -229,28 +268,7 @@ fn gain_detail_with_content_renders_text() {
     item.content_before = Some("diff --git a/foo.rs b/foo.rs".to_string());
     item.content_after = Some("summary: 1 file changed".to_string());
     let items = vec![item];
-    let report = aggregate(&items, Period::All, "sonnet");
-    let backend = TestBackend::new(120, 35);
-    let mut terminal = Terminal::new(backend).unwrap();
-    terminal
-        .draw(|frame| {
-            render_gain(
-                frame,
-                frame.area(),
-                &report,
-                &items,
-                None,
-                GainMode::Family,
-                Default::default(),
-                Some(0),
-                Default::default(),
-                None,
-                None,
-                0,
-            )
-        })
-        .unwrap();
-    let content = buffer_text(&terminal);
+    let content = draw_gain(&items, 120, 35, GainMode::Family, Some(0), Default::default(), None);
     assert!(
         content.contains("diff") || content.contains("summary") || content.contains("foo"),
         "detail panel should render content text: {content:?}"
@@ -328,28 +346,8 @@ fn gain_log_mode_renders_history() {
 #[test]
 fn gain_selected_ignored_in_by_project_mode() {
     let items = vec![make_interception(1000, 400, CommandFamily::Git)];
-    let report = aggregate(&items, Period::All, "sonnet");
-    let backend = TestBackend::new(120, 35);
-    let mut terminal = Terminal::new(backend).unwrap();
     // Must not panic with selected_family=Some(0) in by_project mode
-    terminal
-        .draw(|frame| {
-            render_gain(
-                frame,
-                frame.area(),
-                &report,
-                &items,
-                None,
-                GainMode::Project,
-                Default::default(),
-                Some(0),
-                Default::default(),
-                None,
-                None,
-                0,
-            )
-        })
-        .unwrap();
+    draw_gain(&items, 120, 35, GainMode::Project, Some(0), Default::default(), None);
 }
 
 #[test]
