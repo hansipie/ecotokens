@@ -101,23 +101,30 @@ fn matches_project(item: &Interception, project: &str) -> bool {
     }
 }
 
-/// Returns family names (sorted by descending average savings) for a given project.
+/// Returns family names (sorted by descending savings) for a given project.
 pub fn sorted_family_keys_for_project(items: &[Interception], project: &str) -> Vec<String> {
     use std::collections::HashMap;
-    let mut map: HashMap<String, (f32, u64)> = HashMap::new();
+    let mut map: HashMap<String, (u64, u64)> = HashMap::new();
     for item in items.iter().filter(|i| matches_project(i, project)) {
         if let Some(family) = serde_json::to_value(&item.command_family)
             .ok()
             .and_then(|v| v.as_str().map(|s| s.to_string()))
         {
-            let entry = map.entry(family).or_insert((0.0, 0));
-            entry.0 += item.savings_pct;
-            entry.1 += 1;
+            let entry = map.entry(family).or_insert((0, 0));
+            entry.0 += item.tokens_before as u64;
+            entry.1 += item.tokens_after as u64;
         }
     }
     let mut families: Vec<(String, f32)> = map
         .into_iter()
-        .map(|(k, (sum, n))| (k, if n > 0 { sum / n as f32 } else { 0.0 }))
+        .map(|(k, (before, after))| {
+            let pct = if before == 0 {
+                0.0f32
+            } else {
+                ((1.0 - after as f64 / before as f64) * 100.0) as f32
+            };
+            (k, pct)
+        })
         .collect();
     families.sort_by(|a, b| {
         b.1.partial_cmp(&a.1)
@@ -271,20 +278,27 @@ fn render_families(
     let families_owned: Vec<(String, f32)>;
     let families: Vec<(&str, f32)> = if let Some(proj) = project_filter {
         use std::collections::HashMap;
-        let mut map: HashMap<String, (f32, u64)> = HashMap::new();
+        let mut map: HashMap<String, (u64, u64)> = HashMap::new();
         for item in items.iter().filter(|i| matches_project(i, proj)) {
             if let Some(family) = serde_json::to_value(&item.command_family)
                 .ok()
                 .and_then(|v| v.as_str().map(|s| s.to_string()))
             {
-                let entry = map.entry(family).or_insert((0.0, 0));
-                entry.0 += item.savings_pct;
-                entry.1 += 1;
+                let entry = map.entry(family).or_insert((0, 0));
+                entry.0 += item.tokens_before as u64;
+                entry.1 += item.tokens_after as u64;
             }
         }
         let mut sorted: Vec<(String, f32)> = map
             .into_iter()
-            .map(|(k, (sum, n))| (k, if n > 0 { sum / n as f32 } else { 0.0 }))
+            .map(|(k, (before, after))| {
+                let pct = if before == 0 {
+                    0.0f32
+                } else {
+                    ((1.0 - after as f64 / before as f64) * 100.0) as f32
+                };
+                (k, pct)
+            })
             .collect();
         sorted.sort_by(|a, b| {
             b.1.partial_cmp(&a.1)
