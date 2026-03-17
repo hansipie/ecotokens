@@ -1,8 +1,7 @@
 use std::process::Command;
 
-fn ecotokens() -> String {
-    env!("CARGO_BIN_EXE_ecotokens").to_string()
-}
+mod helpers;
+use helpers::ecotokens;
 
 // ── T041 — Conformité constitution ────────────────────────────────────────────
 

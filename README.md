@@ -85,6 +85,8 @@ ecotokens uninstall --target all       # all targets
 | `ecotokens uninstall` | Remove the hook |
 | `ecotokens filter -- CMD [ARGS]` | Run a command, filter its output, record metrics |
 | `ecotokens gain` | Interactive TUI dashboard — savings by family or project |
+| `ecotokens gain --period PERIOD` | Filter TUI to a time window (`all`, `today`, `week`, `month`) |
+| `ecotokens gain --history` | Print a savings summary table for 24h / 7 days / 30 days |
 | `ecotokens gain --json` | JSON report |
 | `ecotokens config` | Show current configuration |
 | `ecotokens index [--path DIR]` | Index a codebase for BM25 + symbolic search |
@@ -99,12 +101,15 @@ ecotokens uninstall --target all       # all targets
 ## Gain dashboard
 
 ```
-ecotokens gain
-ecotokens gain --period 7d
-ecotokens gain --period today --model claude-sonnet-4-5
+ecotokens gain                                          # all time
+ecotokens gain --period today                           # today only
+ecotokens gain --period week                            # last 7 days
+ecotokens gain --period month --model claude-sonnet-4-5 # last 30 days, custom model
+ecotokens gain --history                                # summary table: 24h / 7d / 30d
+ecotokens gain --history --json                         # same, as JSON
 ```
 
-Interactive TUI showing token savings per command family and per project, with a sparkline.
+Interactive TUI showing token savings per command family and per project, with a sparkline. The `--period` flag filters both the stats and the history panels.
 
 **Keybindings:**
 

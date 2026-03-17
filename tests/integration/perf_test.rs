@@ -2,9 +2,8 @@ use std::process::Command;
 use std::time::Instant;
 use tempfile::TempDir;
 
-fn ecotokens() -> String {
-    env!("CARGO_BIN_EXE_ecotokens").to_string()
-}
+mod helpers;
+use helpers::ecotokens;
 
 // ── T045b — SC-003 : P90 ≤ 50ms ──────────────────────────────────────────────
 
