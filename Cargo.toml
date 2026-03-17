@@ -120,6 +120,10 @@ name = "store_test"
 path = "tests/metrics/store_test.rs"
 
 [[test]]
+name = "clear_test"
+path = "tests/metrics/clear_test.rs"
+
+[[test]]
 name = "report_test"
 path = "tests/metrics/report_test.rs"
 

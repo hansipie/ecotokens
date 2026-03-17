@@ -447,7 +447,7 @@ fn render_projects(
             .gauge_style(Style::default().fg(color).add_modifier(modifier))
             .label(format!("{pct:.1}%"))
             .ratio(ratio)
-            .block(Block::default().title(format!(" {prefix}{label} ")));
+            .block(Block::default().title(format!(" {prefix}{label}  {name} ")));
         frame.render_widget(gauge, rows[i]);
     }
 

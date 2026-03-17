@@ -154,3 +154,36 @@ pub fn read_all() -> std::io::Result<Vec<Interception>> {
         None => Ok(vec![]),
     }
 }
+
+/// Atomically rewrite `path` with the given interceptions.
+///
+/// Writes to a `.tmp` sidecar first, then renames to `path` — safe against
+/// interruption (Ctrl-C, crash) because the rename is atomic on the same
+/// filesystem.
+pub fn write_to(path: &std::path::Path, items: &[Interception]) -> std::io::Result<()> {
+    use std::io::Write;
+
+    if let Some(parent) = path.parent() {
+        std::fs::create_dir_all(parent)?;
+    }
+
+    let tmp_path = {
+        let name = path
+            .file_name()
+            .unwrap_or_default()
+            .to_string_lossy()
+            .to_string();
+        path.with_file_name(format!("{name}.tmp"))
+    };
+
+    let mut file = std::fs::File::create(&tmp_path)?;
+    for item in items {
+        let line = serde_json::to_string(item)
+            .map_err(|e| std::io::Error::new(std::io::ErrorKind::InvalidData, e))?;
+        writeln!(file, "{line}")?;
+    }
+    file.flush()?;
+    drop(file);
+
+    std::fs::rename(&tmp_path, path)
+}
