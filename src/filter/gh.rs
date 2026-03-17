@@ -80,7 +80,11 @@ fn filter_gh_list(output: &str, min_parts: usize) -> String {
         if parts.len() >= min_parts {
             let number = parts[0].trim();
             let title = parts[1].trim();
-            let state = if parts.len() > 3 { parts[3].trim() } else { "open" };
+            let state = if parts.len() > 3 {
+                parts[3].trim()
+            } else {
+                "open"
+            };
             result.push(format!("#{} [{}] {}", number, state, title));
         } else {
             result.push(line.to_string());

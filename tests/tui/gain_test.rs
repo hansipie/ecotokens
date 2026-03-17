@@ -112,7 +112,15 @@ fn gain_renders_savings_label() {
         make_interception(1000, 400, CommandFamily::Git),
         make_interception(2000, 800, CommandFamily::Cargo),
     ];
-    let content = draw_gain(&items, 100, 25, GainMode::Family, None, Default::default(), None);
+    let content = draw_gain(
+        &items,
+        100,
+        25,
+        GainMode::Family,
+        None,
+        Default::default(),
+        None,
+    );
     assert!(
         content.contains("Savings"),
         "buffer should contain 'Savings' label: {content:?}"
@@ -122,7 +130,15 @@ fn gain_renders_savings_label() {
 #[test]
 fn gain_renders_cost_avoided_label() {
     let items = vec![make_interception(5000, 1000, CommandFamily::Git)];
-    let content = draw_gain(&items, 100, 25, GainMode::Family, None, Default::default(), None);
+    let content = draw_gain(
+        &items,
+        100,
+        25,
+        GainMode::Family,
+        None,
+        Default::default(),
+        None,
+    );
     assert!(
         content.contains("Cost avoided"),
         "buffer should contain 'Cost avoided' label: {content:?}"
@@ -268,7 +284,15 @@ fn gain_detail_with_content_renders_text() {
     item.content_before = Some("diff --git a/foo.rs b/foo.rs".to_string());
     item.content_after = Some("summary: 1 file changed".to_string());
     let items = vec![item];
-    let content = draw_gain(&items, 120, 35, GainMode::Family, Some(0), Default::default(), None);
+    let content = draw_gain(
+        &items,
+        120,
+        35,
+        GainMode::Family,
+        Some(0),
+        Default::default(),
+        None,
+    );
     assert!(
         content.contains("diff") || content.contains("summary") || content.contains("foo"),
         "detail panel should render content text: {content:?}"
@@ -347,7 +371,15 @@ fn gain_log_mode_renders_history() {
 fn gain_selected_ignored_in_by_project_mode() {
     let items = vec![make_interception(1000, 400, CommandFamily::Git)];
     // Must not panic with selected_family=Some(0) in by_project mode
-    draw_gain(&items, 120, 35, GainMode::Project, Some(0), Default::default(), None);
+    draw_gain(
+        &items,
+        120,
+        35,
+        GainMode::Project,
+        Some(0),
+        Default::default(),
+        None,
+    );
 }
 
 #[test]

@@ -49,9 +49,13 @@ enum Commands {
     },
     /// Show token savings report
     Gain {
-        #[arg(long, default_value = "all", value_name = "PERIOD",
-              help = "Time window to aggregate [possible values: all, today, week, month]",
-              conflicts_with = "history")]
+        #[arg(
+            long,
+            default_value = "all",
+            value_name = "PERIOD",
+            help = "Time window to aggregate [possible values: all, today, week, month]",
+            conflicts_with = "history"
+        )]
         period: String,
         #[arg(long)]
         json: bool,
@@ -377,7 +381,9 @@ fn cmd_gain(period: String, json: bool, model: Option<String>, history: bool) {
                 }
                 let ts = chrono::Utc::now().format("%H:%M:%S").to_string();
                 let family_count = match project_filter.as_deref() {
-                    Some(proj) => tui::gain::sorted_family_keys_for_project(&filtered_items, proj).len(),
+                    Some(proj) => {
+                        tui::gain::sorted_family_keys_for_project(&filtered_items, proj).len()
+                    }
                     None => report.by_family.len(),
                 };
                 let project_count = report.by_project.len();
