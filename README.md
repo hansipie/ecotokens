@@ -97,6 +97,11 @@ ecotokens uninstall --target all       # all targets
 | `ecotokens trace callees SYMBOL` | Find callees of a symbol |
 | `ecotokens watch [--path DIR]` | Watch a directory and keep the index up to date |
 | `ecotokens duplicates` | Detect near-duplicate code blocks in the indexed codebase |
+| `ecotokens clear --all` | Delete all recorded interceptions |
+| `ecotokens clear --before DATE` | Delete interceptions recorded before DATE (YYYY-MM-DD) |
+| `ecotokens clear --older-than DURATION` | Delete interceptions older than a duration (e.g. `30d`, `2w`, `1m`) |
+| `ecotokens clear --family FAMILY` | Delete interceptions of a specific command family |
+| `ecotokens clear --project PATH` | Delete interceptions for a specific project (use `"(unknown)"` for entries without a git root) |
 
 ## Gain dashboard
 

@@ -164,6 +164,27 @@ enum Commands {
         #[arg(long)]
         json: bool,
     },
+    /// Delete recorded interceptions (selective or total)
+    Clear {
+        /// Delete ALL interceptions (required when no other filter is given)
+        #[arg(long)]
+        all: bool,
+        /// Delete interceptions recorded before DATE (format: YYYY-MM-DD)
+        #[arg(long, value_name = "DATE")]
+        before: Option<String>,
+        /// Delete interceptions older than DURATION (e.g. 30d, 2w, 1m)
+        #[arg(long, value_name = "DURATION")]
+        older_than: Option<String>,
+        /// Delete only interceptions of a specific command family (e.g. git, cargo, python)
+        #[arg(long, value_name = "FAMILY")]
+        family: Option<String>,
+        /// Delete only interceptions for a specific project (git root path, or "(unknown)" for entries without a git root)
+        #[arg(long, value_name = "PATH")]
+        project: Option<String>,
+        /// Skip the confirmation prompt
+        #[arg(long, short = 'y')]
+        yes: bool,
+    },
 }
 
 #[derive(Subcommand)]
@@ -1353,6 +1374,169 @@ fn cmd_duplicates(threshold: f32, min_lines: usize, index_dir: Option<PathBuf>, 
     }
 }
 
+fn parse_older_than(s: &str) -> Option<chrono::Duration> {
+    let (num_str, unit) = if let Some(n) = s.strip_suffix('d') {
+        (n, 'd')
+    } else if let Some(n) = s.strip_suffix('w') {
+        (n, 'w')
+    } else if let Some(n) = s.strip_suffix('m') {
+        (n, 'm')
+    } else {
+        return None;
+    };
+    let n: i64 = num_str.parse().ok()?;
+    match unit {
+        'd' => Some(chrono::Duration::days(n)),
+        'w' => Some(chrono::Duration::weeks(n)),
+        'm' => Some(chrono::Duration::days(n * 30)),
+        _ => None,
+    }
+}
+
+fn cmd_clear(
+    all: bool,
+    before: Option<String>,
+    older_than: Option<String>,
+    family: Option<String>,
+    project: Option<String>,
+    yes: bool,
+) {
+    use chrono::{DateTime, NaiveDate, Utc};
+    use metrics::store::{read_from, write_to, CommandFamily};
+
+    let has_filter =
+        before.is_some() || older_than.is_some() || family.is_some() || project.is_some();
+
+    if !all && !has_filter {
+        eprintln!(
+            "Error: specify at least one of --all, --before, --older-than, --family, --project"
+        );
+        std::process::exit(1);
+    }
+
+    let path = match metrics::store::metrics_path() {
+        Some(p) => p,
+        None => {
+            eprintln!("Cannot locate metrics file");
+            std::process::exit(1);
+        }
+    };
+
+    let items = read_from(&path).unwrap_or_default();
+
+    if items.is_empty() {
+        println!("No interceptions recorded.");
+        return;
+    }
+
+    // Parse --before
+    let before_dt: Option<DateTime<Utc>> = before.as_deref().and_then(|s| {
+        NaiveDate::parse_from_str(s, "%Y-%m-%d")
+            .ok()
+            .and_then(|d| d.and_hms_opt(0, 0, 0))
+            .map(|dt| dt.and_utc())
+    });
+    if before.is_some() && before_dt.is_none() {
+        eprintln!("Error: invalid date for --before (expected YYYY-MM-DD)");
+        std::process::exit(1);
+    }
+
+    // Parse --older-than
+    let cutoff_from_older: Option<DateTime<Utc>> = older_than
+        .as_deref()
+        .and_then(|s| parse_older_than(s).map(|dur| Utc::now() - dur));
+    if older_than.is_some() && cutoff_from_older.is_none() {
+        eprintln!("Error: invalid format for --older-than (expected e.g. 30d, 2w, 1m)");
+        std::process::exit(1);
+    }
+
+    // Parse --family
+    let target_family: Option<CommandFamily> = family
+        .as_deref()
+        .and_then(|s| serde_json::from_str(&format!("\"{s}\"")).ok());
+    if let Some(ref f) = family {
+        if target_family.is_none() {
+            eprintln!(
+                "Error: unknown family '{f}'. Valid values: git, cargo, cpp, fs, markdown, \
+                 python, config_file, go, js, gh, container, grep, aws, network, db, generic"
+            );
+            std::process::exit(1);
+        }
+    }
+
+    // Partition: items matching all filters → to_delete, rest → to_keep
+    let (to_delete, to_keep): (Vec<_>, Vec<_>) = items.into_iter().partition(|item| {
+        if let Some(dt) = before_dt {
+            match DateTime::parse_from_rfc3339(&item.timestamp) {
+                Ok(ts) => {
+                    if ts.with_timezone(&Utc) >= dt {
+                        return false;
+                    }
+                }
+                Err(_) => return false,
+            }
+        }
+
+        if let Some(cutoff) = cutoff_from_older {
+            match DateTime::parse_from_rfc3339(&item.timestamp) {
+                Ok(ts) => {
+                    if ts.with_timezone(&Utc) >= cutoff {
+                        return false;
+                    }
+                }
+                Err(_) => return false,
+            }
+        }
+
+        if let Some(ref fam) = target_family {
+            if &item.command_family != fam {
+                return false;
+            }
+        }
+
+        if let Some(ref proj) = project {
+            let item_root = item.git_root.as_deref().unwrap_or("").trim();
+            let matches = if proj.trim() == "(unknown)" {
+                item_root.is_empty()
+            } else {
+                item_root == proj.trim()
+            };
+            if !matches {
+                return false;
+            }
+        }
+
+        true
+    });
+
+    let delete_count = to_delete.len();
+
+    if delete_count == 0 {
+        println!("No interceptions match the specified filters.");
+        return;
+    }
+
+    // Confirmation prompt (unless --yes)
+    if !yes {
+        use std::io::Write as _;
+        print!("About to delete {delete_count} interception(s). Confirm? [y/N] ");
+        std::io::stdout().flush().ok();
+        let mut input = String::new();
+        std::io::stdin().read_line(&mut input).ok();
+        if !input.trim().eq_ignore_ascii_case("y") {
+            println!("Aborted.");
+            return;
+        }
+    }
+
+    if let Err(e) = write_to(&path, &to_keep) {
+        eprintln!("Error writing metrics file: {e}");
+        std::process::exit(1);
+    }
+
+    println!("Deleted {delete_count} interception(s).");
+}
+
 fn main() {
     let cli = Cli::parse();
     match cli.command {
@@ -1421,5 +1605,13 @@ fn main() {
             index_dir,
             json,
         } => cmd_duplicates(threshold, min_lines, index_dir, json),
+        Commands::Clear {
+            all,
+            before,
+            older_than,
+            family,
+            project,
+            yes,
+        } => cmd_clear(all, before, older_than, family, project, yes),
     }
 }

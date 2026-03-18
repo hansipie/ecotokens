@@ -1,6 +1,6 @@
 [package]
 name = "ecotokens"
-version = "0.4.0"
+version = "0.5.0"
 edition = "2021"
 description = "Token-saving companion for Claude Code"
 license = "MIT"
@@ -118,6 +118,10 @@ path = "tests/filter/container_test.rs"
 [[test]]
 name = "store_test"
 path = "tests/metrics/store_test.rs"
+
+[[test]]
+name = "clear_test"
+path = "tests/metrics/clear_test.rs"
 
 [[test]]
 name = "report_test"
