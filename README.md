@@ -11,7 +11,7 @@
 Token-saving companion for [Claude Code](https://claude.ai/code) and [Gemini CLI](https://github.com/google-gemini/gemini-cli). Built on a *"set it and forget it!"* philosophy: one install command, zero configuration, and ecotokens works automatically from there — intercepting tool outputs before they reach the model, filtering the noise, and recording how many tokens you saved.
 
 <p align="center">
-  <img src="docs/demo.gif" alt="ecotokens demo" width="800">
+  <img src="assets/demo.gif" alt="ecotokens demo" width="800">
 </p>
 
 ## How it works
@@ -254,7 +254,7 @@ Measured over 13 days on a real developer workstation (4 129 hook executions):
 | Cargo commands | 75.4 % reduction |
 | Best single run | `git diff --staged` — 1.68M → 782 tokens (**99.97 %**) |
 
-→ [Full benchmark report](BENCHMARKS.md)
+→ [Full benchmark report](docs/BENCHMARKS.md)
 
 ## Requirements
 
@@ -264,7 +264,7 @@ Measured over 13 days on a real developer workstation (4 129 hook executions):
 
 ## Contributing
 
-Contributions are welcome! Please read the [contributing guidelines](CONTRIBUTING.md) before submitting a pull request.
+Contributions are welcome! Please read the [contributing guidelines](docs/CONTRIBUTING.md) before submitting a pull request.
 
 ## License
 
