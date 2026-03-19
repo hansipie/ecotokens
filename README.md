@@ -242,6 +242,20 @@ Or update the config file directly (`~/.config/ecotokens/config.json`):
 
 Ollama must be running locally. The model is called with a 3-second timeout to avoid blocking the model.
 
+## Benchmarks
+
+Measured over 13 days on a real developer workstation (4 129 hook executions):
+
+| Metric | Value |
+|--------|-------|
+| Tokens saved | **6 714 085** |
+| Overall reduction | **89.6 %** |
+| Git commands | 96.6 % reduction |
+| Cargo commands | 75.4 % reduction |
+| Best single run | `git diff --staged` — 1.68M → 782 tokens (**99.97 %**) |
+
+→ [Full benchmark report](BENCHMARKS.md)
+
 ## Requirements
 
 - Rust ≥ 1.75 (stable)
