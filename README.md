@@ -2,6 +2,12 @@
   <img src="assets/banner.png" alt="ecotokens">
 </p>
 
+<p align="center">
+  <a href="https://github.com/hansipie/ecotokens/actions/workflows/ci.yml"><img src="https://github.com/hansipie/ecotokens/actions/workflows/ci.yml/badge.svg" alt="CI"></a>
+  <a href="https://crates.io/crates/ecotokens"><img src="https://img.shields.io/crates/v/ecotokens.svg" alt="crates.io"></a>
+  <a href="LICENSE"><img src="https://img.shields.io/badge/license-MIT-blue.svg" alt="MIT License"></a>
+</p>
+
 Token-saving companion for [Claude Code](https://claude.ai/code) and [Gemini CLI](https://github.com/google-gemini/gemini-cli). Built on a *"set it and forget it!"* philosophy: one install command, zero configuration, and ecotokens works automatically from there — intercepting tool outputs before they reach the model, filtering the noise, and recording how many tokens you saved.
 
 <p align="center">
@@ -241,6 +247,10 @@ Ollama must be running locally. The model is called with a 3-second timeout to a
 - Rust ≥ 1.75 (stable)
 - One or more of: Claude Code (with hook support), Gemini CLI ≥ 0.1.0
 - Ollama (optional, for semantic search embeddings and AI summarization)
+
+## Contributing
+
+Contributions are welcome! Please read the [contributing guidelines](CONTRIBUTING.md) before submitting a pull request.
 
 ## License
 

@@ -2,11 +2,11 @@
 name = "ecotokens"
 version = "0.5.0"
 edition = "2021"
-description = "Token-saving companion for Claude Code"
+description = "Token optimizer for AI coding assistants — hooks into Claude Code/Gemini CLI to compress shell outputs and track USD savings"
 license = "MIT"
 repository = "https://github.com/hansipie/ecotokens"
 homepage = "https://github.com/hansipie/ecotokens"
-keywords = ["claude", "tokens", "cli", "productivity", "ai"]
+keywords = ["claude", "gemini", "tokens", "cli", "productivity", "ai"]
 categories = ["command-line-utilities", "development-tools"]
 
 [features]
