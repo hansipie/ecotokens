@@ -6,7 +6,7 @@ description = "Token optimizer for AI coding assistants — hooks into Claude Co
 license = "MIT"
 repository = "https://github.com/hansipie/ecotokens"
 homepage = "https://github.com/hansipie/ecotokens"
-keywords = ["claude", "gemini", "tokens", "cli", "productivity", "ai"]
+keywords = ["claude", "gemini", "tokens", "cli", "productivity"]
 categories = ["command-line-utilities", "development-tools"]
 
 [features]
