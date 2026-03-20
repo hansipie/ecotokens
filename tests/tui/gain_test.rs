@@ -146,6 +146,24 @@ fn gain_renders_cost_avoided_label() {
 }
 
 #[test]
+fn gain_renders_since_label() {
+    let items = vec![make_interception(5000, 1000, CommandFamily::Git)];
+    let content = draw_gain(
+        &items,
+        100,
+        25,
+        GainMode::Family,
+        None,
+        Default::default(),
+        None,
+    );
+    assert!(
+        content.contains("Since"),
+        "buffer should contain 'Since' label: {content:?}"
+    );
+}
+
+#[test]
 fn gain_renders_without_panic_on_empty_data() {
     let report = aggregate(&[], Period::All, "sonnet");
     let backend = TestBackend::new(100, 25);
