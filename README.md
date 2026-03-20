@@ -256,6 +256,18 @@ Measured over 13 days on a real developer workstation (4 129 hook executions):
 
 → [Full benchmark report](docs/BENCHMARKS.md)
 
+## Precision Guarantees
+
+Filtering is aggressive on noise, conservative on signal:
+
+- **Short outputs are never modified** — outputs under 200 lines or 50 KB pass through unchanged
+- **Errors are always preserved** — `error[`, `FAILED`, `E   ` (pytest), `--- FAIL:` (Go), stack traces and panic messages are never removed
+- **Failure sections are fully kept** — structured blocks (`=== FAILURES ===`, `failures:`, failure diffs) are always passed through in their entirety
+- **Conservative fallback** — if a family filter doesn't improve the output (filtered ≥ original), the original is returned as-is
+- **Secrets are redacted before filtering** — AWS keys, GitHub PATs, Bearer tokens, PEM private keys, `.env` secrets, JWTs, and URL credentials are replaced with `[REDACTED]` placeholders before any content reaches the model
+- **UTF-8 safe truncation** — truncation always happens at character boundaries, never mid-codepoint
+- **Head + tail preservation** — when generic truncation applies, the first and last 20 lines are always kept (start context + end result)
+
 ## Requirements
 
 - Rust ≥ 1.75 (stable)

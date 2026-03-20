@@ -421,7 +421,7 @@ fn cmd_gain(period: String, json: bool, model: Option<String>, history: bool) {
                         detail_mode,
                         selected_project,
                         project_filter.as_deref(),
-                        history_scroll,
+                        &mut history_scroll,
                     );
                 });
                 if poll(std::time::Duration::from_millis(500)).unwrap_or(false) {
@@ -499,9 +499,10 @@ fn cmd_gain(period: String, json: bool, model: Option<String>, history: bool) {
                                 _ => {}
                             }
                         }
-                        // i/k scroll the history panel in Family Log mode.
+                        // i/k scroll the history panel in Family Log or Diff mode.
                         if gain_mode == tui::gain::GainMode::Family
-                            && detail_mode == tui::gain::DetailMode::Log
+                            && (detail_mode == tui::gain::DetailMode::Log
+                                || detail_mode == tui::gain::DetailMode::Diff)
                         {
                             match key.code {
                                 KeyCode::Char('k') => {
