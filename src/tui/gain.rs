@@ -152,7 +152,7 @@ pub fn render_gain(
     detail_mode: DetailMode,
     selected_project: Option<usize>,
     project_filter: Option<&str>,
-    history_scroll: usize,
+    history_scroll: &mut usize,
 ) {
     // Outer layout: stats | pool(family+detail) | sparkline
     let outer = Layout::default()
@@ -489,7 +489,7 @@ fn render_project_log_panel(
     area: Rect,
     project_name: Option<&str>,
     items: &[Interception],
-    history_scroll: usize,
+    history_scroll: &mut usize,
 ) {
     let Some(name) = project_name else {
         let block = Block::default()
@@ -514,7 +514,9 @@ fn render_project_log_panel(
     let n = history.len();
     // How many rows fit inside the block (subtract 2 for borders).
     let visible = (area.height as usize).saturating_sub(2);
-    let scroll = history_scroll.min(n.saturating_sub(1));
+    let max_scroll = n.saturating_sub(visible);
+    *history_scroll = (*history_scroll).min(max_scroll);
+    let scroll = *history_scroll;
     let history: Vec<&Interception> = history.into_iter().skip(scroll).take(visible).collect();
 
     let scroll_hint = if n > visible {
@@ -552,7 +554,7 @@ fn render_detail(
     family_name: Option<&str>,
     items: &[Interception],
     detail_mode: DetailMode,
-    history_scroll: usize,
+    history_scroll: &mut usize,
 ) {
     let Some(name) = family_name else {
         let block = Block::default().borders(Borders::ALL).title(" Detail ");
@@ -570,38 +572,35 @@ fn render_detail(
         return;
     }
 
-    // Find last interception for this family (items are in chronological order)
+    // Find last interception for this family with actual differences
     let last = items.iter().rev().find(|i| {
-        serde_json::to_value(&i.command_family)
+        let matches_family = serde_json::to_value(&i.command_family)
             .ok()
             .and_then(|v| v.as_str().map(|s| s == name))
-            .unwrap_or(false)
+            .unwrap_or(false);
+        let has_diff = i.content_before != i.content_after
+            && (i.content_before.is_some() || i.content_after.is_some());
+        matches_family && has_diff
     });
 
     let Some(item) = last else {
         let block = Block::default()
             .borders(Borders::ALL)
             .title(format!(" Detail: {name} "));
-        let p = Paragraph::new("No interceptions for this family.").block(block);
+        let p = Paragraph::new("No interception with differences for this family.").block(block);
         frame.render_widget(p, area);
         return;
     };
 
-    if item.content_before.is_none() && item.content_after.is_none() {
-        let cmd_short: String = item.command.chars().take(40).collect();
-        let block = Block::default()
-            .borders(Borders::ALL)
-            .title(format!(" Detail: {name} · {cmd_short} "));
-        let p = Paragraph::new("Content unavailable (data predates this version).").block(block);
-        frame.render_widget(p, area);
-        return;
-    }
-
     if detail_mode == DetailMode::Diff {
-        render_diff_panel(frame, area, name, item);
+        render_diff_panel(frame, area, name, item, history_scroll);
     } else {
         render_split_panel(frame, area, name, item);
     }
+}
+
+fn is_binary(s: &str) -> bool {
+    s.contains('\x00')
 }
 
 fn render_split_panel(frame: &mut Frame, area: Rect, name: &str, item: &Interception) {
@@ -610,6 +609,19 @@ fn render_split_panel(frame: &mut Frame, area: Rect, name: &str, item: &Intercep
     let block = Block::default().borders(Borders::ALL).title(format!(
         " Detail: {name} · {cmd_short} · {ts_short}  [d] diff "
     ));
+
+    // Before (top)
+    let before_text = item.content_before.as_deref().unwrap_or("");
+    let after_text = item.content_after.as_deref().unwrap_or("");
+
+    if is_binary(before_text) || is_binary(after_text) {
+        let p = Paragraph::new("Binary content — diff not available.")
+            .block(block)
+            .style(Style::default().fg(Color::DarkGray));
+        frame.render_widget(p, area);
+        return;
+    }
+
     let inner = block.inner(area);
     frame.render_widget(block, area);
 
@@ -618,8 +630,6 @@ fn render_split_panel(frame: &mut Frame, area: Rect, name: &str, item: &Intercep
         .constraints([Constraint::Percentage(50), Constraint::Percentage(50)])
         .split(inner);
 
-    // Before (top)
-    let before_text = item.content_before.as_deref().unwrap_or("");
     let mut before_lines: Vec<Line> = vec![Line::from(Span::styled(
         format!("▲ before · {} tok", item.tokens_before),
         Style::default()
@@ -638,7 +648,6 @@ fn render_split_panel(frame: &mut Frame, area: Rect, name: &str, item: &Intercep
     );
 
     // After (bottom)
-    let after_text = item.content_after.as_deref().unwrap_or("");
     let mut after_lines: Vec<Line> = vec![Line::from(Span::styled(
         format!(
             "▼ after  · {} tok  (-{:.0}%)",
@@ -660,18 +669,33 @@ fn render_split_panel(frame: &mut Frame, area: Rect, name: &str, item: &Intercep
     );
 }
 
-fn render_diff_panel(frame: &mut Frame, area: Rect, name: &str, item: &Interception) {
+fn render_diff_panel(
+    frame: &mut Frame,
+    area: Rect,
+    name: &str,
+    item: &Interception,
+    history_scroll: &mut usize,
+) {
     let cmd_short: String = item.command.chars().take(40).collect();
     let ts_short = item.timestamp.get(..16).unwrap_or(&item.timestamp);
     let block = Block::default().borders(Borders::ALL).title(format!(
         " Diff : {name} · {cmd_short} · {}→{} tok (-{:.0}%) · {ts_short}  [d] log ",
         item.tokens_before, item.tokens_after, item.savings_pct,
     ));
-    let inner = block.inner(area);
-    frame.render_widget(block, area);
 
     let before_text = item.content_before.as_deref().unwrap_or("");
     let after_text = item.content_after.as_deref().unwrap_or("");
+
+    if is_binary(before_text) || is_binary(after_text) {
+        let p = Paragraph::new("Binary content — diff not available.")
+            .block(block)
+            .style(Style::default().fg(Color::DarkGray));
+        frame.render_widget(p, area);
+        return;
+    }
+
+    let inner = block.inner(area);
+    frame.render_widget(block, area);
 
     let diff = TextDiff::from_lines(before_text, after_text);
 
@@ -717,7 +741,18 @@ fn render_diff_panel(frame: &mut Frame, area: Rect, name: &str, item: &Intercept
         )));
     }
 
-    frame.render_widget(Paragraph::new(lines).wrap(Wrap { trim: false }), inner);
+    let n = lines.len();
+    let visible = inner.height as usize;
+    let max_scroll = n.saturating_sub(visible);
+    *history_scroll = (*history_scroll).min(max_scroll);
+    let scroll = *history_scroll;
+
+    frame.render_widget(
+        Paragraph::new(lines)
+            .wrap(Wrap { trim: false })
+            .scroll((scroll as u16, 0)),
+        inner,
+    );
 }
 
 fn render_log_panel(
@@ -725,7 +760,7 @@ fn render_log_panel(
     area: Rect,
     name: &str,
     items: &[Interception],
-    history_scroll: usize,
+    history_scroll: &mut usize,
 ) {
     let family_items: Vec<&Interception> = items
         .iter()
@@ -740,7 +775,9 @@ fn render_log_panel(
     let history: Vec<&Interception> = family_items.iter().rev().copied().collect();
     let n = history.len();
     let visible = (area.height as usize).saturating_sub(2);
-    let scroll = history_scroll.min(n.saturating_sub(1));
+    let max_scroll = n.saturating_sub(visible);
+    *history_scroll = (*history_scroll).min(max_scroll);
+    let scroll = *history_scroll;
     let history: Vec<&Interception> = history.into_iter().skip(scroll).take(visible).collect();
 
     let scroll_hint = if n > visible {

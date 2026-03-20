@@ -34,7 +34,7 @@ fn draw_gain(
                 detail_mode,
                 selected_project,
                 None,
-                0,
+                &mut 0,
             )
         })
         .unwrap();
@@ -182,7 +182,7 @@ fn gain_renders_without_panic_on_empty_data() {
                 Default::default(),
                 None,
                 None,
-                0,
+                &mut 0,
             )
         })
         .unwrap();
@@ -220,7 +220,7 @@ fn gain_sparkline_present_adaptive() {
                 Default::default(),
                 None,
                 None,
-                0,
+                &mut 0,
             )
         })
         .unwrap();
@@ -255,7 +255,7 @@ fn gain_shows_family_breakdown() {
                 Default::default(),
                 None,
                 None,
-                0,
+                &mut 0,
             )
         })
         .unwrap();
@@ -287,7 +287,7 @@ fn gain_detail_no_content_shows_fallback() {
                 Default::default(),
                 None,
                 None,
-                0,
+                &mut 0,
             )
         })
         .unwrap();
@@ -340,7 +340,7 @@ fn gain_diff_mode_renders_diff_markers() {
                 DetailMode::Diff,
                 None,
                 None,
-                0,
+                &mut 0,
             )
         })
         .unwrap();
@@ -374,7 +374,7 @@ fn gain_log_mode_renders_history() {
                 DetailMode::Log,
                 None,
                 None,
-                0,
+                &mut 0,
             )
         })
         .unwrap();
@@ -426,7 +426,7 @@ fn gain_project_log_mode_renders_history() {
                 Default::default(),
                 Some(0),
                 None,
-                0,
+                &mut 0,
             )
         })
         .unwrap();
@@ -467,7 +467,7 @@ fn gain_project_history_panel_refreshes_between_draws() {
                 Default::default(),
                 Some(0),
                 None,
-                0,
+                &mut 0,
             )
         })
         .unwrap();
@@ -494,7 +494,7 @@ fn gain_project_history_panel_refreshes_between_draws() {
                 Default::default(),
                 Some(0),
                 None,
-                0,
+                &mut 0,
             )
         })
         .unwrap();
