@@ -164,7 +164,7 @@ pub fn render_gain(
         ])
         .split(area);
 
-    render_stats(frame, outer[0], report, last_updated);
+    render_stats(frame, outer[0], report, items, last_updated);
 
     if gain_mode == GainMode::Project {
         let pool = Layout::default()
@@ -228,14 +228,44 @@ pub fn render_gain(
 
 // ── Stats panel ───────────────────────────────────────────────────────────────
 
-fn render_stats(frame: &mut Frame, area: Rect, report: &Report, last_updated: Option<&str>) {
+fn since_days(report: &Report, items: &[Interception]) -> i64 {
+    match report.period.as_str() {
+        "today" => 1,
+        "week" => 7,
+        "month" => 30,
+        _ => {
+            let now = Utc::now().date_naive();
+            let oldest = items
+                .iter()
+                .filter_map(|item| DateTime::parse_from_rfc3339(&item.timestamp).ok())
+                .map(|ts| ts.with_timezone(&Utc).date_naive())
+                .min();
+
+            match oldest {
+                Some(oldest_date) => (now - oldest_date).num_days().max(0) + 1,
+                None => 0,
+            }
+        }
+    }
+}
+
+fn render_stats(
+    frame: &mut Frame,
+    area: Rect,
+    report: &Report,
+    items: &[Interception],
+    last_updated: Option<&str>,
+) {
     let saved = report
         .total_tokens_before
         .saturating_sub(report.total_tokens_after);
+    let since = since_days(report, items);
     let text = vec![
         Line::from(vec![
             Span::styled("Interceptions: ", Style::default().fg(Color::Cyan)),
             Span::raw(format!("{}   ", report.total_interceptions)),
+            Span::styled("Since: ", Style::default().fg(Color::Cyan)),
+            Span::raw(format!("{since} days   ")),
             Span::styled("Tokens saved: ", Style::default().fg(Color::Cyan)),
             Span::raw(format!("{saved}   ")),
             Span::styled("Savings: ", Style::default().fg(Color::Cyan)),
