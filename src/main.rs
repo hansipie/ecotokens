@@ -1144,9 +1144,6 @@ fn cmd_watch(
     if background {
         let cwd_temp = std::env::current_dir().unwrap_or_else(|_| PathBuf::from("."));
         let watch_path_temp = path.as_ref().unwrap_or(&cwd_temp);
-        let default_idx = default_index_dir();
-        let idx_dir_temp = index_dir.as_ref().unwrap_or(&default_idx);
-
         let log_path = watch_log_path(watch_path_temp);
         let log_path_str = log_path.to_string_lossy().to_string();
 

@@ -223,6 +223,7 @@ pub fn are_session_hooks_installed(settings_path: &Path) -> bool {
 }
 
 /// Remove SessionStart and SessionEnd hooks from ~/.claude/settings.json (idempotent).
+#[allow(dead_code)]
 pub fn uninstall_session_hooks(settings_path: &Path) -> InstallResult {
     if !settings_path.exists() {
         return Ok(());
