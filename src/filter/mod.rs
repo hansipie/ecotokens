@@ -152,7 +152,15 @@ pub fn run_filter_pipeline_with_cwd(
     };
 
     let tokens_before = crate::tokens::estimate_tokens(raw) as u32;
-    let tokens_after = crate::tokens::estimate_tokens(&filtered) as u32;
+    let filtered_tokens = crate::tokens::estimate_tokens(&filtered) as u32;
+    let (filtered, tokens_after) = if filtered_tokens > tokens_before {
+        (
+            masked.clone(),
+            crate::tokens::estimate_tokens(&masked) as u32,
+        )
+    } else {
+        (filtered, filtered_tokens)
+    };
 
     if let Some(path) = crate::metrics::store::metrics_path() {
         let mode = if tokens_after < tokens_before {

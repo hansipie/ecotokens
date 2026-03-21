@@ -535,9 +535,11 @@ fn render_project_log_panel(
         .map(|item| {
             let ts = item.timestamp.get(..16).unwrap_or(&item.timestamp);
             let cmd: String = item.command.chars().take(30).collect();
+            let sign = if item.savings_pct >= 0.0 { '-' } else { '+' };
+            let abs_pct = item.savings_pct.abs();
             let text = format!(
-                "{ts:<16}  {cmd:<30}  {:>6} → {:>6}  -{:.1}%",
-                item.tokens_before, item.tokens_after, item.savings_pct
+                "{ts:<16}  {cmd:<30}  {:>6} → {:>6}  {sign}{:.1}%",
+                item.tokens_before, item.tokens_after, abs_pct
             );
             Line::from(Span::styled(text, Style::default().fg(Color::Green)))
         })
@@ -650,8 +652,10 @@ fn render_split_panel(frame: &mut Frame, area: Rect, name: &str, item: &Intercep
     // After (bottom)
     let mut after_lines: Vec<Line> = vec![Line::from(Span::styled(
         format!(
-            "▼ after  · {} tok  (-{:.0}%)",
-            item.tokens_after, item.savings_pct
+            "▼ after  · {} tok  ({}{:.0}%)",
+            item.tokens_after,
+            if item.savings_pct >= 0.0 { '-' } else { '+' },
+            item.savings_pct.abs()
         ),
         Style::default()
             .fg(Color::Green)
@@ -679,8 +683,11 @@ fn render_diff_panel(
     let cmd_short: String = item.command.chars().take(40).collect();
     let ts_short = item.timestamp.get(..16).unwrap_or(&item.timestamp);
     let block = Block::default().borders(Borders::ALL).title(format!(
-        " Diff : {name} · {cmd_short} · {}→{} tok (-{:.0}%) · {ts_short}  [d] log ",
-        item.tokens_before, item.tokens_after, item.savings_pct,
+        " Diff : {name} · {cmd_short} · {}→{} tok ({}{:.0}%) · {ts_short}  [d] log ",
+        item.tokens_before,
+        item.tokens_after,
+        if item.savings_pct >= 0.0 { '-' } else { '+' },
+        item.savings_pct.abs(),
     ));
 
     let before_text = item.content_before.as_deref().unwrap_or("");
@@ -796,9 +803,11 @@ fn render_log_panel(
         .map(|item| {
             let ts = item.timestamp.get(..16).unwrap_or(&item.timestamp);
             let cmd: String = item.command.chars().take(30).collect();
+            let sign = if item.savings_pct >= 0.0 { '-' } else { '+' };
+            let abs_pct = item.savings_pct.abs();
             let text = format!(
-                "{ts:<16}  {cmd:<30}  {:>6} → {:>6}  -{:.1}%",
-                item.tokens_before, item.tokens_after, item.savings_pct
+                "{ts:<16}  {cmd:<30}  {:>6} → {:>6}  {sign}{:.1}%",
+                item.tokens_before, item.tokens_after, abs_pct
             );
             Line::from(Span::styled(text, Style::default().fg(Color::Green)))
         })
