@@ -13,6 +13,7 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 - Parallel Claude sessions on the same path share a single watcher; sessions on different paths get independent watchers
 - Per-path log files (`watch_<sanitized_path>.log`) replacing the single `watch.log`
 - Log files are deleted automatically when their watcher stops
+- "Since N days" indicator in gain stats panel (#22)
 
 ### Changed
 - Replaced `BackgroundState` / `watch-bg.json` with `SessionStore` / `sessions.json` for watcher state management
