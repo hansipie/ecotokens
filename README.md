@@ -102,6 +102,8 @@ ecotokens uninstall --target all       # all targets
 | `ecotokens trace callers SYMBOL` | Find callers of a symbol |
 | `ecotokens trace callees SYMBOL` | Find callees of a symbol |
 | `ecotokens watch [--path DIR]` | Watch a directory and keep the index up to date |
+| `ecotokens auto-watch enable` | Start watch automatically on each Claude Code session |
+| `ecotokens auto-watch disable` | Disable automatic watch |
 | `ecotokens duplicates` | Detect near-duplicate code blocks in the indexed codebase |
 | `ecotokens clear --all` | Delete all recorded interceptions |
 | `ecotokens clear --before DATE` | Delete interceptions recorded before DATE (YYYY-MM-DD) |
@@ -156,6 +158,17 @@ ecotokens watch --status           # show status of background process
 ecotokens watch --status --json    # JSON status output
 ecotokens watch --stop             # stop the background process
 ```
+
+### Auto-watch
+
+`ecotokens auto-watch` integrates with Claude Code's session lifecycle to start and stop the watcher automatically.
+
+```bash
+ecotokens auto-watch enable    # enable auto-watch, install SessionStart/SessionEnd hooks
+ecotokens auto-watch disable   # disable (hooks remain installed but are no-ops)
+```
+
+When enabled, `ecotokens watch --background` starts automatically when a Claude Code session opens, and stops when it closes. The setting is stored in `~/.config/ecotokens/config.json` (`auto_watch: true/false`).
 
 ## Bonus Tools
 

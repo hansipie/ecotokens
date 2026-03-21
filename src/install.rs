@@ -140,6 +140,116 @@ pub fn uninstall_hook(settings_path: &Path, claude_json_path: &Path) -> InstallR
 }
 
 // ============================================================================
+// Claude Code Session hooks (SessionStart / SessionEnd for auto-watch)
+// ============================================================================
+
+const SESSION_START_COMMAND: &str = "ecotokens session-start";
+const SESSION_END_COMMAND: &str = "ecotokens session-end";
+
+fn session_start_hook_entry() -> serde_json::Value {
+    serde_json::json!({
+        "matcher": "",
+        "hooks": [{ "type": "command", "command": SESSION_START_COMMAND }]
+    })
+}
+
+fn session_end_hook_entry() -> serde_json::Value {
+    serde_json::json!({
+        "matcher": "",
+        "hooks": [{ "type": "command", "command": SESSION_END_COMMAND }]
+    })
+}
+
+fn hook_command_matches(h: &serde_json::Value, cmd: &str) -> bool {
+    h["hooks"]
+        .as_array()
+        .and_then(|a| a.first())
+        .and_then(|e| e["command"].as_str())
+        .map(|c| c == cmd)
+        .unwrap_or(false)
+}
+
+/// Install SessionStart and SessionEnd hooks in ~/.claude/settings.json (idempotent).
+pub fn install_session_hooks(settings_path: &Path) -> InstallResult {
+    let mut v = read_settings(settings_path);
+
+    // SessionStart
+    let mut starts = v["hooks"]["SessionStart"]
+        .as_array()
+        .cloned()
+        .unwrap_or_default();
+    if !starts
+        .iter()
+        .any(|h| hook_command_matches(h, SESSION_START_COMMAND))
+    {
+        starts.push(session_start_hook_entry());
+    }
+    v["hooks"]["SessionStart"] = serde_json::Value::Array(starts);
+
+    // SessionEnd
+    let mut ends = v["hooks"]["SessionEnd"]
+        .as_array()
+        .cloned()
+        .unwrap_or_default();
+    if !ends
+        .iter()
+        .any(|h| hook_command_matches(h, SESSION_END_COMMAND))
+    {
+        ends.push(session_end_hook_entry());
+    }
+    v["hooks"]["SessionEnd"] = serde_json::Value::Array(ends);
+
+    write_settings(settings_path, &v)
+}
+
+/// Check whether both session hooks are present in settings.json.
+pub fn are_session_hooks_installed(settings_path: &Path) -> bool {
+    let v = read_settings(settings_path);
+    let start_ok = v["hooks"]["SessionStart"]
+        .as_array()
+        .map(|a| {
+            a.iter()
+                .any(|h| hook_command_matches(h, SESSION_START_COMMAND))
+        })
+        .unwrap_or(false);
+    let end_ok = v["hooks"]["SessionEnd"]
+        .as_array()
+        .map(|a| {
+            a.iter()
+                .any(|h| hook_command_matches(h, SESSION_END_COMMAND))
+        })
+        .unwrap_or(false);
+    start_ok && end_ok
+}
+
+/// Remove SessionStart and SessionEnd hooks from ~/.claude/settings.json (idempotent).
+pub fn uninstall_session_hooks(settings_path: &Path) -> InstallResult {
+    if !settings_path.exists() {
+        return Ok(());
+    }
+    let mut v = read_settings(settings_path);
+
+    if let Some(arr) = v["hooks"]["SessionStart"].as_array() {
+        let filtered: Vec<_> = arr
+            .iter()
+            .filter(|h| !hook_command_matches(h, SESSION_START_COMMAND))
+            .cloned()
+            .collect();
+        v["hooks"]["SessionStart"] = serde_json::Value::Array(filtered);
+    }
+    if let Some(arr) = v["hooks"]["SessionEnd"].as_array() {
+        let filtered: Vec<_> = arr
+            .iter()
+            .filter(|h| !hook_command_matches(h, SESSION_END_COMMAND))
+            .cloned()
+            .collect();
+        v["hooks"]["SessionEnd"] = serde_json::Value::Array(filtered);
+    }
+
+    write_settings(settings_path, &v)
+}
+
+// ============================================================================
 // Gemini CLI Support (BeforeTool hook + shared mcpServers in single file)
 // ============================================================================
 

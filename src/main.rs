@@ -164,6 +164,15 @@ enum Commands {
         #[arg(long)]
         json: bool,
     },
+    /// Called by Claude Code SessionStart hook — starts watch if auto-watch is enabled
+    SessionStart,
+    /// Called by Claude Code SessionEnd hook — stops watch if auto-watch is enabled
+    SessionEnd,
+    /// Enable or disable automatic watch on Claude Code session start/end
+    AutoWatch {
+        #[command(subcommand)]
+        action: AutoWatchAction,
+    },
     /// Delete recorded interceptions (selective or total)
     Clear {
         /// Delete ALL interceptions (required when no other filter is given)
@@ -207,6 +216,14 @@ enum TraceAction {
         #[arg(long)]
         json: bool,
     },
+}
+
+#[derive(Subcommand)]
+enum AutoWatchAction {
+    /// Start watch automatically on each Claude Code session
+    Enable,
+    /// Disable automatic watch
+    Disable,
 }
 
 /// RAII guard that restores terminal state when dropped, even on panic.
@@ -1538,6 +1555,60 @@ fn cmd_clear(
     println!("Deleted {delete_count} interception(s).");
 }
 
+fn cmd_session_start() {
+    let settings = config::settings::Settings::load();
+    if !settings.auto_watch {
+        return;
+    }
+    if let Some(state) = config::background_state::BackgroundState::load() {
+        if state.is_running() {
+            return;
+        }
+    }
+    let _ = std::process::Command::new("ecotokens")
+        .args(["watch", "--background"])
+        .spawn();
+}
+
+fn cmd_session_end() {
+    let settings = config::settings::Settings::load();
+    if !settings.auto_watch {
+        return;
+    }
+    if let Some(state) = config::background_state::BackgroundState::load() {
+        if state.is_running() {
+            let _ = state.stop();
+        }
+    }
+}
+
+fn cmd_auto_watch_enable() {
+    let mut settings = config::settings::Settings::load();
+    settings.auto_watch = true;
+    if let Err(e) = settings.save() {
+        eprintln!("Error saving config: {e}");
+        std::process::exit(1);
+    }
+    let settings_path = default_settings_path();
+    if !install::are_session_hooks_installed(&settings_path) {
+        if let Err(e) = install::install_session_hooks(&settings_path) {
+            eprintln!("Error installing session hooks: {e}");
+            std::process::exit(1);
+        }
+    }
+    println!("✓ auto-watch enabled — ecotokens watch will start automatically with Claude Code");
+}
+
+fn cmd_auto_watch_disable() {
+    let mut settings = config::settings::Settings::load();
+    settings.auto_watch = false;
+    if let Err(e) = settings.save() {
+        eprintln!("Error saving config: {e}");
+        std::process::exit(1);
+    }
+    println!("✓ auto-watch disabled");
+}
+
 fn main() {
     let cli = Cli::parse();
     match cli.command {
@@ -1614,5 +1685,11 @@ fn main() {
             project,
             yes,
         } => cmd_clear(all, before, older_than, family, project, yes),
+        Commands::SessionStart => cmd_session_start(),
+        Commands::SessionEnd => cmd_session_end(),
+        Commands::AutoWatch { action } => match action {
+            AutoWatchAction::Enable => cmd_auto_watch_enable(),
+            AutoWatchAction::Disable => cmd_auto_watch_disable(),
+        },
     }
 }
