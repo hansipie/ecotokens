@@ -60,6 +60,10 @@ name = "settings_test"
 path = "tests/config/settings_test.rs"
 
 [[test]]
+name = "session_store_test"
+path = "tests/config/session_store_test.rs"
+
+[[test]]
 name = "patterns_test"
 path = "tests/masking/patterns_test.rs"
 
