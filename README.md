@@ -159,7 +159,7 @@ ecotokens watch --status --json    # JSON status output
 ecotokens watch --stop             # stop the background process
 ```
 
-### Auto-watch
+### Auto-watch *(Claude Code only)*
 
 `ecotokens auto-watch` integrates with Claude Code's session lifecycle to start and stop the watcher automatically.
 
@@ -169,6 +169,8 @@ ecotokens auto-watch disable   # disable (hooks remain installed but are no-ops)
 ```
 
 When enabled, `ecotokens watch --background` starts automatically when a Claude Code session opens, and stops when it closes. The setting is stored in `~/.config/ecotokens/config.json` (`auto_watch: true/false`).
+
+> **Note:** Auto-watch relies on Claude Code's `SessionStart` / `SessionEnd` hooks and is only available when using Claude Code. Other AI tools (Gemini CLI, etc.) do not expose session lifecycle hooks.
 
 ## Bonus Tools
 

@@ -8,7 +8,7 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 ## [0.6.0] - 2026-03-21
 
 ### Added
-- `ecotokens auto-watch enable|disable` command — starts/stops `watch --background` automatically on Claude Code session open/close
+- `ecotokens auto-watch enable|disable` command — starts/stops `watch --background` automatically on Claude Code session open/close (Claude Code only)
 - Multi-watcher support: one independent watcher per watched directory, tracked in `sessions.json`
 - Parallel Claude sessions on the same path share a single watcher; sessions on different paths get independent watchers
 - Per-path log files (`watch_<sanitized_path>.log`) replacing the single `watch.log`
