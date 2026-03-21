@@ -164,6 +164,15 @@ enum Commands {
         #[arg(long)]
         json: bool,
     },
+    /// Called by Claude Code SessionStart hook — starts watch if auto-watch is enabled
+    SessionStart,
+    /// Called by Claude Code SessionEnd hook — stops watch if auto-watch is enabled
+    SessionEnd,
+    /// Enable or disable automatic watch on Claude Code session start/end
+    AutoWatch {
+        #[command(subcommand)]
+        action: AutoWatchAction,
+    },
     /// Delete recorded interceptions (selective or total)
     Clear {
         /// Delete ALL interceptions (required when no other filter is given)
@@ -207,6 +216,14 @@ enum TraceAction {
         #[arg(long)]
         json: bool,
     },
+}
+
+#[derive(Subcommand)]
+enum AutoWatchAction {
+    /// Start watch automatically on each Claude Code session
+    Enable,
+    /// Disable automatic watch
+    Disable,
 }
 
 /// RAII guard that restores terminal state when dropped, even on panic.
@@ -1046,53 +1063,78 @@ fn cmd_watch(
     stop: bool,
     json: bool,
 ) {
-    // If --stop is requested, stop the background process and exit.
+    // If --stop is requested, stop background watcher(s) and exit.
     if stop {
-        if let Some(state) = config::BackgroundState::load() {
-            match state.stop() {
-                Ok(()) => {
-                    println!(
-                        "ecotokens watch: background process (PID {}) stopped",
-                        state.pid
-                    );
-                }
-                Err(e) => {
-                    eprintln!("ecotokens watch: failed to stop process: {}", e);
-                    std::process::exit(1);
-                }
-            }
+        let mut store = config::SessionStore::load();
+        let pids = if let Some(ref p) = path {
+            store
+                .stop_watcher(&p.display().to_string())
+                .map(|pid| vec![pid])
+                .unwrap_or_default()
         } else {
+            store.stop_all()
+        };
+        let _ = store.save();
+        if pids.is_empty() {
             eprintln!("ecotokens watch: no background process running");
             std::process::exit(1);
+        }
+        for pid in &pids {
+            #[cfg(unix)]
+            let _ = std::process::Command::new("kill")
+                .args(["-TERM", &pid.to_string()])
+                .status();
+            println!("ecotokens watch: background process (PID {pid}) stopped");
         }
         return;
     }
 
     // If --status is requested, show status and exit.
     if status {
-        if let Some(state) = config::BackgroundState::load() {
-            let is_running = state.is_running();
-            if json {
-                let mut obj = serde_json::to_value(&state).unwrap();
-                obj["running"] = serde_json::Value::Bool(is_running);
-                println!("{}", serde_json::to_string_pretty(&obj).unwrap());
-            } else {
-                println!("ecotokens watch (background) status:");
-                println!("  PID              : {}", state.pid);
-                println!("  Watch path       : {}", state.watch_path);
-                println!("  Index dir        : {}", state.index_dir);
-                println!("  Started at       : {}", state.started_at);
-                if let Some(ref log) = state.log_file {
-                    println!("  Log file         : {}", log);
-                }
-                println!(
-                    "  Running          : {}",
-                    if is_running { "yes" } else { "no" }
-                );
-            }
+        let store = config::SessionStore::load();
+        let entries: Vec<_> = if let Some(ref p) = path {
+            let key = p.display().to_string();
+            store
+                .0
+                .get(&key)
+                .map(|e| vec![(key, e.clone())])
+                .unwrap_or_default()
         } else {
+            store
+                .0
+                .iter()
+                .map(|(k, v)| (k.clone(), v.clone()))
+                .collect()
+        };
+        if entries.is_empty() {
             eprintln!("ecotokens watch: no background process running");
             std::process::exit(1);
+        }
+        if json {
+            println!("{}", serde_json::to_string_pretty(&store.0).unwrap());
+        } else {
+            for (watch_path_key, entry) in &entries {
+                let running = entry
+                    .watcher_pid
+                    .map(config::session_store::is_pid_running)
+                    .unwrap_or(false);
+                println!("ecotokens watch (background) — {watch_path_key}:");
+                println!(
+                    "  PID      : {}",
+                    entry
+                        .watcher_pid
+                        .map(|p| p.to_string())
+                        .unwrap_or_else(|| "none".into())
+                );
+                println!("  Sessions : {}", entry.sessions);
+                if let Some(ref ts) = entry.started_at {
+                    println!("  Started  : {ts}");
+                }
+                if let Some(ref log) = entry.log_file {
+                    println!("  Log file : {log}");
+                }
+                println!("  Running  : {}", if running { "yes" } else { "no" });
+            }
         }
         return;
     }
@@ -1102,13 +1144,7 @@ fn cmd_watch(
     if background {
         let cwd_temp = std::env::current_dir().unwrap_or_else(|_| PathBuf::from("."));
         let watch_path_temp = path.as_ref().unwrap_or(&cwd_temp);
-        let default_idx = default_index_dir();
-        let idx_dir_temp = index_dir.as_ref().unwrap_or(&default_idx);
-
-        let log_path = dirs::config_dir()
-            .unwrap_or_else(|| std::path::PathBuf::from("."))
-            .join("ecotokens")
-            .join("watch.log");
+        let log_path = watch_log_path(watch_path_temp);
         let log_path_str = log_path.to_string_lossy().to_string();
 
         // Print before daemonizing so the user sees it in the terminal.
@@ -1121,9 +1157,13 @@ fn cmd_watch(
         match daemonize::Daemonize::new().start() {
             Ok(_) => {
                 // We are now in the daemon child process.
-                let bg_state =
-                    config::BackgroundState::new(watch_path_temp, idx_dir_temp, Some(log_path_str));
-                let _ = bg_state.save();
+                let mut store = config::SessionStore::load();
+                store.register_watcher(
+                    &watch_path_temp.to_string_lossy(),
+                    std::process::id(),
+                    Some(log_path_str),
+                );
+                let _ = store.save();
             }
             Err(e) => {
                 eprintln!("Failed to daemonize: {}", e);
@@ -1287,8 +1327,8 @@ fn cmd_watch(
         });
 
         // Background mode: log events to watch.log
-        let log_file = config::BackgroundState::load()
-            .and_then(|s| s.log_file)
+        let log_file = config::SessionStore::load()
+            .log_file_for(&watch_path_str)
             .map(std::path::PathBuf::from);
 
         if log_file.is_none() {
@@ -1309,7 +1349,9 @@ fn cmd_watch(
         }
 
         // Clean up state on exit.
-        let _ = config::BackgroundState::remove();
+        let mut store = config::SessionStore::load();
+        store.clear_watcher(&watch_path_str);
+        let _ = store.save();
 
         let _ = stop_tx.send(());
         let _ = watcher_handle.join();
@@ -1538,6 +1580,93 @@ fn cmd_clear(
     println!("Deleted {delete_count} interception(s).");
 }
 
+/// Derive a per-path log filename from the watched directory.
+/// `/home/user/my-project` → `~/.config/ecotokens/watch_home_user_my-project.log`
+fn watch_log_path(watch_path: &std::path::Path) -> PathBuf {
+    let sanitized: String = watch_path
+        .to_string_lossy()
+        .chars()
+        .map(|c| {
+            if c.is_alphanumeric() || c == '-' {
+                c
+            } else {
+                '_'
+            }
+        })
+        .collect();
+    dirs::config_dir()
+        .unwrap_or_else(|| PathBuf::from("."))
+        .join("ecotokens")
+        .join(format!("watch{sanitized}.log"))
+}
+
+fn cmd_session_start() {
+    let settings = config::Settings::load();
+    if !settings.auto_watch {
+        return;
+    }
+    let cwd = std::env::current_dir().unwrap_or_else(|_| PathBuf::from("."));
+    let cwd_str = cwd.to_string_lossy().to_string();
+
+    let mut store = config::SessionStore::load();
+    store.cleanup_dead();
+    let needs_watcher = store.increment(&cwd_str);
+    let _ = store.save();
+
+    if needs_watcher {
+        let _ = std::process::Command::new("ecotokens")
+            .args(["watch", "--background", "--path", &cwd_str])
+            .spawn();
+    }
+}
+
+fn cmd_session_end() {
+    let settings = config::Settings::load();
+    if !settings.auto_watch {
+        return;
+    }
+    let cwd = std::env::current_dir().unwrap_or_else(|_| PathBuf::from("."));
+    let cwd_str = cwd.to_string_lossy().to_string();
+
+    let mut store = config::SessionStore::load();
+    if let Some(pid) = store.decrement(&cwd_str) {
+        let _ = store.save();
+        #[cfg(unix)]
+        let _ = std::process::Command::new("kill")
+            .args(["-TERM", &pid.to_string()])
+            .status();
+    } else {
+        let _ = store.save();
+    }
+}
+
+fn cmd_auto_watch_enable() {
+    let mut settings = config::settings::Settings::load();
+    settings.auto_watch = true;
+    if let Err(e) = settings.save() {
+        eprintln!("Error saving config: {e}");
+        std::process::exit(1);
+    }
+    let settings_path = default_settings_path();
+    if !install::are_session_hooks_installed(&settings_path) {
+        if let Err(e) = install::install_session_hooks(&settings_path) {
+            eprintln!("Error installing session hooks: {e}");
+            std::process::exit(1);
+        }
+    }
+    println!("✓ auto-watch enabled — ecotokens watch will start automatically with Claude Code");
+}
+
+fn cmd_auto_watch_disable() {
+    let mut settings = config::settings::Settings::load();
+    settings.auto_watch = false;
+    if let Err(e) = settings.save() {
+        eprintln!("Error saving config: {e}");
+        std::process::exit(1);
+    }
+    println!("✓ auto-watch disabled");
+}
+
 fn main() {
     let cli = Cli::parse();
     match cli.command {
@@ -1614,5 +1743,11 @@ fn main() {
             project,
             yes,
         } => cmd_clear(all, before, older_than, family, project, yes),
+        Commands::SessionStart => cmd_session_start(),
+        Commands::SessionEnd => cmd_session_end(),
+        Commands::AutoWatch { action } => match action {
+            AutoWatchAction::Enable => cmd_auto_watch_enable(),
+            AutoWatchAction::Disable => cmd_auto_watch_disable(),
+        },
     }
 }

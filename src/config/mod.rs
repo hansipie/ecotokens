@@ -1,5 +1,5 @@
-pub mod background_state;
+pub mod session_store;
 pub mod settings;
 
-pub use background_state::BackgroundState;
+pub use session_store::SessionStore;
 pub use settings::Settings;

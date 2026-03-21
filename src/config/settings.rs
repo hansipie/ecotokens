@@ -96,6 +96,9 @@ pub struct Settings {
     /// Timeout in milliseconds for Ollama API calls (default: 3000)
     #[serde(default = "default_ai_summary_timeout_ms")]
     pub ai_summary_timeout_ms: u64,
+    /// Start watch automatically on each Claude Code session (default: false)
+    #[serde(default)]
+    pub auto_watch: bool,
 }
 
 fn default_threshold_lines() -> u32 {
@@ -134,6 +137,7 @@ impl Default for Settings {
             ai_summary_url: None,
             ai_summary_min_tokens: 2500,
             ai_summary_timeout_ms: 3000,
+            auto_watch: false,
         }
     }
 }
