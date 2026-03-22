@@ -54,7 +54,8 @@ fn collect_symbols(
         let ext = path.extension().and_then(|e| e.to_str()).unwrap_or("");
 
         match ext {
-            "rs" | "py" | "js" | "ts" | "jsx" | "tsx" => {
+            "rs" | "py" | "js" | "ts" | "jsx" | "tsx" | "c" | "h" | "cpp" | "cc" | "cxx"
+            | "hpp" | "hh" | "hxx" => {
                 let mut syms = parse_symbols(path)?;
                 for sym in &mut syms {
                     if sym.file_path == filename {

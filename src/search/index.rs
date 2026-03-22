@@ -130,7 +130,8 @@ pub fn index_directory(opts: IndexOptions) -> tantivy::Result<IndexStats> {
         // Symbolic indexing (tree-sitter for code, regex for docs)
         let ext = path.extension().and_then(|e| e.to_str()).unwrap_or("");
         let mut symbols = match ext {
-            "rs" | "py" | "js" | "ts" | "jsx" | "tsx" => parse_symbols(path).unwrap_or_default(),
+            "rs" | "py" | "js" | "ts" | "jsx" | "tsx" | "c" | "h" | "cpp" | "cc" | "cxx"
+            | "hpp" | "hh" | "hxx" => parse_symbols(path).unwrap_or_default(),
             "md" | "markdown" | "toml" | "json" | "yaml" | "yml" => {
                 index_text_doc(path, &rel_path).unwrap_or_default()
             }
@@ -187,6 +188,24 @@ pub fn count_indexable_files(path: &Path) -> u64 {
 fn is_indexable_extension(ext: &str) -> bool {
     matches!(
         ext,
-        "rs" | "py" | "js" | "ts" | "jsx" | "tsx" | "md" | "toml" | "json" | "yaml" | "yml" | "txt"
+        "rs" | "py"
+            | "js"
+            | "ts"
+            | "jsx"
+            | "tsx"
+            | "c"
+            | "h"
+            | "cpp"
+            | "cc"
+            | "cxx"
+            | "hpp"
+            | "hh"
+            | "hxx"
+            | "md"
+            | "toml"
+            | "json"
+            | "yaml"
+            | "yml"
+            | "txt"
     )
 }
