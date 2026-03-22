@@ -5,6 +5,12 @@ All notable changes to this project will be documented in this file.
 The format is based on [Keep a Changelog](https://keepachangelog.com/en/1.0.0/),
 and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0.html).
 
+## [0.7.0] - 2026-03-22
+
+### Added
+- C/C++ indexing support: `.c`, `.h`, `.cpp`, `.cc`, `.cxx`, `.hpp`, `.hh`, `.hxx` files are now indexed and watched
+- Symbol extraction for C/C++: functions, structs, enums, typedefs, classes, and namespaces via `tree-sitter-c` and `tree-sitter-cpp`
+
 ## [0.6.0] - 2026-03-21
 
 ### Added
@@ -79,6 +85,7 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 - `ecotokens install` / `uninstall` / `config` commands
 - MIT license
 
+[0.7.0]: https://github.com/hansipie/ecotokens/releases/tag/v0.7.0
 [0.6.0]: https://github.com/hansipie/ecotokens/releases/tag/v0.6.0
 [0.5.0]: https://github.com/hansipie/ecotokens/releases/tag/v0.5.0
 [0.4.0]: https://github.com/hansipie/ecotokens/releases/tag/v0.4.0

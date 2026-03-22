@@ -144,6 +144,24 @@ fn reindex_single_file(path: &Path, watch_path: &Path, index_dir: &Path) -> Stri
 fn is_indexable_extension(ext: &str) -> bool {
     matches!(
         ext,
-        "rs" | "py" | "js" | "ts" | "md" | "toml" | "json" | "yaml" | "yml" | "txt"
+        "rs" | "py"
+            | "js"
+            | "ts"
+            | "jsx"
+            | "tsx"
+            | "c"
+            | "h"
+            | "cpp"
+            | "cc"
+            | "cxx"
+            | "hpp"
+            | "hh"
+            | "hxx"
+            | "md"
+            | "toml"
+            | "json"
+            | "yaml"
+            | "yml"
+            | "txt"
     )
 }

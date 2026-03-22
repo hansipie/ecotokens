@@ -53,6 +53,8 @@ fn language_for_ext(ext: &str) -> Option<Language> {
         "rs" => Some(tree_sitter_rust::LANGUAGE.into()),
         "py" => Some(tree_sitter_python::LANGUAGE.into()),
         "js" | "ts" | "jsx" | "tsx" => Some(tree_sitter_javascript::LANGUAGE.into()),
+        "c" | "h" => Some(tree_sitter_c::LANGUAGE.into()),
+        "cpp" | "cc" | "cxx" | "hpp" | "hh" | "hxx" => Some(tree_sitter_cpp::LANGUAGE.into()),
         _ => None,
     }
 }
@@ -65,20 +67,32 @@ fn is_declaration_node(node_kind: &str) -> Option<&'static str> {
         "impl_item" => Some("impl"),
         "enum_item" => Some("enum"),
         "trait_item" => Some("trait"),
-        "function_definition" => Some("fn"),   // Python
-        "class_definition" => Some("struct"),  // Python
-        "function_declaration" => Some("fn"),  // JS
-        "class_declaration" => Some("struct"), // JS
+        "function_definition" => Some("fn"),    // Python, C, C++
+        "class_definition" => Some("struct"),   // Python
+        "function_declaration" => Some("fn"),   // JS
+        "class_declaration" => Some("struct"),  // JS
+        "struct_specifier" => Some("struct"),   // C, C++
+        "enum_specifier" => Some("enum"),       // C, C++
+        "type_definition" => Some("type"),      // C (typedef)
+        "class_specifier" => Some("struct"),    // C++
+        "namespace_definition" => Some("impl"), // C++
         _ => None,
     }
 }
 
 /// Extract the declaration name from a node (first `identifier` child).
+/// For C/C++ functions, the name is nested inside `function_declarator` or
+/// `pointer_declarator`, so we recurse into those.
 fn extract_name<'a>(node: tree_sitter::Node<'a>, source: &'a str) -> Option<&'a str> {
     let mut cursor = node.walk();
     for child in node.children(&mut cursor) {
         if child.kind() == "identifier" || child.kind() == "type_identifier" {
             return child.utf8_text(source.as_bytes()).ok();
+        }
+        if matches!(child.kind(), "function_declarator" | "pointer_declarator") {
+            if let Some(name) = extract_name(child, source) {
+                return Some(name);
+            }
         }
     }
     None
