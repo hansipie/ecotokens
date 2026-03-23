@@ -242,12 +242,12 @@ impl TerminalGuard {
 
 impl Drop for TerminalGuard {
     fn drop(&mut self) {
-        let _ = disable_raw_mode();
         if self.use_stderr {
             let _ = std::io::stderr().execute(LeaveAlternateScreen);
         } else {
             let _ = std::io::stdout().execute(LeaveAlternateScreen);
         }
+        let _ = disable_raw_mode();
     }
 }
 
@@ -924,6 +924,7 @@ fn cmd_outline(path: PathBuf, kinds: Option<Vec<String>>, depth: Option<u32>, js
                 let _guard = TerminalGuard::stdout();
                 let backend = CrosstermBackend::new(std::io::stdout());
                 if let Ok(mut terminal) = Terminal::new(backend) {
+                    let _ = terminal.clear();
                     let mut selected = 0usize;
                     let max = symbols.len().saturating_sub(1);
                     loop {
@@ -943,6 +944,7 @@ fn cmd_outline(path: PathBuf, kinds: Option<Vec<String>>, depth: Option<u32>, js
                             }
                         }
                     }
+                    let _ = terminal.show_cursor();
                 }
             } else {
                 for s in &symbols {
