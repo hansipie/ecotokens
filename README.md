@@ -187,9 +187,9 @@ ecotokens watch --status --json    # JSON status output
 ecotokens watch --stop             # stop the background process
 ```
 
-### Auto-watch *(Claude Code & <del>Qwen Code<del>)*
+### Auto-watch *(Claude Code <del>& Qwen Code</del>)*
 
-`ecotokens auto-watch` integrates with Claude Code qnd Qwen Code's session lifecycle to start and stop the watcher automatically.
+`ecotokens auto-watch` integrates with Claude Code <del>and Qwen Code</del>'s session lifecycle to start and stop the watcher automatically.
 
 ```bash
 ecotokens auto-watch enable    # enable auto-watch, install SessionStart/SessionEnd hooks
@@ -198,7 +198,7 @@ ecotokens auto-watch disable   # disable (hooks remain installed but are no-ops)
 
 When enabled, `ecotokens watch --background` starts automatically when a session opens, and stops when it closes. The setting is stored in `~/.config/ecotokens/config.json` (`auto_watch: true/false`).
 
-> **Note:** Auto-watch relies on `SessionStart` / `SessionEnd` hooks. For Qwen Code, session hooks are installed automatically if ecotokens is already installed for Qwen (`ecotokens install --target qwen`) . Gemini CLI does not expose session lifecycle hooks.
+> **Note:** Auto-watch relies on `SessionStart` / `SessionEnd` hooks. <del>For Qwen Code, session hooks are installed automatically if ecotokens is already installed for Qwen (`ecotokens install --target qwen`).</del> Gemini CLI does not expose session lifecycle hooks.
 
 ## Bonus Tools
 
