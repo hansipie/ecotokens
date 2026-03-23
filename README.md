@@ -8,7 +8,7 @@
   <a href="LICENSE"><img src="https://img.shields.io/badge/license-MIT-blue.svg" alt="MIT License"></a>
 </p>
 
-Token-saving companion for [Claude Code](https://claude.ai/code) and [Gemini CLI](https://github.com/google-gemini/gemini-cli). Built on a *"set it and forget it!"* philosophy: one install command, zero configuration, and ecotokens works automatically from there — intercepting tool outputs before they reach the model, filtering the noise, and recording how many tokens you saved.
+Token-saving companion for [Claude Code](https://claude.ai/code), [Gemini CLI](https://github.com/google-gemini/gemini-cli), and [Qwen Code](https://github.com/QwenLM/qwen-code). Built on a *"set it and forget it!"* philosophy: one install command, zero configuration, and ecotokens works automatically from there — intercepting tool outputs before they reach the model, filtering the noise, and recording how many tokens you saved.
 
 <p align="center">
   <img src="assets/demo.gif" alt="ecotokens demo" width="800">
@@ -24,7 +24,7 @@ ecotokens installs as a hook that fires before every shell command. When the AI 
 4. Returns the compressed output to the model
 5. Records the before/after token counts in a local metrics store
 
-Claude Code uses the `PreToolUse` hook (`~/.claude/settings.json`). Gemini CLI uses the `BeforeTool` hook (`~/.gemini/settings.json`).
+Claude Code uses the `PreToolUse` hook (`~/.claude/settings.json`). Gemini CLI uses the `BeforeTool` hook (`~/.gemini/settings.json`). Qwen Code uses the `PreToolUse` hook (`~/.qwen/settings.json`).
 
 For a focused view of the runtime path, see [`docs/hook-filter-metrics-flow.md`](docs/hook-filter-metrics-flow.md).
 
@@ -34,6 +34,12 @@ The result: the model sees clean, concise output — and you keep your context w
 
 ```bash
 cargo install --git https://github.com/hansipie/ecotokens
+```
+
+For exact token counting (tiktoken cl100k_base instead of the character heuristic):
+
+```bash
+cargo install --git https://github.com/hansipie/ecotokens --features exact-tokens
 ```
 
 ## Installation
@@ -56,13 +62,34 @@ ecotokens install --target gemini
 
 This writes a `BeforeTool` hook entry into `~/.gemini/settings.json`.
 
+### Qwen Code
+
+Requires [Qwen Code](https://github.com/QwenLM/qwen-code).
+
+```bash
+cargo install --path .
+ecotokens install --target qwen
+```
+
+This writes a `PreToolUse` hook entry into `~/.qwen/settings.json`.
+
 ### All targets at once
 
 ```bash
 ecotokens install --target all
 ```
 
-`--target all` covers Claude Code and Gemini CLI in a single command.
+`--target all` covers Claude Code, Gemini CLI, and Qwen Code in a single command.
+
+### With exact token counting
+
+By default, token counts use a fast character heuristic (`chars × 0.25`, ~80-85% accuracy). Enable exact counting via [tiktoken](https://github.com/openai/tiktoken) (cl100k_base encoding):
+
+```bash
+cargo install --path . --features exact-tokens
+```
+
+This has no effect on filtering behavior — only the token counts recorded in metrics are more precise.
 
 ### With AI summarization
 
@@ -80,6 +107,7 @@ This writes `ai_summary_enabled` and `ai_summary_model` to `~/.config/ecotokens/
 ```bash
 ecotokens uninstall                    # Claude Code
 ecotokens uninstall --target gemini    # Gemini CLI
+ecotokens uninstall --target qwen      # Qwen Code
 ecotokens uninstall --target all       # all targets
 ```
 
@@ -159,18 +187,18 @@ ecotokens watch --status --json    # JSON status output
 ecotokens watch --stop             # stop the background process
 ```
 
-### Auto-watch *(Claude Code only)*
+### Auto-watch *(Claude Code & <del>Qwen Code<del>)*
 
-`ecotokens auto-watch` integrates with Claude Code's session lifecycle to start and stop the watcher automatically.
+`ecotokens auto-watch` integrates with Claude Code qnd Qwen Code's session lifecycle to start and stop the watcher automatically.
 
 ```bash
 ecotokens auto-watch enable    # enable auto-watch, install SessionStart/SessionEnd hooks
 ecotokens auto-watch disable   # disable (hooks remain installed but are no-ops)
 ```
 
-When enabled, `ecotokens watch --background` starts automatically when a Claude Code session opens, and stops when it closes. The setting is stored in `~/.config/ecotokens/config.json` (`auto_watch: true/false`).
+When enabled, `ecotokens watch --background` starts automatically when a session opens, and stops when it closes. The setting is stored in `~/.config/ecotokens/config.json` (`auto_watch: true/false`).
 
-> **Note:** Auto-watch relies on Claude Code's `SessionStart` / `SessionEnd` hooks and is only available when using Claude Code. Other AI tools (Gemini CLI, etc.) do not expose session lifecycle hooks.
+> **Note:** Auto-watch relies on `SessionStart` / `SessionEnd` hooks. For Qwen Code, session hooks are installed automatically if ecotokens is already installed for Qwen (`ecotokens install --target qwen`) . Gemini CLI does not expose session lifecycle hooks.
 
 ## Bonus Tools
 
@@ -286,7 +314,7 @@ Filtering is aggressive on noise, conservative on signal:
 ## Requirements
 
 - Rust ≥ 1.75 (stable)
-- One or more of: Claude Code (with hook support), Gemini CLI ≥ 0.1.0
+- One or more of: Claude Code (with hook support), Gemini CLI ≥ 0.1.0, Qwen Code
 - Ollama (optional, for semantic search embeddings and AI summarization)
 
 ## Contributing

@@ -143,21 +143,18 @@ pub fn run_filter_pipeline_with_cwd(
         masked.clone()
     } else {
         let mut f = apply_filter(command, &masked);
-        let masked_tokens = crate::tokens::estimate_tokens(&masked) as u32;
-        let filtered_tokens = crate::tokens::estimate_tokens(&f) as u32;
+        let masked_tokens = crate::tokens::count_tokens(&masked) as u32;
+        let filtered_tokens = crate::tokens::count_tokens(&f) as u32;
         if f == masked || (masked_tokens > 0 && filtered_tokens >= masked_tokens) {
             f = ai_summary::ai_summary_or_fallback(&masked, &settings);
         }
         f
     };
 
-    let tokens_before = crate::tokens::estimate_tokens(raw) as u32;
-    let filtered_tokens = crate::tokens::estimate_tokens(&filtered) as u32;
+    let tokens_before = crate::tokens::count_tokens(raw) as u32;
+    let filtered_tokens = crate::tokens::count_tokens(&filtered) as u32;
     let (filtered, tokens_after) = if filtered_tokens > tokens_before {
-        (
-            masked.clone(),
-            crate::tokens::estimate_tokens(&masked) as u32,
-        )
+        (masked.clone(), crate::tokens::count_tokens(&masked) as u32)
     } else {
         (filtered, filtered_tokens)
     };

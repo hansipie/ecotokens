@@ -41,9 +41,9 @@ The project is organized into 12 modules, each with a `mod.rs` exporting its pub
 | Module | Role |
 |---|---|
 | `filter/` | Family-specific output compression (Git, Cargo, Python, C++, FS, Markdown, ConfigFile, Generic) |
-| `hook/` | Handles hook stdin→stdout for both Claude Code (`PreToolUse`, `ecotokens hook`) and Gemini CLI (`BeforeTool`, `ecotokens hook-gemini`) |
+| `hook/` | Handles hook stdin→stdout for Claude Code (`PreToolUse`, `ecotokens hook`), Gemini CLI (`BeforeTool`, `ecotokens hook-gemini`), and Qwen Code (`PreToolUse`, `ecotokens hook-qwen`) |
 | `metrics/` | Appends `Interception` records to `~/.config/ecotokens/metrics.jsonl`; aggregates for reports |
-| `tokens/` | `estimate_tokens(s)` → `chars * 0.25`; optional exact counting via `tiktoken-rs` feature gate |
+| `tokens/` | `count_tokens(s)` — dispatches to tiktoken-rs cl100k_base (`exact-tokens` feature) or `estimate_tokens` heuristic (`chars * 0.25`) by default |
 | `search/` | Tantivy BM25 index + tree-sitter symbol extraction; chunk size 50 lines |
 | `trace/` | Call graph queries (callers/callees) over the search index |
 | `tui/` | Ratatui dashboards (gain, outline, trace, progress, watch) |

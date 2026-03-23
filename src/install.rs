@@ -6,6 +6,8 @@ const HOOK_COMMAND: &str = "ecotokens hook";
 const GEMINI_HOOK_COMMAND: &str = "ecotokens hook-gemini";
 const HOOK_MATCHER: &str = "Bash";
 
+const QWEN_HOOK_COMMAND: &str = "ecotokens hook-qwen";
+
 fn read_settings(path: &Path) -> serde_json::Value {
     if path.exists() {
         let s = std::fs::read_to_string(path).unwrap_or_default();
@@ -354,6 +356,195 @@ pub fn uninstall_gemini(settings_path: &Path) -> InstallResult {
     }
 
     // Remove MCP server entry
+    if let Some(servers) = v["mcpServers"].as_object_mut() {
+        servers.remove("ecotokens");
+    }
+
+    write_settings(settings_path, &v)?;
+
+    Ok(())
+}
+
+// ============================================================================
+// Qwen Code — Session hooks (SessionStart / SessionEnd for auto-watch)
+// ============================================================================
+
+/// Install SessionStart and SessionEnd hooks in ~/.qwen/settings.json (idempotent).
+pub fn install_qwen_session_hooks(settings_path: &Path) -> InstallResult {
+    let mut v = read_settings(settings_path);
+
+    let mut starts = v["hooks"]["SessionStart"]
+        .as_array()
+        .cloned()
+        .unwrap_or_default();
+    if !starts
+        .iter()
+        .any(|h| hook_command_matches(h, SESSION_START_COMMAND))
+    {
+        starts.push(session_start_hook_entry());
+    }
+    v["hooks"]["SessionStart"] = serde_json::Value::Array(starts);
+
+    let mut ends = v["hooks"]["SessionEnd"]
+        .as_array()
+        .cloned()
+        .unwrap_or_default();
+    if !ends
+        .iter()
+        .any(|h| hook_command_matches(h, SESSION_END_COMMAND))
+    {
+        ends.push(session_end_hook_entry());
+    }
+    v["hooks"]["SessionEnd"] = serde_json::Value::Array(ends);
+
+    write_settings(settings_path, &v)
+}
+
+/// Check whether both session hooks are present in ~/.qwen/settings.json.
+pub fn are_qwen_session_hooks_installed(settings_path: &Path) -> bool {
+    let v = read_settings(settings_path);
+    let start_ok = v["hooks"]["SessionStart"]
+        .as_array()
+        .map(|a| {
+            a.iter()
+                .any(|h| hook_command_matches(h, SESSION_START_COMMAND))
+        })
+        .unwrap_or(false);
+    let end_ok = v["hooks"]["SessionEnd"]
+        .as_array()
+        .map(|a| {
+            a.iter()
+                .any(|h| hook_command_matches(h, SESSION_END_COMMAND))
+        })
+        .unwrap_or(false);
+    start_ok && end_ok
+}
+
+/// Remove SessionStart and SessionEnd hooks from ~/.qwen/settings.json (idempotent).
+pub fn uninstall_qwen_session_hooks(settings_path: &Path) -> InstallResult {
+    if !settings_path.exists() {
+        return Ok(());
+    }
+    let mut v = read_settings(settings_path);
+
+    if let Some(arr) = v["hooks"]["SessionStart"].as_array() {
+        let filtered: Vec<_> = arr
+            .iter()
+            .filter(|h| !hook_command_matches(h, SESSION_START_COMMAND))
+            .cloned()
+            .collect();
+        v["hooks"]["SessionStart"] = serde_json::Value::Array(filtered);
+    }
+    if let Some(arr) = v["hooks"]["SessionEnd"].as_array() {
+        let filtered: Vec<_> = arr
+            .iter()
+            .filter(|h| !hook_command_matches(h, SESSION_END_COMMAND))
+            .cloned()
+            .collect();
+        v["hooks"]["SessionEnd"] = serde_json::Value::Array(filtered);
+    }
+
+    write_settings(settings_path, &v)
+}
+
+// ============================================================================
+// Qwen Code Support (PreToolUse hook + shared mcpServers in single file)
+// ============================================================================
+
+/// Get the default Qwen Code settings path: ~/.qwen/settings.json
+pub fn default_qwen_settings_path() -> Option<std::path::PathBuf> {
+    dirs::home_dir().map(|d| d.join(".qwen").join("settings.json"))
+}
+
+fn qwen_hook_entry() -> serde_json::Value {
+    serde_json::json!({
+        "matcher": "run_shell_command",
+        "hooks": [{
+            "type": "command",
+            "command": QWEN_HOOK_COMMAND
+        }]
+    })
+}
+
+/// Install the PreToolUse hook into ~/.qwen/settings.json (idempotent).
+pub fn install_qwen_hook(settings_path: &Path) -> InstallResult {
+    let mut v = read_settings(settings_path);
+
+    let hooks = v["hooks"]["PreToolUse"]
+        .as_array_mut()
+        .cloned()
+        .unwrap_or_default();
+
+    let already_present = hooks.iter().any(|h| {
+        h["hooks"]
+            .as_array()
+            .and_then(|a| a.first())
+            .and_then(|e| e["command"].as_str())
+            .map(|c| c == QWEN_HOOK_COMMAND)
+            .unwrap_or(false)
+    });
+
+    let mut new_hooks = hooks;
+    if !already_present {
+        new_hooks.push(qwen_hook_entry());
+    }
+
+    v["hooks"]["PreToolUse"] = serde_json::Value::Array(new_hooks);
+    write_settings(settings_path, &v)?;
+
+    Ok(())
+}
+
+/// Check if the ecotokens PreToolUse hook is already installed in
+/// ~/.qwen/settings.json.
+pub fn is_qwen_hook_installed(settings_path: &Path) -> bool {
+    let v = read_settings(settings_path);
+    v["hooks"]["PreToolUse"]
+        .as_array()
+        .map(|hooks| {
+            hooks.iter().any(|h| {
+                h["hooks"]
+                    .as_array()
+                    .and_then(|a| a.first())
+                    .and_then(|e| e["command"].as_str())
+                    .map(|c| c == QWEN_HOOK_COMMAND)
+                    .unwrap_or(false)
+            })
+        })
+        .unwrap_or(false)
+}
+
+/// Check if the ecotokens MCP server is registered in ~/.qwen/settings.json.
+pub fn is_qwen_mcp_registered(settings_path: &Path) -> bool {
+    has_ecotokens_mcp_server(&read_settings(settings_path))
+}
+
+/// Remove the ecotokens hook and MCP server from ~/.qwen/settings.json.
+/// Idempotent: no error if they're not present.
+pub fn uninstall_qwen(settings_path: &Path) -> InstallResult {
+    if !settings_path.exists() {
+        return Ok(());
+    }
+
+    let mut v = read_settings(settings_path);
+
+    if let Some(hooks) = v["hooks"]["PreToolUse"].as_array() {
+        let filtered: Vec<serde_json::Value> = hooks
+            .iter()
+            .filter(|h| {
+                !h["hooks"]
+                    .as_array()
+                    .and_then(|a| a.first())
+                    .and_then(|e| e["command"].as_str())
+                    .map(|c| c == QWEN_HOOK_COMMAND)
+                    .unwrap_or(false)
+            })
+            .cloned()
+            .collect();
+
+        v["hooks"]["PreToolUse"] = serde_json::Value::Array(filtered);
+    }
+
     if let Some(servers) = v["mcpServers"].as_object_mut() {
         servers.remove("ecotokens");
     }

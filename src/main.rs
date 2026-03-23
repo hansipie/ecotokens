@@ -40,6 +40,8 @@ enum Commands {
     Hook,
     /// Intercept a Gemini CLI tool call via BeforeTool hook (reads JSON from stdin)
     HookGemini,
+    /// Intercept a Qwen Code tool call via PreToolUse hook (reads JSON from stdin)
+    HookQwen,
     /// Execute a command, filter its output, record metrics
     Filter {
         #[arg(last = true)]
@@ -65,9 +67,9 @@ enum Commands {
         #[arg(long)]
         history: bool,
     },
-    /// Install ecotokens hook in ~/.claude/settings.json or ~/.gemini/settings.json
+    /// Install ecotokens hook in ~/.claude/settings.json, ~/.gemini/settings.json, or ~/.qwen/settings.json
     Install {
-        /// Target AI tool to install for: claude, gemini, or all (default: claude)
+        /// Target AI tool to install for: claude, gemini, qwen, or all (default: claude)
         #[arg(long, default_value = "claude")]
         target: String,
         /// Enable AI-powered output summarization via Ollama
@@ -77,9 +79,9 @@ enum Commands {
         #[arg(long)]
         ai_summary_model: Option<String>,
     },
-    /// Remove ecotokens hook from ~/.claude/settings.json or ~/.gemini/settings.json
+    /// Remove ecotokens hook from ~/.claude/settings.json, ~/.gemini/settings.json, or ~/.qwen/settings.json
     Uninstall {
-        /// Target to uninstall from: claude, gemini, or all (default: claude)
+        /// Target to uninstall from: claude, gemini, qwen, or all (default: claude)
         #[arg(long, default_value = "claude")]
         target: String,
     },
@@ -582,13 +584,15 @@ fn cmd_install(target: String, ai_summary: bool, ai_summary_model: Option<String
     let claude_path = default_settings_path();
     let claude_json = default_claude_json_path();
     let gemini_path = install::default_gemini_settings_path();
+    let qwen_path = install::default_qwen_settings_path();
 
     let install_claude = matches!(target.as_str(), "claude" | "all");
     let install_gemini = matches!(target.as_str(), "gemini" | "all");
+    let install_qwen = matches!(target.as_str(), "qwen" | "all");
 
-    if !install_claude && !install_gemini {
+    if !install_claude && !install_gemini && !install_qwen {
         eprintln!(
-            "unknown target '{}'. Valid values: claude, gemini, all",
+            "unknown target '{}'. Valid values: claude, gemini, qwen, all",
             target
         );
         std::process::exit(1);
@@ -622,6 +626,37 @@ fn cmd_install(target: String, ai_summary: bool, ai_summary_model: Option<String
         }
     }
 
+    if install_qwen {
+        match qwen_path {
+            Some(ref p) => {
+                match install::install_qwen_hook(p) {
+                    Ok(()) => println!("ecotokens hook installed (Qwen Code) → {}", p.display()),
+                    Err(e) => {
+                        eprintln!("install error (qwen hook): {e}");
+                        std::process::exit(1);
+                    }
+                }
+                let settings = config::Settings::load();
+                if settings.auto_watch && !install::are_qwen_session_hooks_installed(p) {
+                    match install::install_qwen_session_hooks(p) {
+                        Ok(()) => println!(
+                            "ecotokens session hooks installed (Qwen Code) → {}",
+                            p.display()
+                        ),
+                        Err(e) => {
+                            eprintln!("install error (qwen session hooks): {e}");
+                            std::process::exit(1);
+                        }
+                    }
+                }
+            }
+            None => {
+                eprintln!("cannot determine Qwen settings path on this system");
+                std::process::exit(1);
+            }
+        }
+    }
+
     let enable_ai = ai_summary || ai_summary_model.is_some();
     if enable_ai {
         let mut settings = config::Settings::load();
@@ -641,13 +676,15 @@ fn cmd_uninstall(target: String) {
     let claude_path = default_settings_path();
     let claude_json = default_claude_json_path();
     let gemini_path = install::default_gemini_settings_path();
+    let qwen_path = install::default_qwen_settings_path();
 
     let uninstall_claude = matches!(target.as_str(), "claude" | "all");
     let uninstall_gemini = matches!(target.as_str(), "gemini" | "all");
+    let uninstall_qwen = matches!(target.as_str(), "qwen" | "all");
 
-    if !uninstall_claude && !uninstall_gemini {
+    if !uninstall_claude && !uninstall_gemini && !uninstall_qwen {
         eprintln!(
-            "unknown target '{}'. Valid values: claude, gemini, all",
+            "unknown target '{}'. Valid values: claude, gemini, qwen, all",
             target
         );
         std::process::exit(1);
@@ -706,6 +743,54 @@ fn cmd_uninstall(target: String) {
             }
             None => {
                 eprintln!("cannot determine Gemini settings path on this system");
+                std::process::exit(1);
+            }
+        }
+    }
+
+    if uninstall_qwen {
+        match qwen_path {
+            Some(ref p) => {
+                let had_hook = install::is_qwen_hook_installed(p);
+                let had_mcp = install::is_qwen_mcp_registered(p);
+                let had_session = install::are_qwen_session_hooks_installed(p);
+                match install::uninstall_qwen(p) {
+                    Ok(()) => {
+                        if had_hook {
+                            println!("ecotokens hook removed (Qwen Code) ← {}", p.display());
+                        }
+                        if had_mcp {
+                            println!(
+                                "ecotokens MCP server unregistered (Qwen Code) ← {}",
+                                p.display()
+                            );
+                        }
+                        if !had_hook && !had_mcp && !had_session {
+                            println!("ecotokens: nothing to uninstall (qwen)");
+                        }
+                    }
+                    Err(e) => {
+                        eprintln!("uninstall error (qwen): {e}");
+                        std::process::exit(1);
+                    }
+                }
+                if had_session {
+                    match install::uninstall_qwen_session_hooks(p) {
+                        Ok(()) => {
+                            println!(
+                                "ecotokens session hooks removed (Qwen Code) ← {}",
+                                p.display()
+                            );
+                        }
+                        Err(e) => {
+                            eprintln!("uninstall error (qwen session hooks): {e}");
+                            std::process::exit(1);
+                        }
+                    }
+                }
+            }
+            None => {
+                eprintln!("cannot determine Qwen settings path on this system");
                 std::process::exit(1);
             }
         }
@@ -1649,14 +1734,27 @@ fn cmd_auto_watch_enable() {
         eprintln!("Error saving config: {e}");
         std::process::exit(1);
     }
-    let settings_path = default_settings_path();
-    if !install::are_session_hooks_installed(&settings_path) {
-        if let Err(e) = install::install_session_hooks(&settings_path) {
-            eprintln!("Error installing session hooks: {e}");
+
+    let claude_path = default_settings_path();
+    if !install::are_session_hooks_installed(&claude_path) {
+        if let Err(e) = install::install_session_hooks(&claude_path) {
+            eprintln!("Error installing session hooks (claude): {e}");
             std::process::exit(1);
         }
     }
-    println!("✓ auto-watch enabled — ecotokens watch will start automatically with Claude Code");
+
+    if let Some(ref qwen_path) = install::default_qwen_settings_path() {
+        if install::is_qwen_hook_installed(qwen_path)
+            && !install::are_qwen_session_hooks_installed(qwen_path)
+        {
+            if let Err(e) = install::install_qwen_session_hooks(qwen_path) {
+                eprintln!("Error installing session hooks (qwen): {e}");
+                std::process::exit(1);
+            }
+        }
+    }
+
+    println!("✓ auto-watch enabled — ecotokens watch will start automatically with Claude Code and Qwen Code");
 }
 
 fn cmd_auto_watch_disable() {
@@ -1674,6 +1772,7 @@ fn main() {
     match cli.command {
         Commands::Hook => hook::handle(),
         Commands::HookGemini => hook::handle_gemini(),
+        Commands::HookQwen => hook::handle_qwen(),
         Commands::Filter { args, debug } => cmd_filter(args, debug),
         Commands::Gain {
             period,
