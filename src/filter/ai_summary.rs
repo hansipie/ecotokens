@@ -16,7 +16,7 @@ pub fn try_ai_summary(output: &str, settings: &Settings) -> Result<String, Strin
     }
 
     // Guard: only summarize large outputs where AI is worth the cost
-    let tokens = crate::tokens::estimate_tokens(output) as u32;
+    let tokens = crate::tokens::count_tokens(output) as u32;
     if tokens < settings.ai_summary_min_tokens {
         return Err(format!(
             "Output too small for AI summary ({} < {} tokens)",
@@ -78,7 +78,7 @@ pub fn try_ai_summary(output: &str, settings: &Settings) -> Result<String, Strin
     Ok(format!(
         "[ecotokens] AI summary ({} → ~{} tokens):\n{}",
         tokens,
-        crate::tokens::estimate_tokens(&summary),
+        crate::tokens::count_tokens(&summary),
         summary
     ))
 }

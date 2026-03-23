@@ -3,8 +3,9 @@ mod helpers;
 use helpers::ecotokens_bin;
 
 use ecotokens::install::{
-    install_gemini_hook, install_hook, is_gemini_hook_installed, is_gemini_mcp_registered,
-    uninstall_gemini, uninstall_hook,
+    install_gemini_hook, install_hook, install_qwen_hook, is_gemini_hook_installed,
+    is_gemini_mcp_registered, is_qwen_hook_installed, is_qwen_mcp_registered, uninstall_gemini,
+    uninstall_hook, uninstall_qwen,
 };
 use std::process::Command;
 use tempfile::TempDir;
@@ -423,5 +424,162 @@ fn gemini_install_creates_directory() {
     let path = dir.path().join(".gemini").join("settings.json");
     // Parent does not exist yet
     install_gemini_hook(&path).expect("should create parent dir and settings file");
+    assert!(path.exists());
+}
+
+// ── Qwen Code installation tests ───────────────────────────────────────────────
+
+fn temp_qwen_settings(dir: &TempDir) -> std::path::PathBuf {
+    let path = dir.path().join(".qwen").join("settings.json");
+    std::fs::create_dir_all(path.parent().unwrap()).expect("create .qwen dir");
+    path
+}
+
+#[test]
+fn qwen_install_hook_writes_pre_tool_use_entry() {
+    let dir = TempDir::new().unwrap();
+    let path = temp_qwen_settings(&dir);
+
+    install_qwen_hook(&path).expect("install_qwen_hook should succeed");
+
+    let content = std::fs::read_to_string(&path).unwrap();
+    let v: serde_json::Value = serde_json::from_str(&content).unwrap();
+    assert!(
+        v["hooks"]["PreToolUse"].is_array(),
+        "PreToolUse hooks array must exist"
+    );
+    let hooks = v["hooks"]["PreToolUse"].as_array().unwrap();
+    assert_eq!(hooks.len(), 1, "should have exactly one hook");
+    assert_eq!(
+        hooks[0]["hooks"][0]["command"].as_str().unwrap(),
+        "ecotokens hook-qwen"
+    );
+    assert_eq!(hooks[0]["matcher"].as_str().unwrap(), "run_shell_command");
+}
+
+#[test]
+fn qwen_install_hook_is_idempotent() {
+    let dir = TempDir::new().unwrap();
+    let path = temp_qwen_settings(&dir);
+
+    install_qwen_hook(&path).unwrap();
+    install_qwen_hook(&path).unwrap();
+
+    let v: serde_json::Value =
+        serde_json::from_str(&std::fs::read_to_string(&path).unwrap()).unwrap();
+    let hooks = v["hooks"]["PreToolUse"].as_array().unwrap();
+    let count = hooks
+        .iter()
+        .filter(|h| {
+            h["hooks"][0]["command"]
+                .as_str()
+                .unwrap_or("")
+                .contains("hook-qwen")
+        })
+        .count();
+    assert_eq!(count, 1, "should not duplicate the hook");
+}
+
+#[test]
+fn qwen_is_hook_installed_returns_false_before_install() {
+    let dir = TempDir::new().unwrap();
+    let path = temp_qwen_settings(&dir);
+    assert!(!is_qwen_hook_installed(&path));
+}
+
+#[test]
+fn qwen_is_hook_installed_returns_true_after_install() {
+    let dir = TempDir::new().unwrap();
+    let path = temp_qwen_settings(&dir);
+    install_qwen_hook(&path).unwrap();
+    assert!(is_qwen_hook_installed(&path));
+}
+
+#[test]
+fn qwen_is_mcp_registered_returns_false_before_install() {
+    let dir = TempDir::new().unwrap();
+    let path = temp_qwen_settings(&dir);
+    assert!(!is_qwen_mcp_registered(&path));
+}
+
+#[test]
+fn qwen_uninstall_removes_hook_and_mcp() {
+    let dir = TempDir::new().unwrap();
+    let path = temp_qwen_settings(&dir);
+
+    let initial = serde_json::json!({
+        "hooks": { "PreToolUse": [{"matcher": "run_shell_command", "hooks": [{"type": "command", "command": "ecotokens hook-qwen"}]}] },
+        "mcpServers": { "ecotokens": { "command": "ecotokens", "args": ["mcp"], "type": "stdio" } }
+    });
+    std::fs::write(&path, serde_json::to_string_pretty(&initial).unwrap()).unwrap();
+
+    assert!(is_qwen_hook_installed(&path));
+    assert!(is_qwen_mcp_registered(&path));
+
+    uninstall_qwen(&path).expect("uninstall_qwen should succeed");
+
+    assert!(!is_qwen_hook_installed(&path), "hook should be removed");
+    assert!(!is_qwen_mcp_registered(&path), "MCP should be removed");
+}
+
+#[test]
+fn qwen_uninstall_preserves_third_party_hooks() {
+    let dir = TempDir::new().unwrap();
+    let path = temp_qwen_settings(&dir);
+
+    let initial = serde_json::json!({
+        "hooks": {
+            "PreToolUse": [
+                {
+                    "matcher": "other_tool",
+                    "hooks": [{"type": "command", "command": "other-hook"}]
+                },
+                {
+                    "matcher": "run_shell_command",
+                    "hooks": [{"type": "command", "command": "ecotokens hook-qwen"}]
+                }
+            ]
+        },
+        "mcpServers": {
+            "other-server": {"command": "other", "args": []},
+            "ecotokens": {"command": "ecotokens", "args": ["mcp"], "type": "stdio"}
+        }
+    });
+    std::fs::write(&path, serde_json::to_string_pretty(&initial).unwrap()).unwrap();
+
+    uninstall_qwen(&path).unwrap();
+
+    let v: serde_json::Value =
+        serde_json::from_str(&std::fs::read_to_string(&path).unwrap()).unwrap();
+
+    let hooks = v["hooks"]["PreToolUse"].as_array().unwrap();
+    assert_eq!(hooks.len(), 1, "third-party hook should survive");
+    assert_eq!(
+        hooks[0]["hooks"][0]["command"].as_str().unwrap(),
+        "other-hook"
+    );
+
+    assert!(
+        v["mcpServers"]["other-server"].is_object(),
+        "third-party MCP should survive"
+    );
+    assert!(
+        v["mcpServers"]["ecotokens"].is_null(),
+        "ecotokens MCP should be gone"
+    );
+}
+
+#[test]
+fn qwen_uninstall_on_missing_file_is_ok() {
+    let dir = TempDir::new().unwrap();
+    let path = dir.path().join(".qwen").join("settings.json");
+    assert!(uninstall_qwen(&path).is_ok());
+}
+
+#[test]
+fn qwen_install_creates_directory() {
+    let dir = TempDir::new().unwrap();
+    let path = dir.path().join(".qwen").join("settings.json");
+    install_qwen_hook(&path).expect("should create parent dir and settings file");
     assert!(path.exists());
 }
