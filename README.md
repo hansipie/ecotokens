@@ -8,6 +8,11 @@
   <a href="LICENSE"><img src="https://img.shields.io/badge/license-MIT-blue.svg" alt="MIT License"></a>
 </p>
 
+<p align="right">
+  <a href="https://www.producthunt.com/products/ecotokens?embed=true&amp;utm_source=badge-featured&amp;utm_medium=badge&amp;utm_campaign=badge-ecotokens" target="_blank" rel="noopener noreferrer"><img alt="EcoTokens - Save 90% of your AI coding tokens — automatically | Product Hunt" width="250" height="54" src="https://api.producthunt.com/widgets/embed-image/v1/featured.svg?post_id=1105858&amp;theme=light&amp;t=1774341425433"></a>
+</p>
+<br>
+
 Token-saving companion for [Claude Code](https://claude.ai/code), [Gemini CLI](https://github.com/google-gemini/gemini-cli), and [Qwen Code](https://github.com/QwenLM/qwen-code). Built on a *"set it and forget it!"* philosophy: one install command, zero configuration, and ecotokens works automatically from there — intercepting tool outputs before they reach the model, filtering the noise, and recording how many tokens you saved.
 
 <p align="center">
