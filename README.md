@@ -19,6 +19,19 @@ Token-saving companion for [Claude Code](https://claude.ai/code), [Gemini CLI](h
   <img src="assets/demo.gif" alt="ecotokens demo" width="800">
 </p>
 
+## Features highlight
+
+| Feature | Details |
+|---------|---------|
+| **PreToolUse hook** | Intercepts every shell (`Bash`) command before its output reaches the model — filters, compresses, and records savings |
+| **PostToolUse hook** *(Claude Code)* | Intercepts native tool results (`Read`, `Grep`, `Glob`) — outline-based compression for source files, grep trimming, glob denoising |
+| **Gain dashboard** | Interactive TUI — token savings by command family or project, sparkline, diff view, history log |
+| **Multi-agent support** | Works with Claude Code, Gemini CLI, and Qwen Code out of the box |
+| **Precision guarantees** | Errors, failures, and stack traces are never removed; secrets are redacted before filtering |
+| **Code intelligence** | BM25 + semantic search, symbol lookup, call graph tracing, near-duplicate detection |
+| **AI summarization** *(optional)* | Large outputs compressed by a local Ollama model instead of being truncated |
+| **Zero config** | One `ecotokens install` command — works automatically from there |
+
 ## How it works
 
 ecotokens installs hooks that intercept tool outputs before they reach the model. Two interception points are supported:
