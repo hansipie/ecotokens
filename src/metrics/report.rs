@@ -139,7 +139,10 @@ pub fn aggregate(items: &[Interception], period: Period, model: &str) -> Report 
     // by_family
     let mut by_family: HashMap<String, FamilyStats> = HashMap::new();
     for item in &filtered {
-        let key = format!("{:?}", item.command_family).to_lowercase();
+        let key = serde_json::to_value(&item.command_family)
+            .ok()
+            .and_then(|v| v.as_str().map(|s| s.to_string()))
+            .unwrap_or_else(|| format!("{:?}", item.command_family).to_lowercase());
         let entry = by_family.entry(key).or_insert(FamilyStats {
             count: 0,
             tokens_before: 0,
