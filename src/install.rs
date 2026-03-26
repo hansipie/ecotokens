@@ -7,6 +7,8 @@ const GEMINI_HOOK_COMMAND: &str = "ecotokens hook-gemini";
 const HOOK_MATCHER: &str = "Bash";
 
 const QWEN_HOOK_COMMAND: &str = "ecotokens hook-qwen";
+const POST_HOOK_COMMAND: &str = "ecotokens hook-post";
+const POST_HOOK_MATCHER: &str = "Read|Grep|Glob";
 
 fn read_settings(path: &Path) -> serde_json::Value {
     if path.exists() {
@@ -70,6 +72,36 @@ pub fn install_hook(settings_path: &Path, claude_json_path: &Path) -> InstallRes
     }
 
     v["hooks"]["PreToolUse"] = serde_json::Value::Array(new_hooks);
+    write_settings(settings_path, &v)
+}
+
+/// Install the PostToolUse hook for Read/Grep/Glob into settings.json (idempotent).
+pub fn install_post_hook(settings_path: &Path) -> InstallResult {
+    let mut v = read_settings(settings_path);
+
+    let hooks = v["hooks"]["PostToolUse"]
+        .as_array_mut()
+        .cloned()
+        .unwrap_or_default();
+
+    let already_present = hooks.iter().any(|h| {
+        h["hooks"]
+            .as_array()
+            .and_then(|a| a.first())
+            .and_then(|e| e["command"].as_str())
+            .map(|c| c == POST_HOOK_COMMAND)
+            .unwrap_or(false)
+    });
+
+    let mut new_hooks = hooks;
+    if !already_present {
+        new_hooks.push(serde_json::json!({
+            "matcher": POST_HOOK_MATCHER,
+            "hooks": [{ "type": "command", "command": POST_HOOK_COMMAND }]
+        }));
+    }
+
+    v["hooks"]["PostToolUse"] = serde_json::Value::Array(new_hooks);
     write_settings(settings_path, &v)
 }
 

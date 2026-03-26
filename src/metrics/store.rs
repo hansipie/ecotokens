@@ -14,6 +14,14 @@ fn truncate_content(s: String) -> String {
     }
 }
 
+#[derive(Debug, Clone, Serialize, Deserialize, PartialEq, Default)]
+#[serde(rename_all = "snake_case")]
+pub enum HookType {
+    #[default]
+    PreToolUse,
+    PostToolUse,
+}
+
 #[derive(Debug, Clone, Serialize, Deserialize, PartialEq)]
 #[serde(rename_all = "snake_case")]
 pub enum CommandFamily {
@@ -33,6 +41,7 @@ pub enum CommandFamily {
     Network,
     Db,
     Generic,
+    NativeRead,
 }
 
 #[derive(Debug, Clone, Serialize, Deserialize, PartialEq)]
@@ -60,6 +69,8 @@ pub struct Interception {
     pub content_before: Option<String>,
     #[serde(default)]
     pub content_after: Option<String>,
+    #[serde(default)]
+    pub hook_type: HookType,
 }
 
 impl Interception {
@@ -95,7 +106,13 @@ impl Interception {
             duration_ms,
             content_before: content_before.map(truncate_content),
             content_after: content_after.map(truncate_content),
+            hook_type: HookType::PreToolUse,
         }
+    }
+
+    pub fn with_hook_type(mut self, hook_type: HookType) -> Self {
+        self.hook_type = hook_type;
+        self
     }
 }
 

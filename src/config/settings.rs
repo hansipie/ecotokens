@@ -99,6 +99,9 @@ pub struct Settings {
     /// Start watch automatically on each Claude Code session (default: false)
     #[serde(default)]
     pub auto_watch: bool,
+    /// Depth for caller/callee trace in PostToolUse enrichment (default: 1)
+    #[serde(default = "default_post_hook_depth")]
+    pub post_hook_depth: u32,
 }
 
 fn default_threshold_lines() -> u32 {
@@ -119,6 +122,9 @@ fn default_ai_summary_min_tokens() -> u32 {
 fn default_ai_summary_timeout_ms() -> u64 {
     3000
 }
+fn default_post_hook_depth() -> u32 {
+    1
+}
 
 impl Default for Settings {
     fn default() -> Self {
@@ -138,6 +144,7 @@ impl Default for Settings {
             ai_summary_min_tokens: 2500,
             ai_summary_timeout_ms: 3000,
             auto_watch: false,
+            post_hook_depth: 1,
         }
     }
 }

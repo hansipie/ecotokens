@@ -1,6 +1,6 @@
 use chrono::Utc;
 use ecotokens::metrics::report::{aggregate, Period};
-use ecotokens::metrics::store::{CommandFamily, FilterMode, Interception};
+use ecotokens::metrics::store::{CommandFamily, FilterMode, HookType, Interception};
 
 fn make_interception_ago(
     seconds_ago: i64,
@@ -31,6 +31,7 @@ fn make_interception_ago(
         duration_ms: 5,
         content_before: None,
         content_after: None,
+        hook_type: HookType::PreToolUse,
     }
 }
 
@@ -40,6 +41,29 @@ fn make_items() -> Vec<Interception> {
         make_interception_ago(100, CommandFamily::Cargo, 500, 400), // today, 20% savings
         make_interception_ago(86500, CommandFamily::Git, 800, 300), // yesterday
     ]
+}
+
+#[test]
+fn gain_shows_native_read_savings() {
+    let mut items = make_items();
+    // Add PostToolUse NativeRead interception
+    let mut native_read = make_interception_ago(5, CommandFamily::NativeRead, 2000, 300);
+    native_read.hook_type = HookType::PostToolUse;
+    native_read.command = "src/main.rs".to_string();
+    items.push(native_read);
+
+    let report = aggregate(&items, Period::All, "claude-sonnet-4-6");
+
+    // NativeRead should appear in by_family with key "native_read" (serde snake_case)
+    assert!(
+        report.by_family.contains_key("native_read"),
+        "by_family should contain 'native_read', got keys: {:?}",
+        report.by_family.keys().collect::<Vec<_>>()
+    );
+    let stats = &report.by_family["native_read"];
+    assert_eq!(stats.count, 1);
+    assert_eq!(stats.tokens_before, 2000);
+    assert_eq!(stats.tokens_after, 300);
 }
 
 #[test]

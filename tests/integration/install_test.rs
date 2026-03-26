@@ -3,9 +3,9 @@ mod helpers;
 use helpers::ecotokens_bin;
 
 use ecotokens::install::{
-    install_gemini_hook, install_hook, install_qwen_hook, is_gemini_hook_installed,
-    is_gemini_mcp_registered, is_qwen_hook_installed, is_qwen_mcp_registered, uninstall_gemini,
-    uninstall_hook, uninstall_qwen,
+    install_gemini_hook, install_hook, install_post_hook, install_qwen_hook,
+    is_gemini_hook_installed, is_gemini_mcp_registered, is_qwen_hook_installed,
+    is_qwen_mcp_registered, uninstall_gemini, uninstall_hook, uninstall_qwen,
 };
 use std::process::Command;
 use tempfile::TempDir;
@@ -582,4 +582,81 @@ fn qwen_install_creates_directory() {
     let path = dir.path().join(".qwen").join("settings.json");
     install_qwen_hook(&path).expect("should create parent dir and settings file");
     assert!(path.exists());
+}
+
+// ── PostToolUse hook tests ──────────────────────────────────────────────────
+
+#[test]
+fn post_hook_installs_in_posttooluse() {
+    let dir = TempDir::new().unwrap();
+    let path = dir.path().join("settings.json");
+
+    install_post_hook(&path).expect("install_post_hook should succeed");
+
+    let content = std::fs::read_to_string(&path).unwrap();
+    let v: serde_json::Value = serde_json::from_str(&content).unwrap();
+    let post_hooks = v["hooks"]["PostToolUse"].as_array().unwrap();
+    assert!(
+        post_hooks.iter().any(|h| h["hooks"]
+            .as_array()
+            .and_then(|a| a.first())
+            .and_then(|e| e["command"].as_str())
+            .map(|c| c.contains("hook-post"))
+            .unwrap_or(false)),
+        "PostToolUse hook with 'hook-post' command should be installed"
+    );
+}
+
+#[test]
+fn post_hook_idempotent() {
+    let dir = TempDir::new().unwrap();
+    let path = dir.path().join("settings.json");
+
+    install_post_hook(&path).unwrap();
+    install_post_hook(&path).unwrap();
+
+    let content = std::fs::read_to_string(&path).unwrap();
+    let v: serde_json::Value = serde_json::from_str(&content).unwrap();
+    let post_hooks = v["hooks"]["PostToolUse"].as_array().unwrap();
+    let count = post_hooks
+        .iter()
+        .filter(|h| {
+            h["hooks"]
+                .as_array()
+                .and_then(|a| a.first())
+                .and_then(|e| e["command"].as_str())
+                .map(|c| c.contains("hook-post"))
+                .unwrap_or(false)
+        })
+        .count();
+    assert_eq!(
+        count, 1,
+        "hook-post should appear exactly once after two installs"
+    );
+}
+
+#[test]
+fn post_hook_preserves_existing_pretooluse_hook() {
+    let dir = TempDir::new().unwrap();
+    let path = dir.path().join("settings.json");
+
+    // Install PreToolUse hook first
+    install_hook(&path, &path).unwrap();
+    // Then install PostToolUse hook
+    install_post_hook(&path).unwrap();
+
+    let content = std::fs::read_to_string(&path).unwrap();
+    let v: serde_json::Value = serde_json::from_str(&content).unwrap();
+
+    // PreToolUse hook should still be there
+    let pre_hooks = v["hooks"]["PreToolUse"].as_array().unwrap();
+    assert!(
+        pre_hooks.iter().any(|h| h["hooks"]
+            .as_array()
+            .and_then(|a| a.first())
+            .and_then(|e| e["command"].as_str())
+            .map(|c| c == "ecotokens hook")
+            .unwrap_or(false)),
+        "PreToolUse hook should be preserved after install_post_hook"
+    );
 }

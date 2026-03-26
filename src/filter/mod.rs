@@ -120,6 +120,7 @@ pub fn apply_filter(command: &str, output: &str) -> String {
         CommandFamily::Network => network::filter_network(command, output),
         CommandFamily::Db => db::filter_db(output),
         CommandFamily::Generic => generic::filter_generic(output, 200, 51200),
+        CommandFamily::NativeRead => output.to_string(),
     }
 }
 
