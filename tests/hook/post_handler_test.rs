@@ -1,4 +1,6 @@
-use ecotokens::hook::post_handler::{handle_post_input, PostFilterResult, PostHookInput};
+use ecotokens::hook::post_handler::{
+    handle_post_input, metrics_command, PostFilterResult, PostHookInput,
+};
 use ecotokens::metrics::store::CommandFamily;
 
 fn make_input(
@@ -80,4 +82,15 @@ fn post_handler_malformed_tool_response_passthrough() {
         matches!(result, PostFilterResult::Passthrough),
         "malformed tool_response should passthrough"
     );
+}
+
+#[test]
+fn post_handler_metrics_command_includes_read_path() {
+    let input = make_input(
+        "Read",
+        serde_json::json!({"file_path": "src/main.rs"}),
+        serde_json::json!({"file": {"content": "fn main() {}"}}),
+    );
+
+    assert_eq!(metrics_command(&input), "Read src/main.rs");
 }

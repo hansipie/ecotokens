@@ -72,5 +72,6 @@ pub fn handle_glob(filenames: &str) -> PostFilterResult {
         output,
         tokens_before,
         tokens_after,
+        content_before: filenames.to_string(),
     }
 }

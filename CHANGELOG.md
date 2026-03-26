@@ -9,10 +9,14 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ### Added
 - Claude Code `PostToolUse` hook support for native tool result optimization
-- Specialized filters for `read_file`, `grep_search`, and `glob` tool results in Claude Code
+- Specialized handlers for `Read`, `Grep`, and `Glob` native tool results
 - `ecotokens hook-post` command for tool result interception
+- `CommandFamily::NativeRead` for tracking Read tool interceptions in metrics
 - Option to disable metrics collection via configuration (`disable-metrics`)
 - `--all-time` flag for `ecotokens clear` command to reset historical savings
+
+### Fixed
+- `by_family` report keys now use serde `snake_case` serialization instead of Debug format, fixing `"nativeread"` being emitted instead of `"native_read"`
 
 ## [0.8.0] - 2026-03-23
 

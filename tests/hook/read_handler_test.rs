@@ -72,6 +72,7 @@ fn read_indexed_file_returns_filtered_or_passthrough() {
             output,
             tokens_before,
             tokens_after,
+            ..
         } => {
             assert!(!output.is_empty(), "outline output should not be empty");
             assert!(tokens_before > 0, "tokens_before should be positive");

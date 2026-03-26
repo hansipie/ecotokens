@@ -534,7 +534,7 @@ fn render_project_log_panel(
         .iter()
         .map(|item| {
             let ts = item.timestamp.get(..16).unwrap_or(&item.timestamp);
-            let cmd: String = item.command.chars().take(30).collect();
+            let cmd = truncate_cmd(&item.command, 30);
             let sign = if item.savings_pct >= 0.0 { '-' } else { '+' };
             let abs_pct = item.savings_pct.abs();
             let text = format!(
@@ -603,6 +603,24 @@ fn render_detail(
 
 fn is_binary(s: &str) -> bool {
     s.contains('\x00')
+}
+
+/// Truncate a command string to `max` chars, showing `…` + tail when longer.
+fn truncate_cmd(s: &str, max: usize) -> String {
+    let chars: Vec<char> = s.chars().collect();
+    if chars.len() <= max {
+        chars.into_iter().collect()
+    } else {
+        let tail: String = chars[chars.len() - (max - 1)..].iter().collect();
+        format!("\u{2026}{tail}")
+    }
+}
+
+fn extract_outline_path(content_after: &str) -> Option<&str> {
+    content_after
+        .lines()
+        .next()
+        .and_then(|line| line.strip_prefix("[ecotokens outline] "))
 }
 
 fn wrap_plain_lines(text: &str, width: usize) -> Vec<String> {
@@ -710,7 +728,22 @@ fn render_diff_panel(
     item: &Interception,
     history_scroll: &mut usize,
 ) {
-    let cmd_short: String = item.command.chars().take(40).collect();
+    let cmd_short: String = if name == "native_read" {
+        item.content_after
+            .as_deref()
+            .and_then(extract_outline_path)
+            .map(|p| {
+                let max = 40usize;
+                if p.len() > max {
+                    format!("…{}", &p[p.len() - max..])
+                } else {
+                    p.to_string()
+                }
+            })
+            .unwrap_or_else(|| item.command.chars().take(40).collect())
+    } else {
+        item.command.chars().take(40).collect()
+    };
     let ts_short = item.timestamp.get(..16).unwrap_or(&item.timestamp);
     let block = Block::default().borders(Borders::ALL).title(format!(
         " Diff : {name} · {cmd_short} · {}→{} tok ({}{:.0}%) · {ts_short}  [d] log ",
@@ -832,7 +865,7 @@ fn render_log_panel(
         .iter()
         .map(|item| {
             let ts = item.timestamp.get(..16).unwrap_or(&item.timestamp);
-            let cmd: String = item.command.chars().take(30).collect();
+            let cmd = truncate_cmd(&item.command, 30);
             let sign = if item.savings_pct >= 0.0 { '-' } else { '+' };
             let abs_pct = item.savings_pct.abs();
             let text = format!(

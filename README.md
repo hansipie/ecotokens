@@ -21,7 +21,9 @@ Token-saving companion for [Claude Code](https://claude.ai/code), [Gemini CLI](h
 
 ## How it works
 
-ecotokens installs as a hook that fires before every shell command. When the AI runs a shell command, ecotokens:
+ecotokens installs hooks that intercept tool outputs before they reach the model. Two interception points are supported:
+
+**PreToolUse / BeforeTool** — fires before every shell (`Bash`) command:
 
 1. Runs the command and captures its output
 2. Applies a family-specific filter (git, cargo, python, …)
@@ -29,7 +31,14 @@ ecotokens installs as a hook that fires before every shell command. When the AI 
 4. Returns the compressed output to the model
 5. Records the before/after token counts in a local metrics store
 
-Claude Code uses the `PreToolUse` hook (`~/.claude/settings.json`). Gemini CLI uses the `BeforeTool` hook (`~/.gemini/settings.json`). Qwen Code uses the `PreToolUse` hook (`~/.qwen/settings.json`).
+**PostToolUse** *(Claude Code only)* — fires after native tool calls (`Read`, `Grep`, `Glob`):
+
+1. Intercepts the tool result before it enters the context window
+2. Applies a specialized filter (outline for source files, grep result trimming, glob path denoising)
+3. Returns the compressed result to the model
+4. Records the savings under the `native_read`, `grep`, or `fs` family
+
+Claude Code uses the `PreToolUse` + `PostToolUse` hooks (`~/.claude/settings.json`). Gemini CLI uses the `BeforeTool` hook (`~/.gemini/settings.json`). Qwen Code uses the `PreToolUse` hook (`~/.qwen/settings.json`).
 
 For a focused view of the runtime path, see [`docs/hook-filter-metrics-flow.md`](docs/hook-filter-metrics-flow.md).
 
@@ -120,9 +129,10 @@ ecotokens uninstall --target all       # all targets
 
 | Command | Description |
 |---------|-------------|
-| `ecotokens install` | Install the PreToolUse hook in `~/.claude/settings.json` |
-| `ecotokens uninstall` | Remove the hook |
+| `ecotokens install` | Install the PreToolUse + PostToolUse hooks in `~/.claude/settings.json` |
+| `ecotokens uninstall` | Remove the hooks |
 | `ecotokens filter -- CMD [ARGS]` | Run a command, filter its output, record metrics |
+| `ecotokens hook-post` | PostToolUse handler — intercept native tool results (Read, Grep, Glob) |
 | `ecotokens gain` | Interactive TUI dashboard — savings by family or project |
 | `ecotokens gain --period PERIOD` | Filter TUI to a time window (`all`, `today`, `week`, `month`) |
 | `ecotokens gain --history` | Print a savings summary table for 24h / 7 days / 30 days |
@@ -253,6 +263,7 @@ ai_summary_url        : http://localhost:11434 (default)
 | `markdown` | `.md` files |
 | `config` | `.toml`, `.json`, `.yaml` |
 | `generic` | Everything else (truncated to 200 lines / 50 KB) |
+| `native_read` | Claude Code `Read` tool results (PostToolUse, outline-based compression) |
 
 ## Embeddings (optional)
 

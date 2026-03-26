@@ -40,6 +40,7 @@ pub enum PostFilterResult {
         output: String,
         tokens_before: u32,
         tokens_after: u32,
+        content_before: String,
     },
     Passthrough,
 }
@@ -115,6 +116,19 @@ fn extract_glob_filenames(tool_response: &serde_json::Value) -> String {
     String::new()
 }
 
+pub fn metrics_command(input: &PostHookInput) -> String {
+    if input.tool_name == "Read" {
+        if let Some(file_path) = input.tool_input.get("file_path").and_then(|v| v.as_str()) {
+            let trimmed = file_path.trim();
+            if !trimmed.is_empty() {
+                return format!("Read {trimmed}");
+            }
+        }
+    }
+
+    input.tool_name.clone()
+}
+
 pub fn handle_post() {
     let settings = Settings::load();
     let depth = settings.post_hook_depth;
@@ -140,6 +154,7 @@ pub fn handle_post() {
             output,
             tokens_before,
             tokens_after,
+            content_before,
         } => {
             // Record metrics
             let mode = if tokens_after < tokens_before {
@@ -148,7 +163,7 @@ pub fn handle_post() {
                 FilterMode::Passthrough
             };
             let interception = Interception::new(
-                input.tool_name.clone(),
+                metrics_command(&input),
                 family,
                 input.cwd.clone(),
                 *tokens_before,
@@ -156,8 +171,8 @@ pub fn handle_post() {
                 mode,
                 false,
                 0,
-                None,
-                None,
+                Some(content_before.clone()),
+                Some(output.clone()),
             )
             .with_hook_type(HookType::PostToolUse);
 

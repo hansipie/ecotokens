@@ -135,12 +135,14 @@ pub fn handle_read(file_path: &str, content: &str, depth: u32) -> PostFilterResu
             output: outline_enriched,
             tokens_before,
             tokens_after: tokens_enriched,
+            content_before: content.to_string(),
         }
     } else if tokens_outline < tokens_before {
         PostFilterResult::Filtered {
             output: outline_only,
             tokens_before,
             tokens_after: tokens_outline,
+            content_before: content.to_string(),
         }
     } else {
         PostFilterResult::Passthrough

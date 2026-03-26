@@ -133,12 +133,14 @@ pub fn handle_grep(output: &str, depth: u32) -> PostFilterResult {
             output: enriched,
             tokens_before,
             tokens_after: tokens_enriched,
+            content_before: output.to_string(),
         }
     } else {
         PostFilterResult::Filtered {
             output: compacted,
             tokens_before,
             tokens_after: tokens_compacted,
+            content_before: output.to_string(),
         }
     }
 }
