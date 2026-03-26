@@ -137,7 +137,7 @@ pub fn sorted_family_keys_for_project(items: &[Interception], project: &str) -> 
 /// Render the gain dashboard:
 ///   - top:    summary stats (interceptions, tokens, savings %, cost USD)
 ///   - middle: one Gauge per command family, sorted by savings desc
-///   - detail: last interception content for selected family (split or diff)
+///   - detail: last interception details for selected family (command, diff, or log)
 ///   - bottom: Sparkline of tokens saved (adaptive width — one column per day)
 #[allow(clippy::too_many_arguments)]
 pub fn render_gain(
@@ -597,7 +597,7 @@ fn render_detail(
     if detail_mode == DetailMode::Diff {
         render_diff_panel(frame, area, name, item, history_scroll);
     } else {
-        render_split_panel(frame, area, name, item);
+        render_split_panel(frame, area, name, item, history_scroll);
     }
 }
 
@@ -605,72 +605,102 @@ fn is_binary(s: &str) -> bool {
     s.contains('\x00')
 }
 
-fn render_split_panel(frame: &mut Frame, area: Rect, name: &str, item: &Interception) {
-    let cmd_short: String = item.command.chars().take(40).collect();
-    let ts_short = item.timestamp.get(..16).unwrap_or(&item.timestamp);
-    let block = Block::default().borders(Borders::ALL).title(format!(
-        " Detail: {name} · {cmd_short} · {ts_short}  [d] diff "
-    ));
-
-    // Before (top)
-    let before_text = item.content_before.as_deref().unwrap_or("");
-    let after_text = item.content_after.as_deref().unwrap_or("");
-
-    if is_binary(before_text) || is_binary(after_text) {
-        let p = Paragraph::new("Binary content — diff not available.")
-            .block(block)
-            .style(Style::default().fg(Color::DarkGray));
-        frame.render_widget(p, area);
-        return;
+fn wrap_plain_lines(text: &str, width: usize) -> Vec<String> {
+    if width == 0 {
+        return vec![];
     }
 
-    let inner = block.inner(area);
-    frame.render_widget(block, area);
+    let mut wrapped = Vec::new();
+    for raw_line in text.lines() {
+        let chars: Vec<char> = raw_line.chars().collect();
+        if chars.is_empty() {
+            wrapped.push(String::new());
+            continue;
+        }
 
-    let halves = Layout::default()
-        .direction(Direction::Vertical)
-        .constraints([Constraint::Percentage(50), Constraint::Percentage(50)])
-        .split(inner);
+        for chunk in chars.chunks(width) {
+            wrapped.push(chunk.iter().collect());
+        }
+    }
 
-    let mut before_lines: Vec<Line> = vec![Line::from(Span::styled(
-        format!("▲ before · {} tok", item.tokens_before),
+    if text.is_empty() {
+        wrapped.push(String::new());
+    }
+
+    wrapped
+}
+
+fn render_split_panel(
+    frame: &mut Frame,
+    area: Rect,
+    name: &str,
+    item: &Interception,
+    history_scroll: &mut usize,
+) {
+    let ts_short = item.timestamp.get(..16).unwrap_or(&item.timestamp);
+    let visible = area.height.saturating_sub(2) as usize;
+    let available_width = area.width.saturating_sub(2).max(1) as usize;
+
+    let project = item.git_root.as_deref().map(project_label);
+    let mut lines = vec![Line::from(Span::styled(
+        "Command",
         Style::default()
-            .fg(Color::DarkGray)
+            .fg(Color::Cyan)
             .add_modifier(Modifier::BOLD),
     ))];
-    before_lines.extend(before_text.lines().map(|l| {
-        Line::from(Span::styled(
-            l.to_string(),
-            Style::default().fg(Color::DarkGray),
-        ))
-    }));
-    frame.render_widget(
-        Paragraph::new(before_lines).wrap(Wrap { trim: false }),
-        halves[0],
+    lines.extend(
+        wrap_plain_lines(item.command.as_str(), available_width)
+            .into_iter()
+            .map(|line| Line::from(Span::styled(line, Style::default().fg(Color::Yellow)))),
     );
+    lines.extend([
+        Line::from(""),
+        Line::from(vec![
+            Span::styled("Tokens: ", Style::default().fg(Color::Cyan)),
+            Span::raw(format!(
+                "{} → {}  ({}{:.1}%)",
+                item.tokens_before,
+                item.tokens_after,
+                if item.savings_pct >= 0.0 { '-' } else { '+' },
+                item.savings_pct.abs()
+            )),
+        ]),
+    ]);
 
-    // After (bottom)
-    let mut after_lines: Vec<Line> = vec![Line::from(Span::styled(
-        format!(
-            "▼ after  · {} tok  ({}{:.0}%)",
-            item.tokens_after,
-            if item.savings_pct >= 0.0 { '-' } else { '+' },
-            item.savings_pct.abs()
-        ),
-        Style::default()
-            .fg(Color::Green)
-            .add_modifier(Modifier::BOLD),
-    ))];
-    after_lines.extend(after_text.lines().map(|l| {
-        Line::from(Span::styled(
-            l.to_string(),
-            Style::default().fg(Color::Green),
-        ))
-    }));
-    frame.render_widget(
-        Paragraph::new(after_lines).wrap(Wrap { trim: false }),
-        halves[1],
-    );
+    if let Some(project) = project {
+        lines.push(Line::from(vec![
+            Span::styled("Project: ", Style::default().fg(Color::Cyan)),
+            Span::raw(project),
+        ]));
+    }
+
+    lines.push(Line::from(vec![
+        Span::styled("Mode: ", Style::default().fg(Color::Cyan)),
+        Span::raw(match item.mode {
+            crate::metrics::store::FilterMode::Filtered => "filtered",
+            crate::metrics::store::FilterMode::Passthrough => "passthrough",
+            crate::metrics::store::FilterMode::Summarized => "summarized",
+        }),
+        Span::raw(format!("  Duration: {} ms", item.duration_ms)),
+    ]));
+
+    let max_scroll = lines.len().saturating_sub(visible);
+    *history_scroll = (*history_scroll).min(max_scroll);
+    let scroll = *history_scroll;
+    let scroll_hint = if lines.len() > visible {
+        format!("[{}/{}]  [i/k]  [d] diff ", scroll + 1, lines.len())
+    } else {
+        format!("{} lines  [i/k] scroll  [d] diff ", lines.len())
+    };
+    let block = Block::default()
+        .borders(Borders::ALL)
+        .title(format!(" Detail: {name} · {ts_short} · {scroll_hint}"));
+
+    let p = Paragraph::new(lines)
+        .block(block)
+        .scroll((scroll as u16, 0))
+        .wrap(Wrap { trim: false });
+    frame.render_widget(p, area);
 }
 
 fn render_diff_panel(
@@ -788,9 +818,9 @@ fn render_log_panel(
     let history: Vec<&Interception> = history.into_iter().skip(scroll).take(visible).collect();
 
     let scroll_hint = if n > visible {
-        format!("[{}/{}]  [i/k]  [d] split ", scroll + 1, n)
+        format!("[{}/{}]  [i/k]  [d] detail ", scroll + 1, n)
     } else {
-        format!("{} entries  [d] split ", n)
+        format!("{} entries  [d] detail ", n)
     };
     let block = Block::default()
         .borders(Borders::ALL)

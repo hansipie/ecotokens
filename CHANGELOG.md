@@ -5,6 +5,31 @@ All notable changes to this project will be documented in this file.
 The format is based on [Keep a Changelog](https://keepachangelog.com/en/1.0.0/),
 and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0.html).
 
+## [Unreleased]
+
+### Added
+- Claude Code `PostToolUse` hook support for native tool result optimization
+- Specialized filters for `read_file`, `grep_search`, and `glob` tool results in Claude Code
+- `ecotokens hook-post` command for tool result interception
+- Option to disable metrics collection via configuration (`disable-metrics`)
+- `--all-time` flag for `ecotokens clear` command to reset historical savings
+
+## [0.8.0] - 2026-03-23
+
+### Added
+- Qwen Code support (PreToolUse, MCP, session hooks)
+- `ecotokens install qwen` and `ecotokens uninstall qwen` commands
+- `tiktoken-rs` integration (cl100k_base) for exact token counting (feature-flagged `exact-tokens`, falls back to heuristic by default)
+- Co-authored by Qwen-Coder for Alibaba Cloud Qwen-Coder ecosystem support
+
+### Fixed
+- TUI cleanup order: `disable_raw_mode` now executed after `LeaveAlternateScreen` to prevent terminal corruption
+- Clear terminal and restore cursor around symbol selection view
+
+### Docs
+- Added Product Hunt featured badge to README (#30)
+- Fixed malformed del tags in auto-watch section of README (#29)
+
 ## [0.7.0] - 2026-03-22
 
 ### Added
@@ -85,6 +110,8 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 - `ecotokens install` / `uninstall` / `config` commands
 - MIT license
 
+[Unreleased]: https://github.com/hansipie/ecotokens/compare/v0.8.0...HEAD
+[0.8.0]: https://github.com/hansipie/ecotokens/releases/tag/v0.8.0
 [0.7.0]: https://github.com/hansipie/ecotokens/releases/tag/v0.7.0
 [0.6.0]: https://github.com/hansipie/ecotokens/releases/tag/v0.6.0
 [0.5.0]: https://github.com/hansipie/ecotokens/releases/tag/v0.5.0

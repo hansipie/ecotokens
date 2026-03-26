@@ -42,6 +42,8 @@ enum Commands {
     HookGemini,
     /// Intercept a Qwen Code tool call via PreToolUse hook (reads JSON from stdin)
     HookQwen,
+    /// Intercept a native Claude Code tool result via PostToolUse hook (reads JSON from stdin)
+    HookPost,
     /// Execute a command, filter its output, record metrics
     Filter {
         #[arg(last = true)]
@@ -518,11 +520,8 @@ fn cmd_gain(period: String, json: bool, model: Option<String>, history: bool) {
                                 _ => {}
                             }
                         }
-                        // i/k scroll the history panel in Family Log or Diff mode.
-                        if gain_mode == tui::gain::GainMode::Family
-                            && (detail_mode == tui::gain::DetailMode::Log
-                                || detail_mode == tui::gain::DetailMode::Diff)
-                        {
+                        // i/k scroll the active detail panel in Family mode.
+                        if gain_mode == tui::gain::GainMode::Family {
                             match key.code {
                                 KeyCode::Char('k') => {
                                     history_scroll = history_scroll.saturating_add(1);
@@ -605,6 +604,15 @@ fn cmd_install(target: String, ai_summary: bool, ai_summary_model: Option<String
             }
             Err(e) => {
                 eprintln!("install error (claude): {e}");
+                std::process::exit(1);
+            }
+        }
+        match install::install_post_hook(&claude_path) {
+            Ok(()) => {
+                println!("ecotokens post-hook installed → {}", claude_path.display());
+            }
+            Err(e) => {
+                eprintln!("install error (post hook): {e}");
                 std::process::exit(1);
             }
         }
@@ -1773,6 +1781,7 @@ fn main() {
         Commands::Hook => hook::handle(),
         Commands::HookGemini => hook::handle_gemini(),
         Commands::HookQwen => hook::handle_qwen(),
+        Commands::HookPost => hook::handle_post(),
         Commands::Filter { args, debug } => cmd_filter(args, debug),
         Commands::Gain {
             period,

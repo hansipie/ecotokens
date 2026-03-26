@@ -299,6 +299,8 @@ fn gain_detail_no_content_shows_fallback() {
 #[test]
 fn gain_detail_with_content_renders_text() {
     let mut item = make_interception(1000, 400, CommandFamily::Git);
+    item.command =
+        "git diff -- src/tui/gain.rs --word-diff --stat --unified=20 --find-renames".to_string();
     item.content_before = Some("diff --git a/foo.rs b/foo.rs".to_string());
     item.content_after = Some("summary: 1 file changed".to_string());
     let items = vec![item];
@@ -314,6 +316,15 @@ fn gain_detail_with_content_renders_text() {
     assert!(
         content.contains("diff") || content.contains("summary") || content.contains("foo"),
         "detail panel should render content text: {content:?}"
+    );
+    assert!(
+        content
+            .contains("git diff -- src/tui/gain.rs --word-diff --stat --unified=20 --find-renames"),
+        "detail panel should render the full command: {content:?}"
+    );
+    assert!(
+        content.contains("[i/k]") || content.contains("i/k"),
+        "detail panel should show the scroll hint: {content:?}"
     );
 }
 
@@ -349,6 +360,49 @@ fn gain_diff_mode_renders_diff_markers() {
     assert!(
         content.contains("Diff"),
         "diff mode should show 'Diff' in panel title: {content:?}"
+    );
+}
+
+#[test]
+fn gain_detail_mode_supports_scroll() {
+    let mut item = make_interception(1000, 400, CommandFamily::Git);
+    item.command = (1..=24)
+        .map(|i| format!("segment-{i:02}"))
+        .collect::<Vec<_>>()
+        .join(" ");
+    item.content_before = Some("before".to_string());
+    item.content_after = Some("after".to_string());
+    let items = vec![item];
+    let report = aggregate(&items, Period::All, "sonnet");
+    let backend = TestBackend::new(48, 18);
+    let mut terminal = Terminal::new(backend).unwrap();
+    let mut scroll = 2;
+    terminal
+        .draw(|frame| {
+            render_gain(
+                frame,
+                frame.area(),
+                &report,
+                &items,
+                None,
+                GainMode::Family,
+                Default::default(),
+                Some(0),
+                DetailMode::Split,
+                None,
+                None,
+                &mut scroll,
+            )
+        })
+        .unwrap();
+    let content = buffer_text(&terminal);
+    assert!(
+        content.contains("segment-11") || content.contains("segment-12"),
+        "scrolled detail should show later command segments: {content:?}"
+    );
+    assert!(
+        !content.contains("Command"),
+        "scrolled detail should move past the header line: {content:?}"
     );
 }
 

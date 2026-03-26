@@ -57,7 +57,7 @@ pub fn filter_grep(output: &str) -> String {
     result.join("\n")
 }
 
-fn parse_grep_line(line: &str) -> Option<(String, (Option<usize>, String))> {
+pub fn parse_grep_line(line: &str) -> Option<(String, (Option<usize>, String))> {
     // Try "file:line:content" first
     let parts: Vec<&str> = line.splitn(3, ':').collect();
     if parts.len() >= 3 {

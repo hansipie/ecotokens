@@ -312,7 +312,17 @@ Filtering is aggressive on noise, conservative on signal:
 - **Errors are always preserved** — `error[`, `FAILED`, `E   ` (pytest), `--- FAIL:` (Go), stack traces and panic messages are never removed
 - **Failure sections are fully kept** — structured blocks (`=== FAILURES ===`, `failures:`, failure diffs) are always passed through in their entirety
 - **Conservative fallback** — if a family filter doesn't improve the output (filtered ≥ original), the original is returned as-is
-- **Secrets are redacted before filtering** — AWS keys, GitHub PATs, Bearer tokens, PEM private keys, `.env` secrets, JWTs, and URL credentials are replaced with `[REDACTED]` placeholders before any content reaches the model
+- **Secrets are redacted before filtering** — sensitive values are detected and replaced before any content reaches the model:
+
+  | Pattern | Replaced by |
+  |---|---|
+  | AWS Access Key (`AKIA…`) | `[AWS_KEY]` |
+  | GitHub PAT (`ghp_…`) | `[GITHUB_TOKEN]` |
+  | Bearer token | `[BEARER_TOKEN]` |
+  | PEM private key | `[PRIVATE_KEY]` |
+  | `.env` secrets (`SECRET=`, `TOKEN=`, `API_KEY=`…) | `[REDACTED]` |
+  | JWT token | `[JWT_TOKEN]` |
+  | URL credentials (`user:pass@host`) | `[CREDENTIALS]` |
 - **UTF-8 safe truncation** — truncation always happens at character boundaries, never mid-codepoint
 - **Head + tail preservation** — when generic truncation applies, the first and last 20 lines are always kept (start context + end result)
 
