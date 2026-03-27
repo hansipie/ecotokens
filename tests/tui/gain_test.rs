@@ -333,7 +333,7 @@ fn gain_detail_with_content_renders_text() {
         "detail panel should render the command: {content:?}"
     );
     assert!(
-        content.contains("[i/k]") || content.contains("i/k"),
+        content.contains("[o/l]") || content.contains("o/l"),
         "detail panel should show the scroll hint: {content:?}"
     );
 }

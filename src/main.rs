@@ -513,26 +513,36 @@ fn cmd_gain(period: String, json: bool, model: Option<String>, history: bool) {
                                     });
                                     history_scroll = 0;
                                 }
-                                KeyCode::Char('k') => {
+                                KeyCode::Char('l') => {
                                     history_scroll = history_scroll.saturating_add(1);
                                 }
-                                KeyCode::Char('i') => {
+                                KeyCode::Char('o') => {
                                     history_scroll = history_scroll.saturating_sub(1);
                                 }
                                 _ => {}
                             }
                         }
-                        // i/k scroll the active detail panel in Family mode.
+                        // o/l scroll the active detail panel in Family mode.
                         if gain_mode == tui::gain::GainMode::Family {
                             match key.code {
-                                KeyCode::Char('k') => {
+                                KeyCode::Char('l') => {
                                     history_scroll = history_scroll.saturating_add(1);
                                 }
-                                KeyCode::Char('i') => {
+                                KeyCode::Char('o') => {
                                     history_scroll = history_scroll.saturating_sub(1);
                                 }
                                 _ => {}
                             }
+                        }
+                        // i/k scroll the History panel (log_scroll) in both modes.
+                        match key.code {
+                            KeyCode::Char('k') => {
+                                log_scroll = log_scroll.saturating_add(1);
+                            }
+                            KeyCode::Char('i') => {
+                                log_scroll = log_scroll.saturating_sub(1);
+                            }
+                            _ => {}
                         }
                         if gain_mode == tui::gain::GainMode::Project
                             && key.code == KeyCode::Enter

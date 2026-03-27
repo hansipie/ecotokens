@@ -733,9 +733,9 @@ fn render_split_panel(
     *history_scroll = (*history_scroll).min(max_scroll);
     let scroll = *history_scroll;
     let scroll_hint = if lines.len() > visible {
-        format!("[{}/{}]  [i/k]  [d] diff ", scroll + 1, lines.len())
+        format!("[{}/{}]  [o/l]  [d] diff ", scroll + 1, lines.len())
     } else {
-        format!("{} lines  [i/k] scroll  [d] diff ", lines.len())
+        format!("{} lines  [o/l] scroll  [d] diff ", lines.len())
     };
     let block = Block::default()
         .borders(Borders::ALL)
@@ -772,27 +772,24 @@ fn render_diff_panel(
         item.command.chars().take(40).collect()
     };
     let ts_short = item.timestamp.get(..16).unwrap_or(&item.timestamp);
-    let block = Block::default().borders(Borders::ALL).title(format!(
-        " Diff : {name} · {cmd_short} · {}→{} tok ({}{:.0}%) · {ts_short}  [d] log ",
-        item.tokens_before,
-        item.tokens_after,
-        if item.savings_pct >= 0.0 { '-' } else { '+' },
-        item.savings_pct.abs(),
-    ));
 
     let before_text = item.content_before.as_deref().unwrap_or("");
     let after_text = item.content_after.as_deref().unwrap_or("");
 
     if is_binary(before_text) || is_binary(after_text) {
+        let block = Block::default().borders(Borders::ALL).title(format!(
+            " Diff : {name} · {cmd_short} · {}→{} tok ({}{:.0}%) · {ts_short}  [d] log ",
+            item.tokens_before,
+            item.tokens_after,
+            if item.savings_pct >= 0.0 { '-' } else { '+' },
+            item.savings_pct.abs(),
+        ));
         let p = Paragraph::new("Binary content — diff not available.")
             .block(block)
             .style(Style::default().fg(Color::DarkGray));
         frame.render_widget(p, area);
         return;
     }
-
-    let inner = block.inner(area);
-    frame.render_widget(block, area);
 
     let diff = TextDiff::from_lines(before_text, after_text);
 
@@ -838,11 +835,28 @@ fn render_diff_panel(
         )));
     }
 
+    // Build block after computing lines so scroll hint can be included.
     let n = lines.len();
-    let visible = inner.height as usize;
+    // Use a temporary block to compute inner height for visible calculation.
+    let tmp_block = Block::default().borders(Borders::ALL);
+    let visible = tmp_block.inner(area).height as usize;
     let max_scroll = n.saturating_sub(visible);
     *history_scroll = (*history_scroll).min(max_scroll);
     let scroll = *history_scroll;
+    let scroll_hint = if n > visible {
+        format!("[{}/{}]  [o/l]  [d] log ", scroll + 1, n)
+    } else {
+        format!("{n} lines  [o/l] scroll  [d] log ")
+    };
+    let block = Block::default().borders(Borders::ALL).title(format!(
+        " Diff : {name} · {cmd_short} · {}→{} tok ({}{:.0}%) · {ts_short} · {scroll_hint}",
+        item.tokens_before,
+        item.tokens_after,
+        if item.savings_pct >= 0.0 { '-' } else { '+' },
+        item.savings_pct.abs(),
+    ));
+    let inner = block.inner(area);
+    frame.render_widget(block, area);
 
     frame.render_widget(
         Paragraph::new(lines)
