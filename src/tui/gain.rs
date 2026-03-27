@@ -154,6 +154,7 @@ pub fn render_gain(
     project_filter: Option<&str>,
     history_scroll: &mut usize,
     log_scroll: &mut usize,
+    log_selected: Option<usize>,
     gauge_scroll: &mut usize,
 ) {
     // Outer layout: stats | pool(family+detail) | sparkline
@@ -181,8 +182,20 @@ pub fn render_gain(
             .direction(Direction::Horizontal)
             .constraints([Constraint::Percentage(50), Constraint::Percentage(50)])
             .split(pool[1]);
-        render_project_log_panel(frame, bottom[0], sel_proj, items, log_scroll);
-        frame.render_widget(Block::default().borders(Borders::ALL), bottom[1]);
+        render_project_log_panel(frame, bottom[0], sel_proj, items, log_scroll, log_selected);
+        let effective_detail = if detail_mode == DetailMode::Log {
+            DetailMode::Split
+        } else {
+            detail_mode
+        };
+        render_project_detail(
+            frame,
+            bottom[1],
+            sel_proj,
+            items,
+            effective_detail,
+            history_scroll,
+        );
         render_sparkline(frame, outer[2], items, sparkline_mode);
         return;
     }
@@ -222,7 +235,14 @@ pub fn render_gain(
         .constraints([Constraint::Percentage(50), Constraint::Percentage(50)])
         .split(pool[1]);
 
-    render_log_panel(frame, bottom[0], sel_name, display_items, log_scroll);
+    render_log_panel(
+        frame,
+        bottom[0],
+        sel_name,
+        display_items,
+        log_scroll,
+        log_selected,
+    );
 
     // En mode Log, l'historique est déjà à gauche — fallback vers Split à droite
     let effective_detail = if detail_mode == DetailMode::Log {
@@ -545,6 +565,7 @@ fn render_project_log_panel(
     project_name: Option<&str>,
     items: &[Interception],
     history_scroll: &mut usize,
+    selected: Option<usize>,
 ) {
     let Some(name) = project_name else {
         let block = Block::default()
@@ -571,6 +592,7 @@ fn render_project_log_panel(
         &format!(" Project history: {label}"),
         filtered,
         history_scroll,
+        selected,
         "",
     );
 }
@@ -597,7 +619,7 @@ fn render_detail(
     };
 
     if detail_mode == DetailMode::Log {
-        render_log_panel(frame, area, Some(name), items, history_scroll);
+        render_log_panel(frame, area, Some(name), items, history_scroll, None);
         return;
     }
 
@@ -625,6 +647,49 @@ fn render_detail(
         render_diff_panel(frame, area, name, item, history_scroll);
     } else {
         render_split_panel(frame, area, name, item, history_scroll);
+    }
+}
+
+fn render_project_detail(
+    frame: &mut Frame,
+    area: Rect,
+    project_name: Option<&str>,
+    items: &[Interception],
+    detail_mode: DetailMode,
+    history_scroll: &mut usize,
+) {
+    let Some(name) = project_name else {
+        let block = Block::default().borders(Borders::ALL).title(" Detail ");
+        let p = Paragraph::new(Span::styled(
+            " j u: select a project  [d] diff  [b] families",
+            Style::default().fg(Color::DarkGray),
+        ))
+        .block(block);
+        frame.render_widget(p, area);
+        return;
+    };
+
+    let label = project_label(name);
+
+    let last = items.iter().rev().find(|i| {
+        let has_diff = i.content_before != i.content_after
+            && (i.content_before.is_some() || i.content_after.is_some());
+        matches_project(i, name) && has_diff
+    });
+
+    let Some(item) = last else {
+        let block = Block::default()
+            .borders(Borders::ALL)
+            .title(format!(" Detail: {label} "));
+        let p = Paragraph::new("No interception with differences for this project.").block(block);
+        frame.render_widget(p, area);
+        return;
+    };
+
+    if detail_mode == DetailMode::Diff {
+        render_diff_panel(frame, area, &label, item, history_scroll);
+    } else {
+        render_split_panel(frame, area, &label, item, history_scroll);
     }
 }
 
@@ -872,6 +937,7 @@ fn render_log_panel(
     name: Option<&str>,
     items: &[Interception],
     history_scroll: &mut usize,
+    selected: Option<usize>,
 ) {
     let Some(name) = name else {
         let block = Block::default().borders(Borders::ALL).title(" History ");
@@ -899,6 +965,7 @@ fn render_log_panel(
         &format!(" History: {name}"),
         filtered,
         history_scroll,
+        selected,
         "[d] detail ",
     );
 }
@@ -909,30 +976,36 @@ fn render_history_panel(
     title: &str,
     history: Vec<&Interception>,
     history_scroll: &mut usize,
+    selected: Option<usize>,
     extra_hint: &str,
 ) {
     let n = history.len();
     // How many rows fit inside the block (subtract 2 for borders).
     let visible = (area.height as usize).saturating_sub(2);
     let max_scroll = n.saturating_sub(visible);
-    *history_scroll = (*history_scroll).min(max_scroll);
+    // Clamp selected to valid range and use it to auto-scroll the view.
+    let clamped_selected = selected.map(|s| s.min(n.saturating_sub(1)));
+    adjust_gauge_scroll(history_scroll, clamped_selected, visible, max_scroll);
     let scroll = *history_scroll;
     let history: Vec<&Interception> = history.into_iter().skip(scroll).take(visible).collect();
 
-    let scroll_hint = if n > visible {
+    let hint = if let Some(sel) = clamped_selected {
+        format!("[{}/{}]  [i/k]  {extra_hint}", sel + 1, n)
+    } else if n > visible {
         format!("[{}/{}]  [i/k]  {extra_hint}", scroll + 1, n)
     } else {
         format!("{n} entries  {extra_hint}")
     };
     let block = Block::default()
         .borders(Borders::ALL)
-        .title(format!("{title} · {scroll_hint}"));
+        .title(format!("{title} · {hint}"));
     let inner = block.inner(area);
     frame.render_widget(block, area);
 
     let lines: Vec<Line> = history
         .iter()
-        .map(|item| {
+        .enumerate()
+        .map(|(idx, item)| {
             let ts = item.timestamp.get(..16).unwrap_or(&item.timestamp);
             let cmd = truncate_cmd(&item.command, 30);
             let sign = if item.savings_pct >= 0.0 { '-' } else { '+' };
@@ -941,7 +1014,13 @@ fn render_history_panel(
                 "{ts:<16}  {cmd:<30}  {:>6} → {:>6}  {sign}{:.1}%",
                 item.tokens_before, item.tokens_after, abs_pct
             );
-            Line::from(Span::styled(text, Style::default().fg(Color::Green)))
+            let is_selected = clamped_selected.is_some_and(|s| s == scroll + idx);
+            let style = if is_selected {
+                Style::default().fg(Color::Black).bg(Color::Green)
+            } else {
+                Style::default().fg(Color::Green)
+            };
+            Line::from(Span::styled(text, style))
         })
         .collect();
 

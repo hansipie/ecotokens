@@ -405,6 +405,7 @@ fn cmd_gain(period: String, json: bool, model: Option<String>, history: bool) {
             let mut project_filter: Option<String> = None;
             let mut history_scroll: usize = 0;
             let mut log_scroll: usize = 0;
+            let mut log_selected: Option<usize> = None;
             let mut gauge_scroll: usize = 0;
             let mut last_reload = std::time::Instant::now();
             // Precomputed once at load time, updated only on reload.
@@ -441,6 +442,7 @@ fn cmd_gain(period: String, json: bool, model: Option<String>, history: bool) {
                         project_filter.as_deref(),
                         &mut history_scroll,
                         &mut log_scroll,
+                        log_selected,
                         &mut gauge_scroll,
                     );
                 });
@@ -454,17 +456,17 @@ fn cmd_gain(period: String, json: bool, model: Option<String>, history: bool) {
                             gain_mode = gain_mode.toggle();
                             history_scroll = 0;
                             log_scroll = 0;
+                            log_selected = None;
                             gauge_scroll = 0;
                         }
                         if key.code == KeyCode::Char('s') {
                             sparkline_mode = sparkline_mode.next();
                         }
-                        if key.code == KeyCode::Char('d')
-                            && gain_mode == tui::gain::GainMode::Family
-                        {
+                        if key.code == KeyCode::Char('d') {
                             detail_mode = detail_mode.toggle();
                             history_scroll = 0;
                             log_scroll = 0;
+                            log_selected = None;
                         }
                         if gain_mode == tui::gain::GainMode::Family && family_count > 0 {
                             match key.code {
@@ -474,6 +476,8 @@ fn cmd_gain(period: String, json: bool, model: Option<String>, history: bool) {
                                         Some(i) => (i + 1) % family_count,
                                     });
                                     history_scroll = 0;
+                                    log_scroll = 0;
+                                    log_selected = None;
                                 }
                                 KeyCode::Char('u') => {
                                     selected_family = Some(match selected_family {
@@ -487,6 +491,8 @@ fn cmd_gain(period: String, json: bool, model: Option<String>, history: bool) {
                                         }
                                     });
                                     history_scroll = 0;
+                                    log_scroll = 0;
+                                    log_selected = None;
                                 }
                                 _ => {}
                             }
@@ -499,6 +505,8 @@ fn cmd_gain(period: String, json: bool, model: Option<String>, history: bool) {
                                         Some(i) => (i + 1) % project_count,
                                     });
                                     history_scroll = 0;
+                                    log_scroll = 0;
+                                    log_selected = None;
                                 }
                                 KeyCode::Char('u') => {
                                     selected_project = Some(match selected_project {
@@ -512,6 +520,8 @@ fn cmd_gain(period: String, json: bool, model: Option<String>, history: bool) {
                                         }
                                     });
                                     history_scroll = 0;
+                                    log_scroll = 0;
+                                    log_selected = None;
                                 }
                                 KeyCode::Char('l') => {
                                     history_scroll = history_scroll.saturating_add(1);
@@ -534,13 +544,14 @@ fn cmd_gain(period: String, json: bool, model: Option<String>, history: bool) {
                                 _ => {}
                             }
                         }
-                        // i/k scroll the History panel (log_scroll) in both modes.
+                        // i/k move the selected line in the History panel.
                         match key.code {
                             KeyCode::Char('k') => {
-                                log_scroll = log_scroll.saturating_add(1);
+                                log_selected = Some(log_selected.map_or(0, |i| i + 1));
                             }
                             KeyCode::Char('i') => {
-                                log_scroll = log_scroll.saturating_sub(1);
+                                log_selected =
+                                    Some(log_selected.map_or(0, |i| i.saturating_sub(1)));
                             }
                             _ => {}
                         }

@@ -36,6 +36,7 @@ fn draw_gain(
                 None,
                 &mut 0,
                 &mut 0,
+                None,
                 &mut 0,
             )
         })
@@ -186,6 +187,7 @@ fn gain_renders_without_panic_on_empty_data() {
                 None,
                 &mut 0,
                 &mut 0,
+                None,
                 &mut 0,
             )
         })
@@ -226,6 +228,7 @@ fn gain_sparkline_present_adaptive() {
                 None,
                 &mut 0,
                 &mut 0,
+                None,
                 &mut 0,
             )
         })
@@ -263,6 +266,7 @@ fn gain_shows_family_breakdown() {
                 None,
                 &mut 0,
                 &mut 0,
+                None,
                 &mut 0,
             )
         })
@@ -297,6 +301,7 @@ fn gain_detail_no_content_shows_fallback() {
                 None,
                 &mut 0,
                 &mut 0,
+                None,
                 &mut 0,
             )
         })
@@ -363,6 +368,7 @@ fn gain_diff_mode_renders_diff_markers() {
                 None,
                 &mut 0,
                 &mut 0,
+                None,
                 &mut 0,
             )
         })
@@ -405,6 +411,7 @@ fn gain_detail_mode_supports_scroll() {
                 None,
                 &mut scroll,
                 &mut 0,
+                None,
                 &mut 0,
             )
         })
@@ -444,6 +451,7 @@ fn gain_log_mode_renders_history() {
                 None,
                 &mut 0,
                 &mut 0,
+                None,
                 &mut 0,
             )
         })
@@ -498,6 +506,7 @@ fn gain_project_log_mode_renders_history() {
                 None,
                 &mut 0,
                 &mut 0,
+                None,
                 &mut 0,
             )
         })
@@ -541,6 +550,7 @@ fn gain_project_history_panel_refreshes_between_draws() {
                 None,
                 &mut 0,
                 &mut 0,
+                None,
                 &mut 0,
             )
         })
@@ -570,6 +580,7 @@ fn gain_project_history_panel_refreshes_between_draws() {
                 None,
                 &mut 0,
                 &mut 0,
+                None,
                 &mut 0,
             )
         })
