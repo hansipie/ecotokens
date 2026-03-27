@@ -33,7 +33,10 @@ fn write_settings(path: &Path, v: &serde_json::Value) -> InstallResult {
     if let Some(parent) = path.parent() {
         std::fs::create_dir_all(parent)?;
     }
-    std::fs::write(path, serde_json::to_string_pretty(v).unwrap())
+    std::fs::write(
+        path,
+        serde_json::to_string_pretty(v).expect("serde_json: impossible (non-string key)"),
+    )
 }
 
 // ============================================================================
@@ -74,6 +77,7 @@ fn hook_entry(matcher: &str, command: &str) -> serde_json::Value {
 }
 
 /// Install a hook idempotently. Returns true if changed.
+#[must_use]
 fn install_hook_generic(
     v: &mut serde_json::Value,
     hook_type: &str,
@@ -128,8 +132,8 @@ fn remove_hook_generic(v: &mut serde_json::Value, hook_type: &str, command: &str
     changed
 }
 
-/// Remove MCP server entry. Returns true if changed.
-fn remove_mcp_server_generic(v: &mut serde_json::Value) -> bool {
+/// Remove the ecotokens MCP server entry. Returns true if changed.
+fn remove_ecotokens_mcp_server(v: &mut serde_json::Value) -> bool {
     if let Some(servers) = v["mcpServers"].as_object_mut() {
         return servers.remove("ecotokens").is_some();
     }
@@ -144,14 +148,14 @@ fn remove_mcp_server_generic(v: &mut serde_json::Value) -> bool {
 pub fn install_hook(settings_path: &Path, claude_json_path: &Path) -> InstallResult {
     let _ = claude_json_path; // kept for signature compatibility with uninstall callers
     let mut v = read_settings(settings_path);
-    install_hook_generic(&mut v, "PreToolUse", HOOK_MATCHER, HOOK_COMMAND);
+    let _ = install_hook_generic(&mut v, "PreToolUse", HOOK_MATCHER, HOOK_COMMAND);
     write_settings(settings_path, &v)
 }
 
 /// Install the PostToolUse hook for Read/Grep/Glob into settings.json (idempotent).
 pub fn install_post_hook(settings_path: &Path) -> InstallResult {
     let mut v = read_settings(settings_path);
-    install_hook_generic(&mut v, "PostToolUse", POST_HOOK_MATCHER, POST_HOOK_COMMAND);
+    let _ = install_hook_generic(&mut v, "PostToolUse", POST_HOOK_MATCHER, POST_HOOK_COMMAND);
     write_settings(settings_path, &v)
 }
 
@@ -176,7 +180,7 @@ pub fn uninstall_hook(settings_path: &Path, claude_json_path: &Path) -> InstallR
 
     if claude_json_path.exists() {
         let mut cv = read_settings(claude_json_path);
-        remove_mcp_server_generic(&mut cv);
+        remove_ecotokens_mcp_server(&mut cv);
         write_settings(claude_json_path, &cv)?;
     }
 
@@ -193,22 +197,16 @@ const SESSION_END_COMMAND: &str = "ecotokens session-end";
 /// Install SessionStart and SessionEnd hooks in ~/.claude/settings.json (idempotent).
 pub fn install_session_hooks(settings_path: &Path) -> InstallResult {
     let mut v = read_settings(settings_path);
-    install_hook_generic(&mut v, "SessionStart", "", SESSION_START_COMMAND);
-    install_hook_generic(&mut v, "SessionEnd", "", SESSION_END_COMMAND);
+    let _ = install_hook_generic(&mut v, "SessionStart", "", SESSION_START_COMMAND);
+    let _ = install_hook_generic(&mut v, "SessionEnd", "", SESSION_END_COMMAND);
     write_settings(settings_path, &v)
 }
 
 /// Check whether both session hooks are present in settings.json.
 pub fn are_session_hooks_installed(settings_path: &Path) -> bool {
-    has_hook_command(
-        &read_settings(settings_path),
-        "SessionStart",
-        SESSION_START_COMMAND,
-    ) && has_hook_command(
-        &read_settings(settings_path),
-        "SessionEnd",
-        SESSION_END_COMMAND,
-    )
+    let v = read_settings(settings_path);
+    has_hook_command(&v, "SessionStart", SESSION_START_COMMAND)
+        && has_hook_command(&v, "SessionEnd", SESSION_END_COMMAND)
 }
 
 /// Remove SessionStart and SessionEnd hooks from ~/.claude/settings.json (idempotent).
@@ -235,7 +233,7 @@ pub fn default_gemini_settings_path() -> Option<std::path::PathBuf> {
 /// Install the BeforeTool hook into ~/.gemini/settings.json (idempotent).
 pub fn install_gemini_hook(settings_path: &Path) -> InstallResult {
     let mut v = read_settings(settings_path);
-    install_hook_generic(
+    let _ = install_hook_generic(
         &mut v,
         "BeforeTool",
         "run_shell_command",
@@ -266,7 +264,7 @@ pub fn uninstall_gemini(settings_path: &Path) -> InstallResult {
 
     let mut v = read_settings(settings_path);
     remove_hook_generic(&mut v, "BeforeTool", GEMINI_HOOK_COMMAND);
-    remove_mcp_server_generic(&mut v);
+    remove_ecotokens_mcp_server(&mut v);
     write_settings(settings_path, &v)
 }
 
@@ -277,22 +275,16 @@ pub fn uninstall_gemini(settings_path: &Path) -> InstallResult {
 /// Install SessionStart and SessionEnd hooks in ~/.qwen/settings.json (idempotent).
 pub fn install_qwen_session_hooks(settings_path: &Path) -> InstallResult {
     let mut v = read_settings(settings_path);
-    install_hook_generic(&mut v, "SessionStart", "", SESSION_START_COMMAND);
-    install_hook_generic(&mut v, "SessionEnd", "", SESSION_END_COMMAND);
+    let _ = install_hook_generic(&mut v, "SessionStart", "", SESSION_START_COMMAND);
+    let _ = install_hook_generic(&mut v, "SessionEnd", "", SESSION_END_COMMAND);
     write_settings(settings_path, &v)
 }
 
 /// Check whether both session hooks are present in ~/.qwen/settings.json.
 pub fn are_qwen_session_hooks_installed(settings_path: &Path) -> bool {
-    has_hook_command(
-        &read_settings(settings_path),
-        "SessionStart",
-        SESSION_START_COMMAND,
-    ) && has_hook_command(
-        &read_settings(settings_path),
-        "SessionEnd",
-        SESSION_END_COMMAND,
-    )
+    let v = read_settings(settings_path);
+    has_hook_command(&v, "SessionStart", SESSION_START_COMMAND)
+        && has_hook_command(&v, "SessionEnd", SESSION_END_COMMAND)
 }
 
 /// Remove SessionStart and SessionEnd hooks from ~/.qwen/settings.json (idempotent).
@@ -318,7 +310,7 @@ pub fn default_qwen_settings_path() -> Option<std::path::PathBuf> {
 /// Install the PreToolUse hook into ~/.qwen/settings.json (idempotent).
 pub fn install_qwen_hook(settings_path: &Path) -> InstallResult {
     let mut v = read_settings(settings_path);
-    install_hook_generic(&mut v, "PreToolUse", "run_shell_command", QWEN_HOOK_COMMAND);
+    let _ = install_hook_generic(&mut v, "PreToolUse", "run_shell_command", QWEN_HOOK_COMMAND);
     write_settings(settings_path, &v)
 }
 
@@ -344,6 +336,6 @@ pub fn uninstall_qwen(settings_path: &Path) -> InstallResult {
 
     let mut v = read_settings(settings_path);
     remove_hook_generic(&mut v, "PreToolUse", QWEN_HOOK_COMMAND);
-    remove_mcp_server_generic(&mut v);
+    remove_ecotokens_mcp_server(&mut v);
     write_settings(settings_path, &v)
 }

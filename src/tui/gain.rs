@@ -305,6 +305,23 @@ fn render_stats(
 
 const GAUGE_MIN_HEIGHT: u16 = 2;
 
+/// Adjust scroll offset to keep `selected` visible in a window of `visible` items.
+fn adjust_gauge_scroll(
+    scroll: &mut usize,
+    selected: Option<usize>,
+    visible: usize,
+    max_scroll: usize,
+) {
+    if let Some(sel) = selected {
+        if sel < *scroll {
+            *scroll = sel;
+        } else if sel >= *scroll + visible {
+            *scroll = sel + 1 - visible;
+        }
+    }
+    *scroll = (*scroll).min(max_scroll);
+}
+
 fn render_families(
     frame: &mut Frame,
     area: Rect,
@@ -392,16 +409,7 @@ fn render_families(
     let inner = block.inner(area);
     let visible = ((inner.height / GAUGE_MIN_HEIGHT) as usize).max(1);
     let max_scroll = n.saturating_sub(visible);
-
-    // Auto-scroll to keep selection visible
-    if let Some(sel) = selected {
-        if sel < *gauge_scroll {
-            *gauge_scroll = sel;
-        } else if sel >= *gauge_scroll + visible {
-            *gauge_scroll = sel + 1 - visible;
-        }
-    }
-    *gauge_scroll = (*gauge_scroll).min(max_scroll);
+    adjust_gauge_scroll(gauge_scroll, selected, visible, max_scroll);
 
     let scroll = *gauge_scroll;
     let slice = &families[scroll..(scroll + visible).min(n)];
@@ -486,16 +494,7 @@ fn render_projects(
     let inner = block.inner(area);
     let visible = ((inner.height / GAUGE_MIN_HEIGHT) as usize).max(1);
     let max_scroll = n.saturating_sub(visible);
-
-    // Auto-scroll to keep selection visible
-    if let Some(sel) = selected {
-        if sel < *gauge_scroll {
-            *gauge_scroll = sel;
-        } else if sel >= *gauge_scroll + visible {
-            *gauge_scroll = sel + 1 - visible;
-        }
-    }
-    *gauge_scroll = (*gauge_scroll).min(max_scroll);
+    adjust_gauge_scroll(gauge_scroll, selected, visible, max_scroll);
 
     let scroll = *gauge_scroll;
     let slice = &projects[scroll..(scroll + visible).min(n)];

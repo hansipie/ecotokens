@@ -328,7 +328,8 @@ fn gain_detail_with_content_renders_text() {
         "detail panel should render content text: {content:?}"
     );
     assert!(
-        content.contains("git diff -- src/tui/gain.rs --word-diff"),
+        content
+            .contains("git diff -- src/tui/gain.rs --word-diff --stat --unified=20 --find-renames"),
         "detail panel should render the command: {content:?}"
     );
     assert!(
