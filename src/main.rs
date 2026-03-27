@@ -548,10 +548,12 @@ fn cmd_gain(period: String, json: bool, model: Option<String>, history: bool) {
                         match key.code {
                             KeyCode::Char('k') => {
                                 log_selected = Some(log_selected.map_or(0, |i| i + 1));
+                                history_scroll = 0;
                             }
                             KeyCode::Char('i') => {
                                 log_selected =
                                     Some(log_selected.map_or(0, |i| i.saturating_sub(1)));
+                                history_scroll = 0;
                             }
                             _ => {}
                         }
@@ -669,8 +671,8 @@ fn cmd_install(target: String, ai_summary: bool, ai_summary_model: Option<String
                     }
                 }
                 let settings = config::Settings::load();
-                if settings.auto_watch && !install::are_qwen_session_hooks_installed(p) {
-                    match install::install_qwen_session_hooks(p) {
+                if settings.auto_watch && !install::are_session_hooks_installed(p) {
+                    match install::install_session_hooks(p) {
                         Ok(()) => println!(
                             "ecotokens session hooks installed (Qwen Code) → {}",
                             p.display()
@@ -785,7 +787,7 @@ fn cmd_uninstall(target: String) {
             Some(ref p) => {
                 let had_hook = install::is_qwen_hook_installed(p);
                 let had_mcp = install::is_qwen_mcp_registered(p);
-                let had_session = install::are_qwen_session_hooks_installed(p);
+                let had_session = install::are_session_hooks_installed(p);
                 match install::uninstall_qwen(p) {
                     Ok(()) => {
                         if had_hook {
@@ -807,7 +809,7 @@ fn cmd_uninstall(target: String) {
                     }
                 }
                 if had_session {
-                    match install::uninstall_qwen_session_hooks(p) {
+                    match install::uninstall_session_hooks(p) {
                         Ok(()) => {
                             println!(
                                 "ecotokens session hooks removed (Qwen Code) ← {}",
@@ -1777,9 +1779,9 @@ fn cmd_auto_watch_enable() {
 
     if let Some(ref qwen_path) = install::default_qwen_settings_path() {
         if install::is_qwen_hook_installed(qwen_path)
-            && !install::are_qwen_session_hooks_installed(qwen_path)
+            && !install::are_session_hooks_installed(qwen_path)
         {
-            if let Err(e) = install::install_qwen_session_hooks(qwen_path) {
+            if let Err(e) = install::install_session_hooks(qwen_path) {
                 eprintln!("Error installing session hooks (qwen): {e}");
                 std::process::exit(1);
             }

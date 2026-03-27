@@ -182,7 +182,8 @@ pub fn render_gain(
             .direction(Direction::Horizontal)
             .constraints([Constraint::Percentage(50), Constraint::Percentage(50)])
             .split(pool[1]);
-        render_project_log_panel(frame, bottom[0], sel_proj, items, log_scroll, log_selected);
+        let selected_proj_item =
+            render_project_log_panel(frame, bottom[0], sel_proj, items, log_scroll, log_selected);
         let effective_detail = if detail_mode == DetailMode::Log {
             DetailMode::Split
         } else {
@@ -195,6 +196,7 @@ pub fn render_gain(
             items,
             effective_detail,
             history_scroll,
+            selected_proj_item,
         );
         render_sparkline(frame, outer[2], items, sparkline_mode);
         return;
@@ -235,7 +237,7 @@ pub fn render_gain(
         .constraints([Constraint::Percentage(50), Constraint::Percentage(50)])
         .split(pool[1]);
 
-    render_log_panel(
+    let selected_log_item = render_log_panel(
         frame,
         bottom[0],
         sel_name,
@@ -257,6 +259,7 @@ pub fn render_gain(
         display_items,
         effective_detail,
         history_scroll,
+        selected_log_item,
     );
     render_sparkline(frame, outer[2], items, sparkline_mode);
 }
@@ -559,14 +562,14 @@ fn render_projects(
     projects.iter().map(|(name, _)| name.to_string()).collect()
 }
 
-fn render_project_log_panel(
+fn render_project_log_panel<'a>(
     frame: &mut Frame,
     area: Rect,
     project_name: Option<&str>,
-    items: &[Interception],
+    items: &'a [Interception],
     history_scroll: &mut usize,
     selected: Option<usize>,
-) {
+) -> Option<&'a Interception> {
     let Some(name) = project_name else {
         let block = Block::default()
             .borders(Borders::ALL)
@@ -577,15 +580,19 @@ fn render_project_log_panel(
         ))
         .block(block);
         frame.render_widget(p, area);
-        return;
+        return None;
     };
 
     let label = project_label(name);
-    let filtered: Vec<&Interception> = items
+    let filtered: Vec<&'a Interception> = items
         .iter()
         .filter(|i| matches_project(i, name))
         .rev()
         .collect();
+    let n = filtered.len();
+    let selected_item = selected
+        .map(|s| s.min(n.saturating_sub(1)))
+        .and_then(|s| filtered.get(s).copied());
     render_history_panel(
         frame,
         area,
@@ -595,17 +602,19 @@ fn render_project_log_panel(
         selected,
         "",
     );
+    selected_item
 }
 
 // ── Detail panel ──────────────────────────────────────────────────────────────
 
-fn render_detail(
+fn render_detail<'a>(
     frame: &mut Frame,
     area: Rect,
     family_name: Option<&str>,
-    items: &[Interception],
+    items: &'a [Interception],
     detail_mode: DetailMode,
     history_scroll: &mut usize,
+    selected_item: Option<&'a Interception>,
 ) {
     let Some(name) = family_name else {
         let block = Block::default().borders(Borders::ALL).title(" Detail ");
@@ -623,18 +632,20 @@ fn render_detail(
         return;
     }
 
-    // Find last interception for this family with actual differences
-    let last = items.iter().rev().find(|i| {
-        let matches_family = serde_json::to_value(&i.command_family)
-            .ok()
-            .and_then(|v| v.as_str().map(|s| s == name))
-            .unwrap_or(false);
-        let has_diff = i.content_before != i.content_after
-            && (i.content_before.is_some() || i.content_after.is_some());
-        matches_family && has_diff
+    // Use the explicitly selected item if provided, otherwise fall back to the last with differences.
+    let item = selected_item.or_else(|| {
+        items.iter().rev().find(|i| {
+            let matches_family = serde_json::to_value(&i.command_family)
+                .ok()
+                .and_then(|v| v.as_str().map(|s| s == name))
+                .unwrap_or(false);
+            let has_diff = i.content_before != i.content_after
+                && (i.content_before.is_some() || i.content_after.is_some());
+            matches_family && has_diff
+        })
     });
 
-    let Some(item) = last else {
+    let Some(item) = item else {
         let block = Block::default()
             .borders(Borders::ALL)
             .title(format!(" Detail: {name} "));
@@ -650,13 +661,14 @@ fn render_detail(
     }
 }
 
-fn render_project_detail(
+fn render_project_detail<'a>(
     frame: &mut Frame,
     area: Rect,
     project_name: Option<&str>,
-    items: &[Interception],
+    items: &'a [Interception],
     detail_mode: DetailMode,
     history_scroll: &mut usize,
+    selected_item: Option<&'a Interception>,
 ) {
     let Some(name) = project_name else {
         let block = Block::default().borders(Borders::ALL).title(" Detail ");
@@ -671,13 +683,16 @@ fn render_project_detail(
 
     let label = project_label(name);
 
-    let last = items.iter().rev().find(|i| {
-        let has_diff = i.content_before != i.content_after
-            && (i.content_before.is_some() || i.content_after.is_some());
-        matches_project(i, name) && has_diff
+    // Use the explicitly selected item if provided, otherwise fall back to the last with differences.
+    let item = selected_item.or_else(|| {
+        items.iter().rev().find(|i| {
+            let has_diff = i.content_before != i.content_after
+                && (i.content_before.is_some() || i.content_after.is_some());
+            matches_project(i, name) && has_diff
+        })
     });
 
-    let Some(item) = last else {
+    let Some(item) = item else {
         let block = Block::default()
             .borders(Borders::ALL)
             .title(format!(" Detail: {label} "));
@@ -931,14 +946,14 @@ fn render_diff_panel(
     );
 }
 
-fn render_log_panel(
+fn render_log_panel<'a>(
     frame: &mut Frame,
     area: Rect,
     name: Option<&str>,
-    items: &[Interception],
+    items: &'a [Interception],
     history_scroll: &mut usize,
     selected: Option<usize>,
-) {
+) -> Option<&'a Interception> {
     let Some(name) = name else {
         let block = Block::default().borders(Borders::ALL).title(" History ");
         let p = Paragraph::new(Span::styled(
@@ -947,9 +962,9 @@ fn render_log_panel(
         ))
         .block(block);
         frame.render_widget(p, area);
-        return;
+        return None;
     };
-    let filtered: Vec<&Interception> = items
+    let filtered: Vec<&'a Interception> = items
         .iter()
         .filter(|i| {
             serde_json::to_value(&i.command_family)
@@ -959,6 +974,10 @@ fn render_log_panel(
         })
         .rev()
         .collect();
+    let n = filtered.len();
+    let selected_item = selected
+        .map(|s| s.min(n.saturating_sub(1)))
+        .and_then(|s| filtered.get(s).copied());
     render_history_panel(
         frame,
         area,
@@ -968,6 +987,7 @@ fn render_log_panel(
         selected,
         "[d] detail ",
     );
+    selected_item
 }
 
 fn render_history_panel(

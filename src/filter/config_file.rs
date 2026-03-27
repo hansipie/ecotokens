@@ -31,35 +31,28 @@ pub fn filter_config_file(content: &str, ext: &str) -> String {
     }
 }
 
+fn format_summary(format_name: &str, key_noun: &str, total_lines: usize, keys: &[&str]) -> String {
+    format!(
+        "[ecotokens] {format_name} summary ({total_lines} lines, {} {key_noun}):\n{}",
+        keys.len(),
+        keys.join(", ")
+    )
+}
+
 fn filter_toml(content: &str, total_lines: usize) -> String {
     let table_re = regex!(r"^\[([^\]]+)\]");
     let tables = extract_root_keys(content, table_re, MAX_ROOT_KEYS);
-
-    format!(
-        "[ecotokens] TOML summary ({total_lines} lines, {} top-level tables):\n{}",
-        tables.len(),
-        tables.join(", ")
-    )
+    format_summary("TOML", "top-level tables", total_lines, &tables)
 }
 
 fn filter_json(content: &str, total_lines: usize) -> String {
     let key_re = regex!(r#"^\s{0,2}"([^"]+)"\s*:"#);
     let keys = extract_root_keys(content, key_re, MAX_ROOT_KEYS);
-
-    format!(
-        "[ecotokens] JSON summary ({total_lines} lines, {} root keys shown):\n{}",
-        keys.len(),
-        keys.join(", ")
-    )
+    format_summary("JSON", "root keys shown", total_lines, &keys)
 }
 
 fn filter_yaml(content: &str, total_lines: usize) -> String {
     let key_re = regex!(r"^([a-zA-Z_][a-zA-Z0-9_-]*):");
     let keys = extract_root_keys(content, key_re, MAX_ROOT_KEYS);
-
-    format!(
-        "[ecotokens] YAML summary ({total_lines} lines, {} root keys shown):\n{}",
-        keys.len(),
-        keys.join(", ")
-    )
+    format_summary("YAML", "root keys shown", total_lines, &keys)
 }

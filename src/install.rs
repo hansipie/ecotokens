@@ -210,7 +210,6 @@ pub fn are_session_hooks_installed(settings_path: &Path) -> bool {
 }
 
 /// Remove SessionStart and SessionEnd hooks from ~/.claude/settings.json (idempotent).
-#[allow(dead_code)]
 pub fn uninstall_session_hooks(settings_path: &Path) -> InstallResult {
     if !settings_path.exists() {
         return Ok(());
@@ -265,36 +264,6 @@ pub fn uninstall_gemini(settings_path: &Path) -> InstallResult {
     let mut v = read_settings(settings_path);
     remove_hook_generic(&mut v, "BeforeTool", GEMINI_HOOK_COMMAND);
     remove_ecotokens_mcp_server(&mut v);
-    write_settings(settings_path, &v)
-}
-
-// ============================================================================
-// Qwen Code — Session hooks (SessionStart / SessionEnd for auto-watch)
-// ============================================================================
-
-/// Install SessionStart and SessionEnd hooks in ~/.qwen/settings.json (idempotent).
-pub fn install_qwen_session_hooks(settings_path: &Path) -> InstallResult {
-    let mut v = read_settings(settings_path);
-    let _ = install_hook_generic(&mut v, "SessionStart", "", SESSION_START_COMMAND);
-    let _ = install_hook_generic(&mut v, "SessionEnd", "", SESSION_END_COMMAND);
-    write_settings(settings_path, &v)
-}
-
-/// Check whether both session hooks are present in ~/.qwen/settings.json.
-pub fn are_qwen_session_hooks_installed(settings_path: &Path) -> bool {
-    let v = read_settings(settings_path);
-    has_hook_command(&v, "SessionStart", SESSION_START_COMMAND)
-        && has_hook_command(&v, "SessionEnd", SESSION_END_COMMAND)
-}
-
-/// Remove SessionStart and SessionEnd hooks from ~/.qwen/settings.json (idempotent).
-pub fn uninstall_qwen_session_hooks(settings_path: &Path) -> InstallResult {
-    if !settings_path.exists() {
-        return Ok(());
-    }
-    let mut v = read_settings(settings_path);
-    remove_hook_generic(&mut v, "SessionStart", SESSION_START_COMMAND);
-    remove_hook_generic(&mut v, "SessionEnd", SESSION_END_COMMAND);
     write_settings(settings_path, &v)
 }
 
