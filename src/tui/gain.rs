@@ -548,47 +548,19 @@ fn render_project_log_panel(
     };
 
     let label = project_label(name);
-
-    let history: Vec<&Interception> = items
+    let filtered: Vec<&Interception> = items
         .iter()
         .filter(|i| matches_project(i, name))
         .rev()
         .collect();
-    let n = history.len();
-    // How many rows fit inside the block (subtract 2 for borders).
-    let visible = (area.height as usize).saturating_sub(2);
-    let max_scroll = n.saturating_sub(visible);
-    *history_scroll = (*history_scroll).min(max_scroll);
-    let scroll = *history_scroll;
-    let history: Vec<&Interception> = history.into_iter().skip(scroll).take(visible).collect();
-
-    let scroll_hint = if n > visible {
-        format!("[{}/{}]  [i/k] ", scroll + 1, n)
-    } else {
-        format!("{} entries ", n)
-    };
-    let block = Block::default()
-        .borders(Borders::ALL)
-        .title(format!(" Project history: {label} · {scroll_hint}"));
-    let inner = block.inner(area);
-    frame.render_widget(block, area);
-
-    let lines: Vec<Line> = history
-        .iter()
-        .map(|item| {
-            let ts = item.timestamp.get(..16).unwrap_or(&item.timestamp);
-            let cmd = truncate_cmd(&item.command, 30);
-            let sign = if item.savings_pct >= 0.0 { '-' } else { '+' };
-            let abs_pct = item.savings_pct.abs();
-            let text = format!(
-                "{ts:<16}  {cmd:<30}  {:>6} → {:>6}  {sign}{:.1}%",
-                item.tokens_before, item.tokens_after, abs_pct
-            );
-            Line::from(Span::styled(text, Style::default().fg(Color::Green)))
-        })
-        .collect();
-
-    frame.render_widget(Paragraph::new(lines), inner);
+    render_history_panel(
+        frame,
+        area,
+        &format!(" Project history: {label}"),
+        filtered,
+        history_scroll,
+        "",
+    );
 }
 
 // ── Detail panel ──────────────────────────────────────────────────────────────
@@ -875,7 +847,7 @@ fn render_log_panel(
     items: &[Interception],
     history_scroll: &mut usize,
 ) {
-    let family_items: Vec<&Interception> = items
+    let filtered: Vec<&Interception> = items
         .iter()
         .filter(|i| {
             serde_json::to_value(&i.command_family)
@@ -883,10 +855,28 @@ fn render_log_panel(
                 .and_then(|v| v.as_str().map(|s| s == name))
                 .unwrap_or(false)
         })
+        .rev()
         .collect();
+    render_history_panel(
+        frame,
+        area,
+        &format!(" History: {name}"),
+        filtered,
+        history_scroll,
+        "[d] detail ",
+    );
+}
 
-    let history: Vec<&Interception> = family_items.iter().rev().copied().collect();
+fn render_history_panel(
+    frame: &mut Frame,
+    area: Rect,
+    title: &str,
+    history: Vec<&Interception>,
+    history_scroll: &mut usize,
+    extra_hint: &str,
+) {
     let n = history.len();
+    // How many rows fit inside the block (subtract 2 for borders).
     let visible = (area.height as usize).saturating_sub(2);
     let max_scroll = n.saturating_sub(visible);
     *history_scroll = (*history_scroll).min(max_scroll);
@@ -894,13 +884,13 @@ fn render_log_panel(
     let history: Vec<&Interception> = history.into_iter().skip(scroll).take(visible).collect();
 
     let scroll_hint = if n > visible {
-        format!("[{}/{}]  [i/k]  [d] detail ", scroll + 1, n)
+        format!("[{}/{}]  [i/k]  {extra_hint}", scroll + 1, n)
     } else {
-        format!("{} entries  [d] detail ", n)
+        format!("{n} entries  {extra_hint}")
     };
     let block = Block::default()
         .borders(Borders::ALL)
-        .title(format!(" History: {name} · {scroll_hint}"));
+        .title(format!("{title} · {scroll_hint}"));
     let inner = block.inner(area);
     frame.render_widget(block, area);
 
