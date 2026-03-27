@@ -1,6 +1,7 @@
 use std::path::{Path, PathBuf};
 
 use super::post_handler::PostFilterResult;
+use crate::config::default_index_dir;
 use crate::search::outline::OutlineOptions;
 use crate::tokens::counter::count_tokens;
 use crate::trace::callees::find_callees;
@@ -26,13 +27,6 @@ fn is_binary_path(file_path: &str) -> bool {
         .unwrap_or("")
         .to_lowercase();
     BINARY_EXTS.contains(&ext.as_str())
-}
-
-fn default_index_dir() -> PathBuf {
-    dirs::config_dir()
-        .unwrap_or_else(|| PathBuf::from("."))
-        .join("ecotokens")
-        .join("index")
 }
 
 /// Format one symbol with its callers/callees.

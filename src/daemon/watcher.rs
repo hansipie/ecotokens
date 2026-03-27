@@ -1,4 +1,5 @@
 use crate::search::index::{build_schema, open_or_create_index};
+use crate::search::is_indexable_extension;
 use std::collections::HashMap;
 use std::path::{Path, PathBuf};
 use std::sync::mpsc;
@@ -139,29 +140,4 @@ fn reindex_single_file(path: &Path, watch_path: &Path, index_dir: &Path) -> Stri
         Ok(_) => "re-indexed".to_string(),
         Err(e) => format!("error: {e}"),
     }
-}
-
-fn is_indexable_extension(ext: &str) -> bool {
-    matches!(
-        ext,
-        "rs" | "py"
-            | "js"
-            | "ts"
-            | "jsx"
-            | "tsx"
-            | "c"
-            | "h"
-            | "cpp"
-            | "cc"
-            | "cxx"
-            | "hpp"
-            | "hh"
-            | "hxx"
-            | "md"
-            | "toml"
-            | "json"
-            | "yaml"
-            | "yml"
-            | "txt"
-    )
 }

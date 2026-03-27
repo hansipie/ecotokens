@@ -8,6 +8,8 @@ use ratatui::crossterm::ExecutableCommand;
 use ratatui::Terminal;
 use std::path::PathBuf;
 
+use crate::config::default_index_dir;
+
 mod config;
 mod daemon;
 mod duplicates;
@@ -260,13 +262,6 @@ fn is_quit_key(key: &ratatui::crossterm::event::KeyEvent) -> bool {
         key.code,
         KeyCode::Char('q') | KeyCode::Char('Q') | KeyCode::Esc
     ) || (key.code == KeyCode::Char('c') && key.modifiers.contains(KeyModifiers::CONTROL))
-}
-
-fn default_index_dir() -> PathBuf {
-    dirs::config_dir()
-        .unwrap_or_else(|| PathBuf::from("."))
-        .join("ecotokens")
-        .join("index")
 }
 
 fn default_settings_path() -> PathBuf {

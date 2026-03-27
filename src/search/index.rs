@@ -7,6 +7,7 @@ use tantivy::schema::*;
 use tantivy::{doc, Index, IndexWriter};
 
 use super::embed::{embed_text, save_embeddings};
+use super::is_indexable_extension;
 use super::symbols::{parse_symbols, write_symbols};
 use super::text_docs::index_text_doc;
 
@@ -183,29 +184,4 @@ pub fn count_indexable_files(path: &Path) -> u64 {
             is_indexable_extension(ext)
         })
         .count() as u64
-}
-
-fn is_indexable_extension(ext: &str) -> bool {
-    matches!(
-        ext,
-        "rs" | "py"
-            | "js"
-            | "ts"
-            | "jsx"
-            | "tsx"
-            | "c"
-            | "h"
-            | "cpp"
-            | "cc"
-            | "cxx"
-            | "hpp"
-            | "hh"
-            | "hxx"
-            | "md"
-            | "toml"
-            | "json"
-            | "yaml"
-            | "yml"
-            | "txt"
-    )
 }
