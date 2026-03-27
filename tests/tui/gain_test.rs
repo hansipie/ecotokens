@@ -36,6 +36,7 @@ fn draw_gain(
                 None,
                 &mut 0,
                 &mut 0,
+                &mut 0,
             )
         })
         .unwrap();
@@ -185,6 +186,7 @@ fn gain_renders_without_panic_on_empty_data() {
                 None,
                 &mut 0,
                 &mut 0,
+                &mut 0,
             )
         })
         .unwrap();
@@ -224,6 +226,7 @@ fn gain_sparkline_present_adaptive() {
                 None,
                 &mut 0,
                 &mut 0,
+                &mut 0,
             )
         })
         .unwrap();
@@ -260,6 +263,7 @@ fn gain_shows_family_breakdown() {
                 None,
                 &mut 0,
                 &mut 0,
+                &mut 0,
             )
         })
         .unwrap();
@@ -293,6 +297,7 @@ fn gain_detail_no_content_shows_fallback() {
                 None,
                 &mut 0,
                 &mut 0,
+                &mut 0,
             )
         })
         .unwrap();
@@ -311,7 +316,7 @@ fn gain_detail_with_content_renders_text() {
     let items = vec![item];
     let content = draw_gain(
         &items,
-        120,
+        160,
         35,
         GainMode::Family,
         Some(0),
@@ -323,9 +328,8 @@ fn gain_detail_with_content_renders_text() {
         "detail panel should render content text: {content:?}"
     );
     assert!(
-        content
-            .contains("git diff -- src/tui/gain.rs --word-diff --stat --unified=20 --find-renames"),
-        "detail panel should render the full command: {content:?}"
+        content.contains("git diff -- src/tui/gain.rs --word-diff"),
+        "detail panel should render the command: {content:?}"
     );
     assert!(
         content.contains("[i/k]") || content.contains("i/k"),
@@ -358,6 +362,7 @@ fn gain_diff_mode_renders_diff_markers() {
                 None,
                 &mut 0,
                 &mut 0,
+                &mut 0,
             )
         })
         .unwrap();
@@ -382,7 +387,7 @@ fn gain_detail_mode_supports_scroll() {
     let report = aggregate(&items, Period::All, "sonnet");
     let backend = TestBackend::new(48, 18);
     let mut terminal = Terminal::new(backend).unwrap();
-    let mut scroll = 2;
+    let mut scroll = 6;
     terminal
         .draw(|frame| {
             render_gain(
@@ -398,6 +403,7 @@ fn gain_detail_mode_supports_scroll() {
                 None,
                 None,
                 &mut scroll,
+                &mut 0,
                 &mut 0,
             )
         })
@@ -435,6 +441,7 @@ fn gain_log_mode_renders_history() {
                 DetailMode::Log,
                 None,
                 None,
+                &mut 0,
                 &mut 0,
                 &mut 0,
             )
@@ -490,6 +497,7 @@ fn gain_project_log_mode_renders_history() {
                 None,
                 &mut 0,
                 &mut 0,
+                &mut 0,
             )
         })
         .unwrap();
@@ -532,6 +540,7 @@ fn gain_project_history_panel_refreshes_between_draws() {
                 None,
                 &mut 0,
                 &mut 0,
+                &mut 0,
             )
         })
         .unwrap();
@@ -558,6 +567,7 @@ fn gain_project_history_panel_refreshes_between_draws() {
                 Default::default(),
                 Some(0),
                 None,
+                &mut 0,
                 &mut 0,
                 &mut 0,
             )

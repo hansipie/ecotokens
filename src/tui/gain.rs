@@ -153,6 +153,7 @@ pub fn render_gain(
     selected_project: Option<usize>,
     project_filter: Option<&str>,
     history_scroll: &mut usize,
+    log_scroll: &mut usize,
     gauge_scroll: &mut usize,
 ) {
     // Outer layout: stats | pool(family+detail) | sparkline
@@ -170,29 +171,27 @@ pub fn render_gain(
     if gain_mode == GainMode::Project {
         let pool = Layout::default()
             .direction(Direction::Vertical)
-            .constraints([Constraint::Percentage(50), Constraint::Percentage(50)])
+            .constraints([Constraint::Min(3), Constraint::Min(5)])
             .split(outer[1]);
         let project_names = render_projects(frame, pool[0], report, selected_project, gauge_scroll);
         let sel_proj = selected_project
             .and_then(|i| project_names.get(i))
             .map(String::as_str);
-        render_project_log_panel(frame, pool[1], sel_proj, items, history_scroll);
+        let bottom = Layout::default()
+            .direction(Direction::Horizontal)
+            .constraints([Constraint::Percentage(50), Constraint::Percentage(50)])
+            .split(pool[1]);
+        render_project_log_panel(frame, bottom[0], sel_proj, items, log_scroll);
+        frame.render_widget(Block::default().borders(Borders::ALL), bottom[1]);
         render_sparkline(frame, outer[2], items, sparkline_mode);
         return;
     }
 
-    // GainMode::Family — pool split family/detail
-    let pool = if detail_mode == DetailMode::Diff || detail_mode == DetailMode::Log {
-        Layout::default()
-            .direction(Direction::Vertical)
-            .constraints([Constraint::Percentage(50), Constraint::Percentage(50)])
-            .split(outer[1])
-    } else {
-        Layout::default()
-            .direction(Direction::Vertical)
-            .constraints([Constraint::Min(3), Constraint::Length(6)])
-            .split(outer[1])
-    };
+    // GainMode::Family — jauges pleine largeur, puis History | Detail en bas
+    let pool = Layout::default()
+        .direction(Direction::Vertical)
+        .constraints([Constraint::Min(3), Constraint::Min(5)])
+        .split(outer[1]);
 
     let filtered_items: Vec<Interception>;
     let display_items: &[Interception] = if let Some(proj) = project_filter {
@@ -217,12 +216,26 @@ pub fn render_gain(
     let sel_name = selected_family
         .and_then(|i| family_names.get(i))
         .map(String::as_str);
+
+    let bottom = Layout::default()
+        .direction(Direction::Horizontal)
+        .constraints([Constraint::Percentage(50), Constraint::Percentage(50)])
+        .split(pool[1]);
+
+    render_log_panel(frame, bottom[0], sel_name, display_items, log_scroll);
+
+    // En mode Log, l'historique est déjà à gauche — fallback vers Split à droite
+    let effective_detail = if detail_mode == DetailMode::Log {
+        DetailMode::Split
+    } else {
+        detail_mode
+    };
     render_detail(
         frame,
-        pool[1],
+        bottom[1],
         sel_name,
         display_items,
-        detail_mode,
+        effective_detail,
         history_scroll,
     );
     render_sparkline(frame, outer[2], items, sparkline_mode);
@@ -585,7 +598,7 @@ fn render_detail(
     };
 
     if detail_mode == DetailMode::Log {
-        render_log_panel(frame, area, name, items, history_scroll);
+        render_log_panel(frame, area, Some(name), items, history_scroll);
         return;
     }
 
@@ -843,10 +856,20 @@ fn render_diff_panel(
 fn render_log_panel(
     frame: &mut Frame,
     area: Rect,
-    name: &str,
+    name: Option<&str>,
     items: &[Interception],
     history_scroll: &mut usize,
 ) {
+    let Some(name) = name else {
+        let block = Block::default().borders(Borders::ALL).title(" History ");
+        let p = Paragraph::new(Span::styled(
+            " j u: select a family",
+            Style::default().fg(Color::DarkGray),
+        ))
+        .block(block);
+        frame.render_widget(p, area);
+        return;
+    };
     let filtered: Vec<&Interception> = items
         .iter()
         .filter(|i| {
