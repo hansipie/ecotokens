@@ -153,6 +153,7 @@ pub fn render_gain(
     selected_project: Option<usize>,
     project_filter: Option<&str>,
     history_scroll: &mut usize,
+    gauge_scroll: &mut usize,
 ) {
     // Outer layout: stats | pool(family+detail) | sparkline
     let outer = Layout::default()
@@ -171,7 +172,7 @@ pub fn render_gain(
             .direction(Direction::Vertical)
             .constraints([Constraint::Percentage(50), Constraint::Percentage(50)])
             .split(outer[1]);
-        let project_names = render_projects(frame, pool[0], report, selected_project);
+        let project_names = render_projects(frame, pool[0], report, selected_project, gauge_scroll);
         let sel_proj = selected_project
             .and_then(|i| project_names.get(i))
             .map(String::as_str);
@@ -211,6 +212,7 @@ pub fn render_gain(
         display_items,
         selected_family,
         project_filter,
+        gauge_scroll,
     );
     let sel_name = selected_family
         .and_then(|i| family_names.get(i))
@@ -288,6 +290,8 @@ fn render_stats(
 
 // ── Family gauges ─────────────────────────────────────────────────────────────
 
+const GAUGE_MIN_HEIGHT: u16 = 2;
+
 fn render_families(
     frame: &mut Frame,
     area: Rect,
@@ -295,6 +299,7 @@ fn render_families(
     items: &[Interception],
     selected: Option<usize>,
     project_filter: Option<&str>,
+    gauge_scroll: &mut usize,
 ) -> Vec<String> {
     let title = if let Some(proj) = project_filter {
         let basename = project_label(proj);
@@ -370,26 +375,44 @@ fn render_families(
         return vec![];
     }
 
-    // One row per family
-    let n = families.len() as u16;
+    let n = families.len();
     let inner = block.inner(area);
+    let visible = ((inner.height / GAUGE_MIN_HEIGHT) as usize).max(1);
+    let max_scroll = n.saturating_sub(visible);
+
+    // Auto-scroll to keep selection visible
+    if let Some(sel) = selected {
+        if sel < *gauge_scroll {
+            *gauge_scroll = sel;
+        } else if sel >= *gauge_scroll + visible {
+            *gauge_scroll = sel + 1 - visible;
+        }
+    }
+    *gauge_scroll = (*gauge_scroll).min(max_scroll);
+
+    let scroll = *gauge_scroll;
+    let slice = &families[scroll..(scroll + visible).min(n)];
+
+    let scroll_hint = if n > visible {
+        format!(" [{}/{}] ", scroll + 1, n)
+    } else {
+        String::new()
+    };
+    let block = block.title(scroll_hint);
     frame.render_widget(block, area);
 
-    let row_height = (inner.height / n).max(1);
-    let constraints: Vec<Constraint> = families
+    let constraints: Vec<Constraint> = slice
         .iter()
-        .map(|_| Constraint::Length(row_height))
+        .map(|_| Constraint::Length(GAUGE_MIN_HEIGHT))
         .collect();
     let rows = Layout::default()
         .direction(Direction::Vertical)
         .constraints(constraints)
         .split(inner);
 
-    for (i, (name, pct)) in families.iter().enumerate() {
-        if i >= rows.len() {
-            break;
-        }
-        let is_sel = selected == Some(i);
+    for (i, (name, pct)) in slice.iter().enumerate() {
+        let global_idx = scroll + i;
+        let is_sel = selected == Some(global_idx);
         let color = if is_sel { Color::Green } else { Color::Yellow };
         let modifier = if is_sel {
             Modifier::BOLD
@@ -416,6 +439,7 @@ fn render_projects(
     area: Rect,
     report: &Report,
     selected: Option<usize>,
+    gauge_scroll: &mut usize,
 ) -> Vec<String> {
     let block = Block::default()
         .borders(Borders::ALL)
@@ -445,25 +469,44 @@ fn render_projects(
             .then_with(|| a.0.cmp(b.0))
     });
 
-    let n = projects.len() as u16;
+    let n = projects.len();
     let inner = block.inner(area);
+    let visible = ((inner.height / GAUGE_MIN_HEIGHT) as usize).max(1);
+    let max_scroll = n.saturating_sub(visible);
+
+    // Auto-scroll to keep selection visible
+    if let Some(sel) = selected {
+        if sel < *gauge_scroll {
+            *gauge_scroll = sel;
+        } else if sel >= *gauge_scroll + visible {
+            *gauge_scroll = sel + 1 - visible;
+        }
+    }
+    *gauge_scroll = (*gauge_scroll).min(max_scroll);
+
+    let scroll = *gauge_scroll;
+    let slice = &projects[scroll..(scroll + visible).min(n)];
+
+    let scroll_hint = if n > visible {
+        format!(" [{}/{}] ", scroll + 1, n)
+    } else {
+        String::new()
+    };
+    let block = block.title(scroll_hint);
     frame.render_widget(block, area);
 
-    let row_height = (inner.height / n).max(1);
-    let constraints: Vec<Constraint> = projects
+    let constraints: Vec<Constraint> = slice
         .iter()
-        .map(|_| Constraint::Length(row_height))
+        .map(|_| Constraint::Length(GAUGE_MIN_HEIGHT))
         .collect();
     let rows = Layout::default()
         .direction(Direction::Vertical)
         .constraints(constraints)
         .split(inner);
 
-    for (i, (name, pct)) in projects.iter().enumerate() {
-        if i >= rows.len() {
-            break;
-        }
-        let is_sel = selected == Some(i);
+    for (i, (name, pct)) in slice.iter().enumerate() {
+        let global_idx = scroll + i;
+        let is_sel = selected == Some(global_idx);
         let color = if is_sel { Color::Green } else { Color::Yellow };
         let modifier = if is_sel {
             Modifier::BOLD

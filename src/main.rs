@@ -409,6 +409,7 @@ fn cmd_gain(period: String, json: bool, model: Option<String>, history: bool) {
             let mut selected_project: Option<usize> = None;
             let mut project_filter: Option<String> = None;
             let mut history_scroll: usize = 0;
+            let mut gauge_scroll: usize = 0;
             let mut last_reload = std::time::Instant::now();
             // Precomputed once at load time, updated only on reload.
             let mut sorted_projects: Vec<(String, f32)> = sorted_projects_from(&report);
@@ -443,6 +444,7 @@ fn cmd_gain(period: String, json: bool, model: Option<String>, history: bool) {
                         selected_project,
                         project_filter.as_deref(),
                         &mut history_scroll,
+                        &mut gauge_scroll,
                     );
                 });
                 if poll(std::time::Duration::from_millis(500)).unwrap_or(false) {
@@ -454,6 +456,7 @@ fn cmd_gain(period: String, json: bool, model: Option<String>, history: bool) {
                             project_filter = None;
                             gain_mode = gain_mode.toggle();
                             history_scroll = 0;
+                            gauge_scroll = 0;
                         }
                         if key.code == KeyCode::Char('s') {
                             sparkline_mode = sparkline_mode.next();
@@ -542,6 +545,7 @@ fn cmd_gain(period: String, json: bool, model: Option<String>, history: bool) {
                                     gain_mode = tui::gain::GainMode::Family;
                                     selected_family = None;
                                     history_scroll = 0;
+                                    gauge_scroll = 0;
                                 }
                             }
                         }
