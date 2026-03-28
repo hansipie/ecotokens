@@ -186,8 +186,9 @@ Interactive TUI showing token savings per command family and per project, with a
 |-----|--------|
 | `j` / `u` | Navigate up / down in list |
 | `k` / `i` | Scroll history log down / up (family log view) |
-| `b` | Toggle family / project view |
-| `d` | Cycle detail mode (split / diff / log) — family view only |
+| `p` | Switch to project view (from family view) |
+| `f` | Switch to family view (from project view) |
+| `d` | Toggle detail mode (details / diff) — family view only |
 | `s` | Cycle sparkline scale (linear / log / capped) |
 | `q` / `Esc` | Quit |
 
@@ -347,6 +348,8 @@ Filtering is aggressive on noise, conservative on signal:
   | `.env` secrets (`SECRET=`, `TOKEN=`, `API_KEY=`…) | `[REDACTED]` |
   | JWT token | `[JWT_TOKEN]` |
   | URL credentials (`user:pass@host`) | `[CREDENTIALS]` |
+  | Slack token (`xox[bpoa]-…`) | `[SLACK_TOKEN]` |
+  | Stripe secret key (`sk_live/test_…`) | `[STRIPE_KEY]` |
 - **UTF-8 safe truncation** — truncation always happens at character boundaries, never mid-codepoint
 - **Head + tail preservation** — when generic truncation applies, the first and last 20 lines are always kept (start context + end result)
 
