@@ -35,6 +35,9 @@ fn draw_gain(
                 selected_project,
                 None,
                 &mut 0,
+                &mut 0,
+                None,
+                &mut 0,
             )
         })
         .unwrap();
@@ -183,6 +186,9 @@ fn gain_renders_without_panic_on_empty_data() {
                 None,
                 None,
                 &mut 0,
+                &mut 0,
+                None,
+                &mut 0,
             )
         })
         .unwrap();
@@ -221,6 +227,9 @@ fn gain_sparkline_present_adaptive() {
                 None,
                 None,
                 &mut 0,
+                &mut 0,
+                None,
+                &mut 0,
             )
         })
         .unwrap();
@@ -256,6 +265,9 @@ fn gain_shows_family_breakdown() {
                 None,
                 None,
                 &mut 0,
+                &mut 0,
+                None,
+                &mut 0,
             )
         })
         .unwrap();
@@ -288,6 +300,9 @@ fn gain_detail_no_content_shows_fallback() {
                 None,
                 None,
                 &mut 0,
+                &mut 0,
+                None,
+                &mut 0,
             )
         })
         .unwrap();
@@ -306,7 +321,7 @@ fn gain_detail_with_content_renders_text() {
     let items = vec![item];
     let content = draw_gain(
         &items,
-        120,
+        160,
         35,
         GainMode::Family,
         Some(0),
@@ -320,10 +335,10 @@ fn gain_detail_with_content_renders_text() {
     assert!(
         content
             .contains("git diff -- src/tui/gain.rs --word-diff --stat --unified=20 --find-renames"),
-        "detail panel should render the full command: {content:?}"
+        "detail panel should render the command: {content:?}"
     );
     assert!(
-        content.contains("[i/k]") || content.contains("i/k"),
+        content.contains("[o/l]") || content.contains("o/l"),
         "detail panel should show the scroll hint: {content:?}"
     );
 }
@@ -352,6 +367,9 @@ fn gain_diff_mode_renders_diff_markers() {
                 None,
                 None,
                 &mut 0,
+                &mut 0,
+                None,
+                &mut 0,
             )
         })
         .unwrap();
@@ -376,7 +394,7 @@ fn gain_detail_mode_supports_scroll() {
     let report = aggregate(&items, Period::All, "sonnet");
     let backend = TestBackend::new(48, 18);
     let mut terminal = Terminal::new(backend).unwrap();
-    let mut scroll = 2;
+    let mut scroll = 6;
     terminal
         .draw(|frame| {
             render_gain(
@@ -388,10 +406,13 @@ fn gain_detail_mode_supports_scroll() {
                 GainMode::Family,
                 Default::default(),
                 Some(0),
-                DetailMode::Split,
+                DetailMode::Details,
                 None,
                 None,
                 &mut scroll,
+                &mut 0,
+                None,
+                &mut 0,
             )
         })
         .unwrap();
@@ -425,8 +446,11 @@ fn gain_log_mode_renders_history() {
                 GainMode::Family,
                 Default::default(),
                 Some(0),
-                DetailMode::Log,
+                DetailMode::Details,
                 None,
+                None,
+                &mut 0,
+                &mut 0,
                 None,
                 &mut 0,
             )
@@ -481,6 +505,9 @@ fn gain_project_log_mode_renders_history() {
                 Some(0),
                 None,
                 &mut 0,
+                &mut 0,
+                None,
+                &mut 0,
             )
         })
         .unwrap();
@@ -522,6 +549,9 @@ fn gain_project_history_panel_refreshes_between_draws() {
                 Some(0),
                 None,
                 &mut 0,
+                &mut 0,
+                None,
+                &mut 0,
             )
         })
         .unwrap();
@@ -547,6 +577,9 @@ fn gain_project_history_panel_refreshes_between_draws() {
                 None,
                 Default::default(),
                 Some(0),
+                None,
+                &mut 0,
+                &mut 0,
                 None,
                 &mut 0,
             )

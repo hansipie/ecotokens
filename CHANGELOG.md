@@ -5,6 +5,22 @@ All notable changes to this project will be documented in this file.
 The format is based on [Keep a Changelog](https://keepachangelog.com/en/1.0.0/),
 and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0.html).
 
+## [0.10.0] - 2026-03-28
+
+### Added
+- Slack token (`xox[bpoa]-…`) and Stripe secret key (`sk_live/test_…`) masking patterns — redacted before any content reaches the model
+
+### Security
+- Hook handlers now cap stdin at 10 MB (`MAX_STDIN_BYTES`) — oversized payloads are passed through unchanged instead of consuming unbounded memory
+- Ollama AI summary URL is validated to point to localhost only (SSRF guard)
+- Indexer skips files larger than 50 MB to prevent memory exhaustion
+
+### Changed
+- Gain TUI: `DetailMode` simplified from a 3-cycle (Split / Diff / Log) to a 2-cycle toggle (Details / Diff)
+- Gain TUI: view switching is now contextual — `p` switches to the project view (from family), `f` switches back to the family view (from project); the generic `b` toggle is removed
+- Gain TUI: log-panel selection index is clamped to the actual item count via `log_item_count`
+- Gain TUI: key-repeat events filtered out (only `KeyEventKind::Press` is handled)
+
 ## [0.9.0] - 2026-03-26
 
 ### Added
@@ -109,7 +125,8 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 - `ecotokens install` / `uninstall` / `config` commands
 - MIT license
 
-[0.9.0]: https://github.com/hansipie/ecotokens/compare/v0.8.0...v0.9.0
+[0.10.0]: https://github.com/hansipie/ecotokens/compare/v0.9.0...v0.10.0
+[0.9.0]: https://github.com/hansipie/ecotokens/releases/tag/v0.9.0
 [0.8.0]: https://github.com/hansipie/ecotokens/releases/tag/v0.8.0
 [0.7.0]: https://github.com/hansipie/ecotokens/releases/tag/v0.7.0
 [0.6.0]: https://github.com/hansipie/ecotokens/releases/tag/v0.6.0

@@ -11,22 +11,22 @@ pub enum HookOutput {
     Rewrite(String),
 }
 
-/// Gemini hook payload structure.
+/// Shared payload structure for Gemini BeforeTool and Qwen PreToolUse hooks.
 #[derive(Debug, Deserialize)]
-struct GeminiHookPayload {
+struct ShellToolPayload {
     tool_name: String,
     tool_input: serde_json::Value,
 }
 
-/// Gemini hook response structure.
+/// Shared response structure for shell-tool hooks.
 #[derive(Debug, Serialize)]
-struct GeminiHookResponse {
+struct ShellHookResponse {
     #[serde(rename = "hookSpecificOutput")]
-    hook_specific_output: GeminiHookSpecificOutput,
+    hook_specific_output: ShellHookSpecificOutput,
 }
 
 #[derive(Debug, Serialize)]
-struct GeminiHookSpecificOutput {
+struct ShellHookSpecificOutput {
     #[serde(rename = "hookEventName")]
     hook_event_name: String,
     decision: String,
@@ -52,12 +52,19 @@ pub fn handle_hook_input(input: &HookInput, exclusions: &[String], _debug: bool)
 
 /// Top-level hook stdin→stdout handler (reads Claude Code PreToolUse JSON).
 pub fn handle() {
+    use super::MAX_STDIN_BYTES;
     use std::io::Read;
 
     let mut stdin = String::new();
     std::io::stdin()
+        .take(MAX_STDIN_BYTES as u64 + 1)
         .read_to_string(&mut stdin)
         .unwrap_or_default();
+
+    if stdin.len() > MAX_STDIN_BYTES {
+        print!("{stdin}");
+        return;
+    }
 
     let v: serde_json::Value = match serde_json::from_str(&stdin) {
         Ok(v) => v,
@@ -109,11 +116,11 @@ pub fn handle() {
     }
 }
 
-/// Helper to emit Gemini allow response.
-fn emit_gemini_allow(updated_input: Option<serde_json::Value>) {
-    let response = GeminiHookResponse {
-        hook_specific_output: GeminiHookSpecificOutput {
-            hook_event_name: "BeforeTool".to_string(),
+/// Emit a shell-tool allow response (Gemini or Qwen format).
+fn emit_allow(hook_event_name: &str, updated_input: Option<serde_json::Value>) {
+    let response = ShellHookResponse {
+        hook_specific_output: ShellHookSpecificOutput {
+            hook_event_name: hook_event_name.to_string(),
             decision: "allow".to_string(),
             tool_input: updated_input,
         },
@@ -123,64 +130,34 @@ fn emit_gemini_allow(updated_input: Option<serde_json::Value>) {
     }
 }
 
-/// Qwen Code hook payload structure (PreToolUse, same layout as Gemini).
-#[derive(Debug, Deserialize)]
-struct QwenHookPayload {
-    tool_name: String,
-    tool_input: serde_json::Value,
-}
-
-/// Qwen Code hook response structure.
-#[derive(Debug, Serialize)]
-struct QwenHookResponse {
-    #[serde(rename = "hookSpecificOutput")]
-    hook_specific_output: QwenHookSpecificOutput,
-}
-
-#[derive(Debug, Serialize)]
-struct QwenHookSpecificOutput {
-    #[serde(rename = "hookEventName")]
-    hook_event_name: String,
-    decision: String,
-    #[serde(rename = "toolInput", skip_serializing_if = "Option::is_none")]
-    tool_input: Option<serde_json::Value>,
-}
-
-/// Helper to emit Qwen allow response.
-fn emit_qwen_allow(updated_input: Option<serde_json::Value>) {
-    let response = QwenHookResponse {
-        hook_specific_output: QwenHookSpecificOutput {
-            hook_event_name: "PreToolUse".to_string(),
-            decision: "allow".to_string(),
-            tool_input: updated_input,
-        },
-    };
-    if let Ok(s) = serde_json::to_string(&response) {
-        println!("{s}");
-    }
-}
-
-/// Top-level hook stdin→stdout handler for Qwen Code PreToolUse events.
-/// Reads a JSON payload with `tool_name` and `tool_input`,
-/// rewrites `tool_input.command` for shell tools, and emits a Qwen-compatible response.
-pub fn handle_qwen() {
+/// Common handler for Gemini BeforeTool and Qwen PreToolUse shell-tool hooks.
+/// Reads a JSON payload with `tool_name` and `tool_input`, rewrites `tool_input.command`
+/// for shell tools, and emits a response using `hook_event_name`.
+fn handle_shell_tool_hook(hook_event_name: &str, label: &str) {
+    use super::MAX_STDIN_BYTES;
     use std::io::Read;
 
     let mut stdin = String::new();
     std::io::stdin()
+        .take(MAX_STDIN_BYTES as u64 + 1)
         .read_to_string(&mut stdin)
         .unwrap_or_default();
 
-    let payload: QwenHookPayload = match serde_json::from_str(&stdin) {
+    if stdin.len() > MAX_STDIN_BYTES {
+        emit_allow(hook_event_name, None);
+        return;
+    }
+
+    let payload: ShellToolPayload = match serde_json::from_str(&stdin) {
         Ok(p) => p,
         Err(_) => {
-            emit_qwen_allow(None);
+            emit_allow(hook_event_name, None);
             return;
         }
     };
 
     if payload.tool_name != "run_shell_command" {
-        emit_qwen_allow(None);
+        emit_allow(hook_event_name, None);
         return;
     }
 
@@ -189,7 +166,7 @@ pub fn handle_qwen() {
         .unwrap_or("")
         .to_string();
     if command.is_empty() {
-        emit_qwen_allow(None);
+        emit_allow(hook_event_name, None);
         return;
     }
 
@@ -199,74 +176,27 @@ pub fn handle_qwen() {
     let output = handle_hook_input(&input, &settings.exclusions, debug);
 
     match output {
-        HookOutput::Passthrough => emit_qwen_allow(None),
+        HookOutput::Passthrough => emit_allow(hook_event_name, None),
         HookOutput::Rewrite(new_cmd) => {
             if debug {
                 eprintln!(
-                    "[ecotokens debug] rewriting (qwen): {} → {}",
+                    "[ecotokens debug] rewriting ({label}): {} → {}",
                     input.command, new_cmd
                 );
             }
             let mut tool_input = payload.tool_input.clone();
             tool_input["command"] = serde_json::Value::String(new_cmd);
-            emit_qwen_allow(Some(tool_input));
+            emit_allow(hook_event_name, Some(tool_input));
         }
     }
 }
 
 /// Top-level hook stdin→stdout handler for Gemini CLI BeforeTool events.
-/// Reads a JSON payload with `tool_name` and `tool_input`,
-/// rewrites `tool_input.command` for shell tools, and emits a Gemini-compatible response.
 pub fn handle_gemini() {
-    use std::io::Read;
+    handle_shell_tool_hook("BeforeTool", "gemini");
+}
 
-    let mut stdin = String::new();
-    std::io::stdin()
-        .read_to_string(&mut stdin)
-        .unwrap_or_default();
-
-    let payload: GeminiHookPayload = match serde_json::from_str(&stdin) {
-        Ok(p) => p,
-        Err(_) => {
-            // Cannot parse — passthrough
-            emit_gemini_allow(None);
-            return;
-        }
-    };
-
-    // Only intercept shell commands; let all other tools pass through unmodified.
-    if payload.tool_name != "run_shell_command" {
-        emit_gemini_allow(None);
-        return;
-    }
-
-    let command = payload.tool_input["command"]
-        .as_str()
-        .unwrap_or("")
-        .to_string();
-    if command.is_empty() {
-        emit_gemini_allow(None);
-        return;
-    }
-
-    let settings = crate::config::Settings::load();
-    let input = HookInput { command };
-    let debug = settings.debug;
-    let output = handle_hook_input(&input, &settings.exclusions, debug);
-
-    match output {
-        HookOutput::Passthrough => emit_gemini_allow(None),
-        HookOutput::Rewrite(new_cmd) => {
-            if debug {
-                eprintln!(
-                    "[ecotokens debug] rewriting (gemini): {} → {}",
-                    input.command, new_cmd
-                );
-            }
-            // Merge the rewritten command into tool_input, preserving other fields.
-            let mut tool_input = payload.tool_input.clone();
-            tool_input["command"] = serde_json::Value::String(new_cmd);
-            emit_gemini_allow(Some(tool_input));
-        }
-    }
+/// Top-level hook stdin→stdout handler for Qwen Code PreToolUse events.
+pub fn handle_qwen() {
+    handle_shell_tool_hook("PreToolUse", "qwen");
 }

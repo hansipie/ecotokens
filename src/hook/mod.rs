@@ -7,3 +7,6 @@ pub use handler::handle;
 pub use handler::handle_gemini;
 pub use handler::handle_qwen;
 pub use post_handler::handle_post;
+
+/// Maximum stdin payload size accepted by hook handlers (10 MB).
+pub const MAX_STDIN_BYTES: usize = 10 * 1024 * 1024;

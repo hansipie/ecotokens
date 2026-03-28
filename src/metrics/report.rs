@@ -72,6 +72,23 @@ fn period_start(period: &Period) -> Option<DateTime<Utc>> {
     }
 }
 
+/// Filter interceptions by period start time.
+fn filter_items_by_period<'a>(
+    items: impl Iterator<Item = &'a Interception>,
+    start: Option<DateTime<Utc>>,
+) -> Vec<&'a Interception> {
+    items
+        .filter(|item| {
+            if let Some(start_ts) = start {
+                if let Ok(ts) = DateTime::parse_from_rfc3339(&item.timestamp) {
+                    return ts.with_timezone(&Utc) >= start_ts;
+                }
+            }
+            true
+        })
+        .collect()
+}
+
 #[derive(Debug, Clone, Serialize, Deserialize)]
 pub struct HistoryReport {
     pub model_ref: String,
@@ -93,16 +110,8 @@ pub fn aggregate_history(items: &[Interception], model: &str) -> HistoryReport {
 /// Filter interceptions by period, reusing the same logic as `aggregate`.
 pub fn filter_by_period(items: &[Interception], period: &Period) -> Vec<Interception> {
     let start = period_start(period);
-    items
-        .iter()
-        .filter(|item| {
-            if let Some(start_ts) = start {
-                if let Ok(ts) = DateTime::parse_from_rfc3339(&item.timestamp) {
-                    return ts.with_timezone(&Utc) >= start_ts;
-                }
-            }
-            true
-        })
+    filter_items_by_period(items.iter(), start)
+        .into_iter()
         .cloned()
         .collect()
 }
@@ -110,18 +119,7 @@ pub fn filter_by_period(items: &[Interception], period: &Period) -> Vec<Intercep
 /// Aggregate interceptions into a Report.
 pub fn aggregate(items: &[Interception], period: Period, model: &str) -> Report {
     let start = period_start(&period);
-
-    let filtered: Vec<&Interception> = items
-        .iter()
-        .filter(|item| {
-            if let Some(start_ts) = start {
-                if let Ok(ts) = DateTime::parse_from_rfc3339(&item.timestamp) {
-                    return ts.with_timezone(&Utc) >= start_ts;
-                }
-            }
-            true
-        })
-        .collect();
+    let filtered = filter_items_by_period(items.iter(), start);
 
     let total_before: u64 = filtered.iter().map(|i| i.tokens_before as u64).sum();
     let total_after: u64 = filtered.iter().map(|i| i.tokens_after as u64).sum();

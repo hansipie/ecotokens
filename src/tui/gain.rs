@@ -22,9 +22,8 @@ pub enum SparklineMode {
 #[derive(Clone, Copy, Default, PartialEq, Eq)]
 pub enum DetailMode {
     #[default]
-    Split,
+    Details,
     Diff,
-    Log,
 }
 
 #[derive(Clone, Copy, Default, PartialEq, Eq)]
@@ -46,9 +45,8 @@ impl GainMode {
 impl DetailMode {
     pub fn toggle(self) -> Self {
         match self {
-            DetailMode::Split => DetailMode::Diff,
-            DetailMode::Diff => DetailMode::Log,
-            DetailMode::Log => DetailMode::Split,
+            DetailMode::Details => DetailMode::Diff,
+            DetailMode::Diff => DetailMode::Details,
         }
     }
 }
@@ -134,6 +132,65 @@ pub fn sorted_family_keys_for_project(items: &[Interception], project: &str) -> 
     families.into_iter().map(|(k, _)| k).collect()
 }
 
+/// Returns the number of items shown in the active log/history panel.
+/// Used by the event loop to clamp the selection index.
+pub fn log_item_count(
+    items: &[Interception],
+    gain_mode: GainMode,
+    selected_family: Option<usize>,
+    selected_project: Option<usize>,
+    project_filter: Option<&str>,
+    report: &Report,
+    sorted_projects: &[(String, f32)],
+) -> usize {
+    match gain_mode {
+        GainMode::Project => {
+            let Some(idx) = selected_project else {
+                return 0;
+            };
+            let Some((name, _)) = sorted_projects.get(idx) else {
+                return 0;
+            };
+            items.iter().filter(|i| matches_project(i, name)).count()
+        }
+        GainMode::Family => {
+            let family_names: Vec<String> = if let Some(proj) = project_filter {
+                sorted_family_keys_for_project(items, proj)
+            } else {
+                let mut sorted: Vec<(&String, f32)> = report
+                    .by_family
+                    .iter()
+                    .map(|(k, v)| (k, v.savings_pct))
+                    .collect();
+                sorted.sort_by(|a, b| {
+                    b.1.partial_cmp(&a.1)
+                        .unwrap_or(std::cmp::Ordering::Equal)
+                        .then_with(|| a.0.cmp(b.0))
+                });
+                sorted.into_iter().map(|(k, _)| k.clone()).collect()
+            };
+            let Some(idx) = selected_family else { return 0 };
+            let Some(name) = family_names.get(idx) else {
+                return 0;
+            };
+            items
+                .iter()
+                .filter(|i| {
+                    if let Some(proj) = project_filter {
+                        if !matches_project(i, proj) {
+                            return false;
+                        }
+                    }
+                    serde_json::to_value(&i.command_family)
+                        .ok()
+                        .and_then(|v| v.as_str().map(|s| s == name.as_str()))
+                        .unwrap_or(false)
+                })
+                .count()
+        }
+    }
+}
+
 /// Render the gain dashboard:
 ///   - top:    summary stats (interceptions, tokens, savings %, cost USD)
 ///   - middle: one Gauge per command family, sorted by savings desc
@@ -153,6 +210,9 @@ pub fn render_gain(
     selected_project: Option<usize>,
     project_filter: Option<&str>,
     history_scroll: &mut usize,
+    log_scroll: &mut usize,
+    log_selected: Option<usize>,
+    gauge_scroll: &mut usize,
 ) {
     // Outer layout: stats | pool(family+detail) | sparkline
     let outer = Layout::default()
@@ -169,29 +229,36 @@ pub fn render_gain(
     if gain_mode == GainMode::Project {
         let pool = Layout::default()
             .direction(Direction::Vertical)
-            .constraints([Constraint::Percentage(50), Constraint::Percentage(50)])
+            .constraints([Constraint::Min(3), Constraint::Min(5)])
             .split(outer[1]);
-        let project_names = render_projects(frame, pool[0], report, selected_project);
+        let project_names = render_projects(frame, pool[0], report, selected_project, gauge_scroll);
         let sel_proj = selected_project
             .and_then(|i| project_names.get(i))
             .map(String::as_str);
-        render_project_log_panel(frame, pool[1], sel_proj, items, history_scroll);
+        let bottom = Layout::default()
+            .direction(Direction::Horizontal)
+            .constraints([Constraint::Percentage(50), Constraint::Percentage(50)])
+            .split(pool[1]);
+        let selected_proj_item =
+            render_project_log_panel(frame, bottom[0], sel_proj, items, log_scroll, log_selected);
+        render_project_detail(
+            frame,
+            bottom[1],
+            sel_proj,
+            items,
+            detail_mode,
+            history_scroll,
+            selected_proj_item,
+        );
         render_sparkline(frame, outer[2], items, sparkline_mode);
         return;
     }
 
-    // GainMode::Family — pool split family/detail
-    let pool = if detail_mode == DetailMode::Diff || detail_mode == DetailMode::Log {
-        Layout::default()
-            .direction(Direction::Vertical)
-            .constraints([Constraint::Percentage(50), Constraint::Percentage(50)])
-            .split(outer[1])
-    } else {
-        Layout::default()
-            .direction(Direction::Vertical)
-            .constraints([Constraint::Min(3), Constraint::Length(6)])
-            .split(outer[1])
-    };
+    // GainMode::Family — jauges pleine largeur, puis History | Detail en bas
+    let pool = Layout::default()
+        .direction(Direction::Vertical)
+        .constraints([Constraint::Min(3), Constraint::Min(5)])
+        .split(outer[1]);
 
     let filtered_items: Vec<Interception>;
     let display_items: &[Interception] = if let Some(proj) = project_filter {
@@ -211,17 +278,34 @@ pub fn render_gain(
         display_items,
         selected_family,
         project_filter,
+        gauge_scroll,
     );
     let sel_name = selected_family
         .and_then(|i| family_names.get(i))
         .map(String::as_str);
+
+    let bottom = Layout::default()
+        .direction(Direction::Horizontal)
+        .constraints([Constraint::Percentage(50), Constraint::Percentage(50)])
+        .split(pool[1]);
+
+    let selected_log_item = render_log_panel(
+        frame,
+        bottom[0],
+        sel_name,
+        display_items,
+        log_scroll,
+        log_selected,
+    );
+
     render_detail(
         frame,
-        pool[1],
+        bottom[1],
         sel_name,
         display_items,
         detail_mode,
         history_scroll,
+        selected_log_item,
     );
     render_sparkline(frame, outer[2], items, sparkline_mode);
 }
@@ -288,6 +372,25 @@ fn render_stats(
 
 // ── Family gauges ─────────────────────────────────────────────────────────────
 
+const GAUGE_MIN_HEIGHT: u16 = 2;
+
+/// Adjust scroll offset to keep `selected` visible in a window of `visible` items.
+fn adjust_gauge_scroll(
+    scroll: &mut usize,
+    selected: Option<usize>,
+    visible: usize,
+    max_scroll: usize,
+) {
+    if let Some(sel) = selected {
+        if sel < *scroll {
+            *scroll = sel;
+        } else if sel >= *scroll + visible {
+            *scroll = sel + 1 - visible;
+        }
+    }
+    *scroll = (*scroll).min(max_scroll);
+}
+
 fn render_families(
     frame: &mut Frame,
     area: Rect,
@@ -295,12 +398,13 @@ fn render_families(
     items: &[Interception],
     selected: Option<usize>,
     project_filter: Option<&str>,
+    gauge_scroll: &mut usize,
 ) -> Vec<String> {
     let title = if let Some(proj) = project_filter {
         let basename = project_label(proj);
-        format!(" By family  ·  project: {basename}  [j/u] nav  [b] projects ")
+        format!(" By family  ·  project: {basename}  [j/u] nav  [p] projects ")
     } else {
-        " By family  ·  global  [j/u] nav  [b] projects ".to_string()
+        " By family  ·  global  [j/u] nav  [p] projects ".to_string()
     };
     let block = Block::default().borders(Borders::ALL).title(title);
 
@@ -370,26 +474,35 @@ fn render_families(
         return vec![];
     }
 
-    // One row per family
-    let n = families.len() as u16;
+    let n = families.len();
     let inner = block.inner(area);
+    let visible = ((inner.height / GAUGE_MIN_HEIGHT) as usize).max(1);
+    let max_scroll = n.saturating_sub(visible);
+    adjust_gauge_scroll(gauge_scroll, selected, visible, max_scroll);
+
+    let scroll = *gauge_scroll;
+    let slice = &families[scroll..(scroll + visible).min(n)];
+
+    let scroll_hint = if n > visible {
+        format!(" [{}/{}] ", scroll + 1, n)
+    } else {
+        String::new()
+    };
+    let block = block.title(scroll_hint);
     frame.render_widget(block, area);
 
-    let row_height = (inner.height / n).max(1);
-    let constraints: Vec<Constraint> = families
+    let constraints: Vec<Constraint> = slice
         .iter()
-        .map(|_| Constraint::Length(row_height))
+        .map(|_| Constraint::Length(GAUGE_MIN_HEIGHT))
         .collect();
     let rows = Layout::default()
         .direction(Direction::Vertical)
         .constraints(constraints)
         .split(inner);
 
-    for (i, (name, pct)) in families.iter().enumerate() {
-        if i >= rows.len() {
-            break;
-        }
-        let is_sel = selected == Some(i);
+    for (i, (name, pct)) in slice.iter().enumerate() {
+        let global_idx = scroll + i;
+        let is_sel = selected == Some(global_idx);
         let color = if is_sel { Color::Green } else { Color::Yellow };
         let modifier = if is_sel {
             Modifier::BOLD
@@ -416,10 +529,11 @@ fn render_projects(
     area: Rect,
     report: &Report,
     selected: Option<usize>,
+    gauge_scroll: &mut usize,
 ) -> Vec<String> {
     let block = Block::default()
         .borders(Borders::ALL)
-        .title(" By project  [j/u] nav  [b] families ");
+        .title(" By project  [j/u] nav  [f] families ");
 
     if report.by_project.is_empty() {
         let paragraph = Paragraph::new("No data yet.").block(block);
@@ -445,25 +559,35 @@ fn render_projects(
             .then_with(|| a.0.cmp(b.0))
     });
 
-    let n = projects.len() as u16;
+    let n = projects.len();
     let inner = block.inner(area);
+    let visible = ((inner.height / GAUGE_MIN_HEIGHT) as usize).max(1);
+    let max_scroll = n.saturating_sub(visible);
+    adjust_gauge_scroll(gauge_scroll, selected, visible, max_scroll);
+
+    let scroll = *gauge_scroll;
+    let slice = &projects[scroll..(scroll + visible).min(n)];
+
+    let scroll_hint = if n > visible {
+        format!(" [{}/{}] ", scroll + 1, n)
+    } else {
+        String::new()
+    };
+    let block = block.title(scroll_hint);
     frame.render_widget(block, area);
 
-    let row_height = (inner.height / n).max(1);
-    let constraints: Vec<Constraint> = projects
+    let constraints: Vec<Constraint> = slice
         .iter()
-        .map(|_| Constraint::Length(row_height))
+        .map(|_| Constraint::Length(GAUGE_MIN_HEIGHT))
         .collect();
     let rows = Layout::default()
         .direction(Direction::Vertical)
         .constraints(constraints)
         .split(inner);
 
-    for (i, (name, pct)) in projects.iter().enumerate() {
-        if i >= rows.len() {
-            break;
-        }
-        let is_sel = selected == Some(i);
+    for (i, (name, pct)) in slice.iter().enumerate() {
+        let global_idx = scroll + i;
+        let is_sel = selected == Some(global_idx);
         let color = if is_sel { Color::Green } else { Color::Yellow };
         let modifier = if is_sel {
             Modifier::BOLD
@@ -484,13 +608,14 @@ fn render_projects(
     projects.iter().map(|(name, _)| name.to_string()).collect()
 }
 
-fn render_project_log_panel(
+fn render_project_log_panel<'a>(
     frame: &mut Frame,
     area: Rect,
     project_name: Option<&str>,
-    items: &[Interception],
+    items: &'a [Interception],
     history_scroll: &mut usize,
-) {
+    selected: Option<usize>,
+) -> Option<&'a Interception> {
     let Some(name) = project_name else {
         let block = Block::default()
             .borders(Borders::ALL)
@@ -501,67 +626,46 @@ fn render_project_log_panel(
         ))
         .block(block);
         frame.render_widget(p, area);
-        return;
+        return None;
     };
 
     let label = project_label(name);
-
-    let history: Vec<&Interception> = items
+    let filtered: Vec<&'a Interception> = items
         .iter()
         .filter(|i| matches_project(i, name))
         .rev()
         .collect();
-    let n = history.len();
-    // How many rows fit inside the block (subtract 2 for borders).
-    let visible = (area.height as usize).saturating_sub(2);
-    let max_scroll = n.saturating_sub(visible);
-    *history_scroll = (*history_scroll).min(max_scroll);
-    let scroll = *history_scroll;
-    let history: Vec<&Interception> = history.into_iter().skip(scroll).take(visible).collect();
-
-    let scroll_hint = if n > visible {
-        format!("[{}/{}]  [i/k] ", scroll + 1, n)
-    } else {
-        format!("{} entries ", n)
-    };
-    let block = Block::default()
-        .borders(Borders::ALL)
-        .title(format!(" Project history: {label} · {scroll_hint}"));
-    let inner = block.inner(area);
-    frame.render_widget(block, area);
-
-    let lines: Vec<Line> = history
-        .iter()
-        .map(|item| {
-            let ts = item.timestamp.get(..16).unwrap_or(&item.timestamp);
-            let cmd = truncate_cmd(&item.command, 30);
-            let sign = if item.savings_pct >= 0.0 { '-' } else { '+' };
-            let abs_pct = item.savings_pct.abs();
-            let text = format!(
-                "{ts:<16}  {cmd:<30}  {:>6} → {:>6}  {sign}{:.1}%",
-                item.tokens_before, item.tokens_after, abs_pct
-            );
-            Line::from(Span::styled(text, Style::default().fg(Color::Green)))
-        })
-        .collect();
-
-    frame.render_widget(Paragraph::new(lines), inner);
+    let n = filtered.len();
+    let selected_item = selected
+        .map(|s| s.min(n.saturating_sub(1)))
+        .and_then(|s| filtered.get(s).copied());
+    render_history_panel(
+        frame,
+        area,
+        &format!(" Project history: {label}"),
+        filtered,
+        history_scroll,
+        selected,
+        "",
+    );
+    selected_item
 }
 
 // ── Detail panel ──────────────────────────────────────────────────────────────
 
-fn render_detail(
+fn render_detail<'a>(
     frame: &mut Frame,
     area: Rect,
     family_name: Option<&str>,
-    items: &[Interception],
+    items: &'a [Interception],
     detail_mode: DetailMode,
     history_scroll: &mut usize,
+    selected_item: Option<&'a Interception>,
 ) {
     let Some(name) = family_name else {
         let block = Block::default().borders(Borders::ALL).title(" Detail ");
         let p = Paragraph::new(Span::styled(
-            " j u: select a family  [d] diff/log  [b] projects",
+            " j u: select a family  [d] diff/log  [p] projects",
             Style::default().fg(Color::DarkGray),
         ))
         .block(block);
@@ -569,23 +673,20 @@ fn render_detail(
         return;
     };
 
-    if detail_mode == DetailMode::Log {
-        render_log_panel(frame, area, name, items, history_scroll);
-        return;
-    }
-
-    // Find last interception for this family with actual differences
-    let last = items.iter().rev().find(|i| {
-        let matches_family = serde_json::to_value(&i.command_family)
-            .ok()
-            .and_then(|v| v.as_str().map(|s| s == name))
-            .unwrap_or(false);
-        let has_diff = i.content_before != i.content_after
-            && (i.content_before.is_some() || i.content_after.is_some());
-        matches_family && has_diff
+    // Use the explicitly selected item if provided, otherwise fall back to the last with differences.
+    let item = selected_item.or_else(|| {
+        items.iter().rev().find(|i| {
+            let matches_family = serde_json::to_value(&i.command_family)
+                .ok()
+                .and_then(|v| v.as_str().map(|s| s == name))
+                .unwrap_or(false);
+            let has_diff = i.content_before != i.content_after
+                && (i.content_before.is_some() || i.content_after.is_some());
+            matches_family && has_diff
+        })
     });
 
-    let Some(item) = last else {
+    let Some(item) = item else {
         let block = Block::default()
             .borders(Borders::ALL)
             .title(format!(" Detail: {name} "));
@@ -597,7 +698,54 @@ fn render_detail(
     if detail_mode == DetailMode::Diff {
         render_diff_panel(frame, area, name, item, history_scroll);
     } else {
-        render_split_panel(frame, area, name, item, history_scroll);
+        render_details_panel(frame, area, name, item, history_scroll);
+    }
+}
+
+fn render_project_detail<'a>(
+    frame: &mut Frame,
+    area: Rect,
+    project_name: Option<&str>,
+    items: &'a [Interception],
+    detail_mode: DetailMode,
+    history_scroll: &mut usize,
+    selected_item: Option<&'a Interception>,
+) {
+    let Some(name) = project_name else {
+        let block = Block::default().borders(Borders::ALL).title(" Detail ");
+        let p = Paragraph::new(Span::styled(
+            " j u: select a project  [d] diff  [f] families",
+            Style::default().fg(Color::DarkGray),
+        ))
+        .block(block);
+        frame.render_widget(p, area);
+        return;
+    };
+
+    let label = project_label(name);
+
+    // Use the explicitly selected item if provided, otherwise fall back to the last with differences.
+    let item = selected_item.or_else(|| {
+        items.iter().rev().find(|i| {
+            let has_diff = i.content_before != i.content_after
+                && (i.content_before.is_some() || i.content_after.is_some());
+            matches_project(i, name) && has_diff
+        })
+    });
+
+    let Some(item) = item else {
+        let block = Block::default()
+            .borders(Borders::ALL)
+            .title(format!(" Detail: {label} "));
+        let p = Paragraph::new("No interception with differences for this project.").block(block);
+        frame.render_widget(p, area);
+        return;
+    };
+
+    if detail_mode == DetailMode::Diff {
+        render_diff_panel(frame, area, &label, item, history_scroll);
+    } else {
+        render_details_panel(frame, area, &label, item, history_scroll);
     }
 }
 
@@ -648,7 +796,7 @@ fn wrap_plain_lines(text: &str, width: usize) -> Vec<String> {
     wrapped
 }
 
-fn render_split_panel(
+fn render_details_panel(
     frame: &mut Frame,
     area: Rect,
     name: &str,
@@ -706,9 +854,9 @@ fn render_split_panel(
     *history_scroll = (*history_scroll).min(max_scroll);
     let scroll = *history_scroll;
     let scroll_hint = if lines.len() > visible {
-        format!("[{}/{}]  [i/k]  [d] diff ", scroll + 1, lines.len())
+        format!("[{}/{}]  [o/l]  [d] diff ", scroll + 1, lines.len())
     } else {
-        format!("{} lines  [i/k] scroll  [d] diff ", lines.len())
+        format!("{} lines  [o/l] scroll  [d] diff ", lines.len())
     };
     let block = Block::default()
         .borders(Borders::ALL)
@@ -745,27 +893,24 @@ fn render_diff_panel(
         item.command.chars().take(40).collect()
     };
     let ts_short = item.timestamp.get(..16).unwrap_or(&item.timestamp);
-    let block = Block::default().borders(Borders::ALL).title(format!(
-        " Diff : {name} · {cmd_short} · {}→{} tok ({}{:.0}%) · {ts_short}  [d] log ",
-        item.tokens_before,
-        item.tokens_after,
-        if item.savings_pct >= 0.0 { '-' } else { '+' },
-        item.savings_pct.abs(),
-    ));
 
     let before_text = item.content_before.as_deref().unwrap_or("");
     let after_text = item.content_after.as_deref().unwrap_or("");
 
     if is_binary(before_text) || is_binary(after_text) {
+        let block = Block::default().borders(Borders::ALL).title(format!(
+            " Diff : {name} · {cmd_short} · {}→{} tok ({}{:.0}%) · {ts_short}  [d] detail ",
+            item.tokens_before,
+            item.tokens_after,
+            if item.savings_pct >= 0.0 { '-' } else { '+' },
+            item.savings_pct.abs(),
+        ));
         let p = Paragraph::new("Binary content — diff not available.")
             .block(block)
             .style(Style::default().fg(Color::DarkGray));
         frame.render_widget(p, area);
         return;
     }
-
-    let inner = block.inner(area);
-    frame.render_widget(block, area);
 
     let diff = TextDiff::from_lines(before_text, after_text);
 
@@ -811,11 +956,28 @@ fn render_diff_panel(
         )));
     }
 
+    // Build block after computing lines so scroll hint can be included.
     let n = lines.len();
-    let visible = inner.height as usize;
+    // Use a temporary block to compute inner height for visible calculation.
+    let tmp_block = Block::default().borders(Borders::ALL);
+    let visible = tmp_block.inner(area).height as usize;
     let max_scroll = n.saturating_sub(visible);
     *history_scroll = (*history_scroll).min(max_scroll);
     let scroll = *history_scroll;
+    let scroll_hint = if n > visible {
+        format!("[{}/{}]  [o/l]  [d] detail ", scroll + 1, n)
+    } else {
+        format!("{n} lines  [o/l] scroll  [d] detail ")
+    };
+    let block = Block::default().borders(Borders::ALL).title(format!(
+        " Diff : {name} · {cmd_short} · {}→{} tok ({}{:.0}%) · {ts_short} · {scroll_hint}",
+        item.tokens_before,
+        item.tokens_after,
+        if item.savings_pct >= 0.0 { '-' } else { '+' },
+        item.savings_pct.abs(),
+    ));
+    let inner = block.inner(area);
+    frame.render_widget(block, area);
 
     frame.render_widget(
         Paragraph::new(lines)
@@ -825,14 +987,25 @@ fn render_diff_panel(
     );
 }
 
-fn render_log_panel(
+fn render_log_panel<'a>(
     frame: &mut Frame,
     area: Rect,
-    name: &str,
-    items: &[Interception],
+    name: Option<&str>,
+    items: &'a [Interception],
     history_scroll: &mut usize,
-) {
-    let family_items: Vec<&Interception> = items
+    selected: Option<usize>,
+) -> Option<&'a Interception> {
+    let Some(name) = name else {
+        let block = Block::default().borders(Borders::ALL).title(" History ");
+        let p = Paragraph::new(Span::styled(
+            " j u: select a family",
+            Style::default().fg(Color::DarkGray),
+        ))
+        .block(block);
+        frame.render_widget(p, area);
+        return None;
+    };
+    let filtered: Vec<&'a Interception> = items
         .iter()
         .filter(|i| {
             serde_json::to_value(&i.command_family)
@@ -840,30 +1013,60 @@ fn render_log_panel(
                 .and_then(|v| v.as_str().map(|s| s == name))
                 .unwrap_or(false)
         })
+        .rev()
         .collect();
+    let n = filtered.len();
+    let selected_item = selected
+        .map(|s| s.min(n.saturating_sub(1)))
+        .and_then(|s| filtered.get(s).copied());
+    render_history_panel(
+        frame,
+        area,
+        &format!(" History: {name}"),
+        filtered,
+        history_scroll,
+        selected,
+        "",
+    );
+    selected_item
+}
 
-    let history: Vec<&Interception> = family_items.iter().rev().copied().collect();
+fn render_history_panel(
+    frame: &mut Frame,
+    area: Rect,
+    title: &str,
+    history: Vec<&Interception>,
+    history_scroll: &mut usize,
+    selected: Option<usize>,
+    extra_hint: &str,
+) {
     let n = history.len();
+    // How many rows fit inside the block (subtract 2 for borders).
     let visible = (area.height as usize).saturating_sub(2);
     let max_scroll = n.saturating_sub(visible);
-    *history_scroll = (*history_scroll).min(max_scroll);
+    // Clamp selected to valid range and use it to auto-scroll the view.
+    let clamped_selected = selected.map(|s| s.min(n.saturating_sub(1)));
+    adjust_gauge_scroll(history_scroll, clamped_selected, visible, max_scroll);
     let scroll = *history_scroll;
     let history: Vec<&Interception> = history.into_iter().skip(scroll).take(visible).collect();
 
-    let scroll_hint = if n > visible {
-        format!("[{}/{}]  [i/k]  [d] detail ", scroll + 1, n)
+    let hint = if let Some(sel) = clamped_selected {
+        format!("[{}/{}]  [i/k]  {extra_hint}", sel + 1, n)
+    } else if n > visible {
+        format!("[{}/{}]  [i/k]  {extra_hint}", scroll + 1, n)
     } else {
-        format!("{} entries  [d] detail ", n)
+        format!("{n} entries  {extra_hint}")
     };
     let block = Block::default()
         .borders(Borders::ALL)
-        .title(format!(" History: {name} · {scroll_hint}"));
+        .title(format!("{title} · {hint}"));
     let inner = block.inner(area);
     frame.render_widget(block, area);
 
     let lines: Vec<Line> = history
         .iter()
-        .map(|item| {
+        .enumerate()
+        .map(|(idx, item)| {
             let ts = item.timestamp.get(..16).unwrap_or(&item.timestamp);
             let cmd = truncate_cmd(&item.command, 30);
             let sign = if item.savings_pct >= 0.0 { '-' } else { '+' };
@@ -872,7 +1075,13 @@ fn render_log_panel(
                 "{ts:<16}  {cmd:<30}  {:>6} → {:>6}  {sign}{:.1}%",
                 item.tokens_before, item.tokens_after, abs_pct
             );
-            Line::from(Span::styled(text, Style::default().fg(Color::Green)))
+            let is_selected = clamped_selected.is_some_and(|s| s == scroll + idx);
+            let style = if is_selected {
+                Style::default().fg(Color::Black).bg(Color::Green)
+            } else {
+                Style::default().fg(Color::Green)
+            };
+            Line::from(Span::styled(text, style))
         })
         .collect();
 

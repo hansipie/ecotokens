@@ -7,6 +7,7 @@ use tantivy::schema::*;
 use tantivy::{doc, Index, IndexWriter};
 
 use super::embed::{embed_text, save_embeddings};
+use super::is_indexable_extension;
 use super::symbols::{parse_symbols, write_symbols};
 use super::text_docs::index_text_doc;
 
@@ -98,6 +99,12 @@ pub fn index_directory(opts: IndexOptions) -> tantivy::Result<IndexStats> {
             p.fetch_add(1, Ordering::Relaxed);
         }
 
+        // Skip files larger than 50 MB to avoid memory exhaustion
+        let file_size = std::fs::metadata(path).map(|m| m.len()).unwrap_or(0);
+        if file_size > 50 * 1024 * 1024 {
+            continue;
+        }
+
         let content = match std::fs::read_to_string(path) {
             Ok(c) => c,
             Err(_) => continue,
@@ -183,29 +190,4 @@ pub fn count_indexable_files(path: &Path) -> u64 {
             is_indexable_extension(ext)
         })
         .count() as u64
-}
-
-fn is_indexable_extension(ext: &str) -> bool {
-    matches!(
-        ext,
-        "rs" | "py"
-            | "js"
-            | "ts"
-            | "jsx"
-            | "tsx"
-            | "c"
-            | "h"
-            | "cpp"
-            | "cc"
-            | "cxx"
-            | "hpp"
-            | "hh"
-            | "hxx"
-            | "md"
-            | "toml"
-            | "json"
-            | "yaml"
-            | "yml"
-            | "txt"
-    )
 }

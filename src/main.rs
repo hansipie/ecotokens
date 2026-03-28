@@ -1,12 +1,14 @@
 use clap::{Parser, Subcommand};
 use ratatui::backend::CrosstermBackend;
-use ratatui::crossterm::event::{poll, read, Event, KeyCode, KeyModifiers};
+use ratatui::crossterm::event::{poll, read, Event, KeyCode, KeyEventKind, KeyModifiers};
 use ratatui::crossterm::terminal::{
     disable_raw_mode, enable_raw_mode, EnterAlternateScreen, LeaveAlternateScreen,
 };
 use ratatui::crossterm::ExecutableCommand;
 use ratatui::Terminal;
 use std::path::PathBuf;
+
+use crate::config::default_index_dir;
 
 mod config;
 mod daemon;
@@ -262,13 +264,6 @@ fn is_quit_key(key: &ratatui::crossterm::event::KeyEvent) -> bool {
     ) || (key.code == KeyCode::Char('c') && key.modifiers.contains(KeyModifiers::CONTROL))
 }
 
-fn default_index_dir() -> PathBuf {
-    dirs::config_dir()
-        .unwrap_or_else(|| PathBuf::from("."))
-        .join("ecotokens")
-        .join("index")
-}
-
 fn default_settings_path() -> PathBuf {
     dirs::home_dir()
         .unwrap_or_else(|| PathBuf::from("."))
@@ -409,6 +404,9 @@ fn cmd_gain(period: String, json: bool, model: Option<String>, history: bool) {
             let mut selected_project: Option<usize> = None;
             let mut project_filter: Option<String> = None;
             let mut history_scroll: usize = 0;
+            let mut log_scroll: usize = 0;
+            let mut log_selected: Option<usize> = None;
+            let mut gauge_scroll: usize = 0;
             let mut last_reload = std::time::Instant::now();
             // Precomputed once at load time, updated only on reload.
             let mut sorted_projects: Vec<(String, f32)> = sorted_projects_from(&report);
@@ -443,26 +441,38 @@ fn cmd_gain(period: String, json: bool, model: Option<String>, history: bool) {
                         selected_project,
                         project_filter.as_deref(),
                         &mut history_scroll,
+                        &mut log_scroll,
+                        log_selected,
+                        &mut gauge_scroll,
                     );
                 });
                 if poll(std::time::Duration::from_millis(500)).unwrap_or(false) {
                     if let Ok(Event::Key(key)) = read() {
+                        if key.kind != KeyEventKind::Press {
+                            continue;
+                        }
                         if is_quit_key(&key) {
                             break;
                         }
-                        if key.code == KeyCode::Char('b') {
+                        let switch_mode = (key.code == KeyCode::Char('p')
+                            && gain_mode == tui::gain::GainMode::Family)
+                            || (key.code == KeyCode::Char('f')
+                                && gain_mode == tui::gain::GainMode::Project);
+                        if switch_mode {
                             project_filter = None;
                             gain_mode = gain_mode.toggle();
                             history_scroll = 0;
+                            log_scroll = 0;
+                            log_selected = None;
+                            gauge_scroll = 0;
                         }
                         if key.code == KeyCode::Char('s') {
                             sparkline_mode = sparkline_mode.next();
                         }
-                        if key.code == KeyCode::Char('d')
-                            && gain_mode == tui::gain::GainMode::Family
-                        {
+                        if key.code == KeyCode::Char('d') {
                             detail_mode = detail_mode.toggle();
                             history_scroll = 0;
+                            log_scroll = 0;
                         }
                         if gain_mode == tui::gain::GainMode::Family && family_count > 0 {
                             match key.code {
@@ -472,6 +482,8 @@ fn cmd_gain(period: String, json: bool, model: Option<String>, history: bool) {
                                         Some(i) => (i + 1) % family_count,
                                     });
                                     history_scroll = 0;
+                                    log_scroll = 0;
+                                    log_selected = None;
                                 }
                                 KeyCode::Char('u') => {
                                     selected_family = Some(match selected_family {
@@ -485,6 +497,8 @@ fn cmd_gain(period: String, json: bool, model: Option<String>, history: bool) {
                                         }
                                     });
                                     history_scroll = 0;
+                                    log_scroll = 0;
+                                    log_selected = None;
                                 }
                                 _ => {}
                             }
@@ -497,6 +511,8 @@ fn cmd_gain(period: String, json: bool, model: Option<String>, history: bool) {
                                         Some(i) => (i + 1) % project_count,
                                     });
                                     history_scroll = 0;
+                                    log_scroll = 0;
+                                    log_selected = None;
                                 }
                                 KeyCode::Char('u') => {
                                     selected_project = Some(match selected_project {
@@ -510,27 +526,54 @@ fn cmd_gain(period: String, json: bool, model: Option<String>, history: bool) {
                                         }
                                     });
                                     history_scroll = 0;
+                                    log_scroll = 0;
+                                    log_selected = None;
                                 }
-                                KeyCode::Char('k') => {
+                                KeyCode::Char('l') => {
                                     history_scroll = history_scroll.saturating_add(1);
                                 }
-                                KeyCode::Char('i') => {
+                                KeyCode::Char('o') => {
                                     history_scroll = history_scroll.saturating_sub(1);
                                 }
                                 _ => {}
                             }
                         }
-                        // i/k scroll the active detail panel in Family mode.
+                        // o/l scroll the active detail panel in Family mode.
                         if gain_mode == tui::gain::GainMode::Family {
                             match key.code {
-                                KeyCode::Char('k') => {
+                                KeyCode::Char('l') => {
                                     history_scroll = history_scroll.saturating_add(1);
                                 }
-                                KeyCode::Char('i') => {
+                                KeyCode::Char('o') => {
                                     history_scroll = history_scroll.saturating_sub(1);
                                 }
                                 _ => {}
                             }
+                        }
+                        // i/k move the selected line in the History panel.
+                        match key.code {
+                            KeyCode::Char('k') => {
+                                let count = tui::gain::log_item_count(
+                                    &filtered_items,
+                                    gain_mode,
+                                    selected_family,
+                                    selected_project,
+                                    project_filter.as_deref(),
+                                    &report,
+                                    &sorted_projects,
+                                );
+                                if count > 0 {
+                                    log_selected =
+                                        Some(log_selected.map_or(0, |i| (i + 1).min(count - 1)));
+                                }
+                                history_scroll = 0;
+                            }
+                            KeyCode::Char('i') => {
+                                log_selected =
+                                    Some(log_selected.map_or(0, |i| i.saturating_sub(1)));
+                                history_scroll = 0;
+                            }
+                            _ => {}
                         }
                         if gain_mode == tui::gain::GainMode::Project
                             && key.code == KeyCode::Enter
@@ -542,6 +585,7 @@ fn cmd_gain(period: String, json: bool, model: Option<String>, history: bool) {
                                     gain_mode = tui::gain::GainMode::Family;
                                     selected_family = None;
                                     history_scroll = 0;
+                                    gauge_scroll = 0;
                                 }
                             }
                         }
@@ -645,8 +689,8 @@ fn cmd_install(target: String, ai_summary: bool, ai_summary_model: Option<String
                     }
                 }
                 let settings = config::Settings::load();
-                if settings.auto_watch && !install::are_qwen_session_hooks_installed(p) {
-                    match install::install_qwen_session_hooks(p) {
+                if settings.auto_watch && !install::are_session_hooks_installed(p) {
+                    match install::install_session_hooks(p) {
                         Ok(()) => println!(
                             "ecotokens session hooks installed (Qwen Code) → {}",
                             p.display()
@@ -761,7 +805,7 @@ fn cmd_uninstall(target: String) {
             Some(ref p) => {
                 let had_hook = install::is_qwen_hook_installed(p);
                 let had_mcp = install::is_qwen_mcp_registered(p);
-                let had_session = install::are_qwen_session_hooks_installed(p);
+                let had_session = install::are_session_hooks_installed(p);
                 match install::uninstall_qwen(p) {
                     Ok(()) => {
                         if had_hook {
@@ -783,7 +827,7 @@ fn cmd_uninstall(target: String) {
                     }
                 }
                 if had_session {
-                    match install::uninstall_qwen_session_hooks(p) {
+                    match install::uninstall_session_hooks(p) {
                         Ok(()) => {
                             println!(
                                 "ecotokens session hooks removed (Qwen Code) ← {}",
@@ -1753,9 +1797,9 @@ fn cmd_auto_watch_enable() {
 
     if let Some(ref qwen_path) = install::default_qwen_settings_path() {
         if install::is_qwen_hook_installed(qwen_path)
-            && !install::are_qwen_session_hooks_installed(qwen_path)
+            && !install::are_session_hooks_installed(qwen_path)
         {
-            if let Err(e) = install::install_qwen_session_hooks(qwen_path) {
+            if let Err(e) = install::install_session_hooks(qwen_path) {
                 eprintln!("Error installing session hooks (qwen): {e}");
                 std::process::exit(1);
             }

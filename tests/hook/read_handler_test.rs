@@ -1,12 +1,10 @@
+use ecotokens::config::default_index_dir;
 use ecotokens::hook::post_handler::PostFilterResult;
 use ecotokens::hook::read_handler::handle_read;
 use std::path::PathBuf;
 
 fn index_dir() -> PathBuf {
-    dirs::config_dir()
-        .unwrap_or_else(|| PathBuf::from("."))
-        .join("ecotokens")
-        .join("index")
+    default_index_dir()
 }
 
 #[test]

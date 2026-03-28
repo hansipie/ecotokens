@@ -29,6 +29,19 @@ pub fn try_ai_summary(output: &str, settings: &Settings) -> Result<String, Strin
         .as_deref()
         .unwrap_or(DEFAULT_OLLAMA_URL);
 
+    // Guard: only allow requests to localhost (prevent SSRF).
+    // Covers standard loopback forms; IPv4-mapped IPv6 (::ffff:127.0.0.1)
+    // is not expected in practice since Ollama binds to plain localhost.
+    {
+        let parsed = ollama_url
+            .parse::<reqwest::Url>()
+            .map_err(|e| format!("Invalid Ollama URL: {e}"))?;
+        let host = parsed.host_str().unwrap_or("");
+        if !matches!(host, "localhost" | "127.0.0.1" | "::1") {
+            return Err(format!("Ollama URL must point to localhost, got: {host}"));
+        }
+    }
+
     // Prepare prompt
     let prompt = format!(
         "Summarize this command output in <500 tokens. Keep ALL errors, warnings, and critical info. Remove verbose logs, stack traces >10 lines, and boilerplate. Format: brief overview, then bullet list of key points.\n\n{}",

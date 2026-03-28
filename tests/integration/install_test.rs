@@ -297,27 +297,41 @@ fn gemini_install_hook_writes_before_tool_entry() {
     );
 }
 
-#[test]
-fn gemini_install_hook_is_idempotent() {
-    let dir = TempDir::new().unwrap();
-    let path = temp_gemini_settings(&dir);
-
-    install_gemini_hook(&path).unwrap();
-    install_gemini_hook(&path).unwrap();
-
+fn assert_hook_idempotent(
+    settings_path: &std::path::Path,
+    install_fn: impl Fn(&std::path::Path),
+    hook_type: &str,
+    cmd_substr: &str,
+) {
+    install_fn(settings_path);
+    install_fn(settings_path);
     let v: serde_json::Value =
-        serde_json::from_str(&std::fs::read_to_string(&path).unwrap()).unwrap();
-    let hooks = v["hooks"]["BeforeTool"].as_array().unwrap();
+        serde_json::from_str(&std::fs::read_to_string(settings_path).unwrap()).unwrap();
+    let hooks = v["hooks"][hook_type].as_array().unwrap();
     let count = hooks
         .iter()
         .filter(|h| {
             h["hooks"][0]["command"]
                 .as_str()
                 .unwrap_or("")
-                .contains("hook-gemini")
+                .contains(cmd_substr)
         })
         .count();
     assert_eq!(count, 1, "should not duplicate the hook");
+}
+
+#[test]
+fn gemini_install_hook_is_idempotent() {
+    let dir = TempDir::new().unwrap();
+    let path = temp_gemini_settings(&dir);
+    assert_hook_idempotent(
+        &path,
+        |p| {
+            install_gemini_hook(p).unwrap();
+        },
+        "BeforeTool",
+        "hook-gemini",
+    );
 }
 
 #[test]
@@ -363,21 +377,22 @@ fn gemini_uninstall_removes_hook_and_mcp() {
     assert!(!is_gemini_mcp_registered(&path), "MCP should be removed");
 }
 
-#[test]
-fn gemini_uninstall_preserves_third_party_hooks() {
-    let dir = TempDir::new().unwrap();
-    let path = temp_gemini_settings(&dir);
-
+fn assert_uninstall_preserves_third_party(
+    settings_path: &std::path::Path,
+    hook_type: &str,
+    ecotokens_command: &str,
+    uninstall_fn: impl Fn(&std::path::Path),
+) {
     let initial = serde_json::json!({
         "hooks": {
-            "BeforeTool": [
+            hook_type: [
                 {
                     "matcher": "other_tool",
                     "hooks": [{"type": "command", "command": "other-hook"}]
                 },
                 {
                     "matcher": "run_shell_command",
-                    "hooks": [{"type": "command", "command": "ecotokens hook-gemini"}]
+                    "hooks": [{"type": "command", "command": ecotokens_command}]
                 }
             ]
         },
@@ -386,20 +401,20 @@ fn gemini_uninstall_preserves_third_party_hooks() {
             "ecotokens": {"command": "ecotokens", "args": ["mcp"], "type": "stdio"}
         }
     });
-    std::fs::write(&path, serde_json::to_string_pretty(&initial).unwrap()).unwrap();
-
-    uninstall_gemini(&path).unwrap();
-
+    std::fs::write(
+        settings_path,
+        serde_json::to_string_pretty(&initial).unwrap(),
+    )
+    .unwrap();
+    uninstall_fn(settings_path);
     let v: serde_json::Value =
-        serde_json::from_str(&std::fs::read_to_string(&path).unwrap()).unwrap();
-
-    let hooks = v["hooks"]["BeforeTool"].as_array().unwrap();
+        serde_json::from_str(&std::fs::read_to_string(settings_path).unwrap()).unwrap();
+    let hooks = v["hooks"][hook_type].as_array().unwrap();
     assert_eq!(hooks.len(), 1, "third-party hook should survive");
     assert_eq!(
         hooks[0]["hooks"][0]["command"].as_str().unwrap(),
         "other-hook"
     );
-
     assert!(
         v["mcpServers"]["other-server"].is_object(),
         "third-party MCP should survive"
@@ -408,6 +423,15 @@ fn gemini_uninstall_preserves_third_party_hooks() {
         v["mcpServers"]["ecotokens"].is_null(),
         "ecotokens MCP should be gone"
     );
+}
+
+#[test]
+fn gemini_uninstall_preserves_third_party_hooks() {
+    let dir = TempDir::new().unwrap();
+    let path = temp_gemini_settings(&dir);
+    assert_uninstall_preserves_third_party(&path, "BeforeTool", "ecotokens hook-gemini", |p| {
+        uninstall_gemini(p).unwrap();
+    });
 }
 
 #[test]
@@ -461,23 +485,14 @@ fn qwen_install_hook_writes_pre_tool_use_entry() {
 fn qwen_install_hook_is_idempotent() {
     let dir = TempDir::new().unwrap();
     let path = temp_qwen_settings(&dir);
-
-    install_qwen_hook(&path).unwrap();
-    install_qwen_hook(&path).unwrap();
-
-    let v: serde_json::Value =
-        serde_json::from_str(&std::fs::read_to_string(&path).unwrap()).unwrap();
-    let hooks = v["hooks"]["PreToolUse"].as_array().unwrap();
-    let count = hooks
-        .iter()
-        .filter(|h| {
-            h["hooks"][0]["command"]
-                .as_str()
-                .unwrap_or("")
-                .contains("hook-qwen")
-        })
-        .count();
-    assert_eq!(count, 1, "should not duplicate the hook");
+    assert_hook_idempotent(
+        &path,
+        |p| {
+            install_qwen_hook(p).unwrap();
+        },
+        "PreToolUse",
+        "hook-qwen",
+    );
 }
 
 #[test]
@@ -526,47 +541,9 @@ fn qwen_uninstall_removes_hook_and_mcp() {
 fn qwen_uninstall_preserves_third_party_hooks() {
     let dir = TempDir::new().unwrap();
     let path = temp_qwen_settings(&dir);
-
-    let initial = serde_json::json!({
-        "hooks": {
-            "PreToolUse": [
-                {
-                    "matcher": "other_tool",
-                    "hooks": [{"type": "command", "command": "other-hook"}]
-                },
-                {
-                    "matcher": "run_shell_command",
-                    "hooks": [{"type": "command", "command": "ecotokens hook-qwen"}]
-                }
-            ]
-        },
-        "mcpServers": {
-            "other-server": {"command": "other", "args": []},
-            "ecotokens": {"command": "ecotokens", "args": ["mcp"], "type": "stdio"}
-        }
+    assert_uninstall_preserves_third_party(&path, "PreToolUse", "ecotokens hook-qwen", |p| {
+        uninstall_qwen(p).unwrap();
     });
-    std::fs::write(&path, serde_json::to_string_pretty(&initial).unwrap()).unwrap();
-
-    uninstall_qwen(&path).unwrap();
-
-    let v: serde_json::Value =
-        serde_json::from_str(&std::fs::read_to_string(&path).unwrap()).unwrap();
-
-    let hooks = v["hooks"]["PreToolUse"].as_array().unwrap();
-    assert_eq!(hooks.len(), 1, "third-party hook should survive");
-    assert_eq!(
-        hooks[0]["hooks"][0]["command"].as_str().unwrap(),
-        "other-hook"
-    );
-
-    assert!(
-        v["mcpServers"]["other-server"].is_object(),
-        "third-party MCP should survive"
-    );
-    assert!(
-        v["mcpServers"]["ecotokens"].is_null(),
-        "ecotokens MCP should be gone"
-    );
 }
 
 #[test]
