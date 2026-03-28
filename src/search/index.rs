@@ -99,6 +99,12 @@ pub fn index_directory(opts: IndexOptions) -> tantivy::Result<IndexStats> {
             p.fetch_add(1, Ordering::Relaxed);
         }
 
+        // Skip files larger than 50 MB to avoid memory exhaustion
+        let file_size = std::fs::metadata(path).map(|m| m.len()).unwrap_or(0);
+        if file_size > 50 * 1024 * 1024 {
+            continue;
+        }
+
         let content = match std::fs::read_to_string(path) {
             Ok(c) => c,
             Err(_) => continue,

@@ -52,12 +52,19 @@ pub fn handle_hook_input(input: &HookInput, exclusions: &[String], _debug: bool)
 
 /// Top-level hook stdin→stdout handler (reads Claude Code PreToolUse JSON).
 pub fn handle() {
+    use super::MAX_STDIN_BYTES;
     use std::io::Read;
 
     let mut stdin = String::new();
     std::io::stdin()
+        .take(MAX_STDIN_BYTES as u64 + 1)
         .read_to_string(&mut stdin)
         .unwrap_or_default();
+
+    if stdin.len() > MAX_STDIN_BYTES {
+        print!("{stdin}");
+        return;
+    }
 
     let v: serde_json::Value = match serde_json::from_str(&stdin) {
         Ok(v) => v,
@@ -127,12 +134,19 @@ fn emit_allow(hook_event_name: &str, updated_input: Option<serde_json::Value>) {
 /// Reads a JSON payload with `tool_name` and `tool_input`, rewrites `tool_input.command`
 /// for shell tools, and emits a response using `hook_event_name`.
 fn handle_shell_tool_hook(hook_event_name: &str, label: &str) {
+    use super::MAX_STDIN_BYTES;
     use std::io::Read;
 
     let mut stdin = String::new();
     std::io::stdin()
+        .take(MAX_STDIN_BYTES as u64 + 1)
         .read_to_string(&mut stdin)
         .unwrap_or_default();
+
+    if stdin.len() > MAX_STDIN_BYTES {
+        emit_allow(hook_event_name, None);
+        return;
+    }
 
     let payload: ShellToolPayload = match serde_json::from_str(&stdin) {
         Ok(p) => p,

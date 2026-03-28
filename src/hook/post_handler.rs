@@ -130,11 +130,22 @@ pub fn metrics_command(input: &PostHookInput) -> String {
 }
 
 pub fn handle_post() {
+    use super::MAX_STDIN_BYTES;
+
     let settings = Settings::load();
     let depth = settings.post_hook_depth;
 
     let mut stdin_buf = String::new();
-    if io::stdin().read_to_string(&mut stdin_buf).is_err() {
+    if io::stdin()
+        .take(MAX_STDIN_BYTES as u64 + 1)
+        .read_to_string(&mut stdin_buf)
+        .is_err()
+    {
+        print!("{{}}");
+        return;
+    }
+
+    if stdin_buf.len() > MAX_STDIN_BYTES {
         print!("{{}}");
         return;
     }

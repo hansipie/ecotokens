@@ -1,6 +1,6 @@
 use clap::{Parser, Subcommand};
 use ratatui::backend::CrosstermBackend;
-use ratatui::crossterm::event::{poll, read, Event, KeyCode, KeyModifiers};
+use ratatui::crossterm::event::{poll, read, Event, KeyCode, KeyEventKind, KeyModifiers};
 use ratatui::crossterm::terminal::{
     disable_raw_mode, enable_raw_mode, EnterAlternateScreen, LeaveAlternateScreen,
 };
@@ -448,10 +448,15 @@ fn cmd_gain(period: String, json: bool, model: Option<String>, history: bool) {
                 });
                 if poll(std::time::Duration::from_millis(500)).unwrap_or(false) {
                     if let Ok(Event::Key(key)) = read() {
+                        if key.kind != KeyEventKind::Press {
+                            continue;
+                        }
                         if is_quit_key(&key) {
                             break;
                         }
-                        if key.code == KeyCode::Char('b') {
+                        let switch_mode = (key.code == KeyCode::Char('p') && gain_mode == tui::gain::GainMode::Family)
+                            || (key.code == KeyCode::Char('f') && gain_mode == tui::gain::GainMode::Project);
+                        if switch_mode {
                             project_filter = None;
                             gain_mode = gain_mode.toggle();
                             history_scroll = 0;
@@ -466,7 +471,6 @@ fn cmd_gain(period: String, json: bool, model: Option<String>, history: bool) {
                             detail_mode = detail_mode.toggle();
                             history_scroll = 0;
                             log_scroll = 0;
-                            log_selected = None;
                         }
                         if gain_mode == tui::gain::GainMode::Family && family_count > 0 {
                             match key.code {
@@ -547,7 +551,20 @@ fn cmd_gain(period: String, json: bool, model: Option<String>, history: bool) {
                         // i/k move the selected line in the History panel.
                         match key.code {
                             KeyCode::Char('k') => {
-                                log_selected = Some(log_selected.map_or(0, |i| i + 1));
+                                let count = tui::gain::log_item_count(
+                                    &filtered_items,
+                                    gain_mode,
+                                    selected_family,
+                                    selected_project,
+                                    project_filter.as_deref(),
+                                    &report,
+                                    &sorted_projects,
+                                );
+                                if count > 0 {
+                                    log_selected = Some(
+                                        log_selected.map_or(0, |i| (i + 1).min(count - 1)),
+                                    );
+                                }
                                 history_scroll = 0;
                             }
                             KeyCode::Char('i') => {

@@ -56,5 +56,19 @@ pub fn mask(text: &str) -> (String, bool) {
         redacted = true;
     }
 
+    // Slack tokens
+    let re_slack = regex!(r"xox[bpoa]-[A-Za-z0-9-]{10,}");
+    if re_slack.is_match(&out) {
+        out = re_slack.replace_all(&out, "[SLACK_TOKEN]").into_owned();
+        redacted = true;
+    }
+
+    // Stripe secret keys
+    let re_stripe = regex!(r"sk_(live|test)_[A-Za-z0-9]{24,}");
+    if re_stripe.is_match(&out) {
+        out = re_stripe.replace_all(&out, "[STRIPE_KEY]").into_owned();
+        redacted = true;
+    }
+
     (out, redacted)
 }

@@ -22,9 +22,8 @@ pub enum SparklineMode {
 #[derive(Clone, Copy, Default, PartialEq, Eq)]
 pub enum DetailMode {
     #[default]
-    Split,
+    Details,
     Diff,
-    Log,
 }
 
 #[derive(Clone, Copy, Default, PartialEq, Eq)]
@@ -46,9 +45,8 @@ impl GainMode {
 impl DetailMode {
     pub fn toggle(self) -> Self {
         match self {
-            DetailMode::Split => DetailMode::Diff,
-            DetailMode::Diff => DetailMode::Log,
-            DetailMode::Log => DetailMode::Split,
+            DetailMode::Details => DetailMode::Diff,
+            DetailMode::Diff => DetailMode::Details,
         }
     }
 }
@@ -134,6 +132,65 @@ pub fn sorted_family_keys_for_project(items: &[Interception], project: &str) -> 
     families.into_iter().map(|(k, _)| k).collect()
 }
 
+/// Returns the number of items shown in the active log/history panel.
+/// Used by the event loop to clamp the selection index.
+pub fn log_item_count(
+    items: &[Interception],
+    gain_mode: GainMode,
+    selected_family: Option<usize>,
+    selected_project: Option<usize>,
+    project_filter: Option<&str>,
+    report: &Report,
+    sorted_projects: &[(String, f32)],
+) -> usize {
+    match gain_mode {
+        GainMode::Project => {
+            let Some(idx) = selected_project else {
+                return 0;
+            };
+            let Some((name, _)) = sorted_projects.get(idx) else {
+                return 0;
+            };
+            items.iter().filter(|i| matches_project(i, name)).count()
+        }
+        GainMode::Family => {
+            let family_names: Vec<String> = if let Some(proj) = project_filter {
+                sorted_family_keys_for_project(items, proj)
+            } else {
+                let mut sorted: Vec<(&String, f32)> = report
+                    .by_family
+                    .iter()
+                    .map(|(k, v)| (k, v.savings_pct))
+                    .collect();
+                sorted.sort_by(|a, b| {
+                    b.1.partial_cmp(&a.1)
+                        .unwrap_or(std::cmp::Ordering::Equal)
+                        .then_with(|| a.0.cmp(b.0))
+                });
+                sorted.into_iter().map(|(k, _)| k.clone()).collect()
+            };
+            let Some(idx) = selected_family else { return 0 };
+            let Some(name) = family_names.get(idx) else {
+                return 0;
+            };
+            items
+                .iter()
+                .filter(|i| {
+                    if let Some(proj) = project_filter {
+                        if !matches_project(i, proj) {
+                            return false;
+                        }
+                    }
+                    serde_json::to_value(&i.command_family)
+                        .ok()
+                        .and_then(|v| v.as_str().map(|s| s == name.as_str()))
+                        .unwrap_or(false)
+                })
+                .count()
+        }
+    }
+}
+
 /// Render the gain dashboard:
 ///   - top:    summary stats (interceptions, tokens, savings %, cost USD)
 ///   - middle: one Gauge per command family, sorted by savings desc
@@ -184,17 +241,12 @@ pub fn render_gain(
             .split(pool[1]);
         let selected_proj_item =
             render_project_log_panel(frame, bottom[0], sel_proj, items, log_scroll, log_selected);
-        let effective_detail = if detail_mode == DetailMode::Log {
-            DetailMode::Split
-        } else {
-            detail_mode
-        };
         render_project_detail(
             frame,
             bottom[1],
             sel_proj,
             items,
-            effective_detail,
+            detail_mode,
             history_scroll,
             selected_proj_item,
         );
@@ -246,18 +298,12 @@ pub fn render_gain(
         log_selected,
     );
 
-    // En mode Log, l'historique est déjà à gauche — fallback vers Split à droite
-    let effective_detail = if detail_mode == DetailMode::Log {
-        DetailMode::Split
-    } else {
-        detail_mode
-    };
     render_detail(
         frame,
         bottom[1],
         sel_name,
         display_items,
-        effective_detail,
+        detail_mode,
         history_scroll,
         selected_log_item,
     );
@@ -356,9 +402,9 @@ fn render_families(
 ) -> Vec<String> {
     let title = if let Some(proj) = project_filter {
         let basename = project_label(proj);
-        format!(" By family  ·  project: {basename}  [j/u] nav  [b] projects ")
+        format!(" By family  ·  project: {basename}  [j/u] nav  [p] projects ")
     } else {
-        " By family  ·  global  [j/u] nav  [b] projects ".to_string()
+        " By family  ·  global  [j/u] nav  [p] projects ".to_string()
     };
     let block = Block::default().borders(Borders::ALL).title(title);
 
@@ -487,7 +533,7 @@ fn render_projects(
 ) -> Vec<String> {
     let block = Block::default()
         .borders(Borders::ALL)
-        .title(" By project  [j/u] nav  [b] families ");
+        .title(" By project  [j/u] nav  [f] families ");
 
     if report.by_project.is_empty() {
         let paragraph = Paragraph::new("No data yet.").block(block);
@@ -619,18 +665,13 @@ fn render_detail<'a>(
     let Some(name) = family_name else {
         let block = Block::default().borders(Borders::ALL).title(" Detail ");
         let p = Paragraph::new(Span::styled(
-            " j u: select a family  [d] diff/log  [b] projects",
+            " j u: select a family  [d] diff/log  [p] projects",
             Style::default().fg(Color::DarkGray),
         ))
         .block(block);
         frame.render_widget(p, area);
         return;
     };
-
-    if detail_mode == DetailMode::Log {
-        render_log_panel(frame, area, Some(name), items, history_scroll, None);
-        return;
-    }
 
     // Use the explicitly selected item if provided, otherwise fall back to the last with differences.
     let item = selected_item.or_else(|| {
@@ -657,7 +698,7 @@ fn render_detail<'a>(
     if detail_mode == DetailMode::Diff {
         render_diff_panel(frame, area, name, item, history_scroll);
     } else {
-        render_split_panel(frame, area, name, item, history_scroll);
+        render_details_panel(frame, area, name, item, history_scroll);
     }
 }
 
@@ -673,7 +714,7 @@ fn render_project_detail<'a>(
     let Some(name) = project_name else {
         let block = Block::default().borders(Borders::ALL).title(" Detail ");
         let p = Paragraph::new(Span::styled(
-            " j u: select a project  [d] diff  [b] families",
+            " j u: select a project  [d] diff  [f] families",
             Style::default().fg(Color::DarkGray),
         ))
         .block(block);
@@ -704,7 +745,7 @@ fn render_project_detail<'a>(
     if detail_mode == DetailMode::Diff {
         render_diff_panel(frame, area, &label, item, history_scroll);
     } else {
-        render_split_panel(frame, area, &label, item, history_scroll);
+        render_details_panel(frame, area, &label, item, history_scroll);
     }
 }
 
@@ -755,7 +796,7 @@ fn wrap_plain_lines(text: &str, width: usize) -> Vec<String> {
     wrapped
 }
 
-fn render_split_panel(
+fn render_details_panel(
     frame: &mut Frame,
     area: Rect,
     name: &str,
@@ -858,7 +899,7 @@ fn render_diff_panel(
 
     if is_binary(before_text) || is_binary(after_text) {
         let block = Block::default().borders(Borders::ALL).title(format!(
-            " Diff : {name} · {cmd_short} · {}→{} tok ({}{:.0}%) · {ts_short}  [d] log ",
+            " Diff : {name} · {cmd_short} · {}→{} tok ({}{:.0}%) · {ts_short}  [d] detail ",
             item.tokens_before,
             item.tokens_after,
             if item.savings_pct >= 0.0 { '-' } else { '+' },
@@ -924,9 +965,9 @@ fn render_diff_panel(
     *history_scroll = (*history_scroll).min(max_scroll);
     let scroll = *history_scroll;
     let scroll_hint = if n > visible {
-        format!("[{}/{}]  [o/l]  [d] log ", scroll + 1, n)
+        format!("[{}/{}]  [o/l]  [d] detail ", scroll + 1, n)
     } else {
-        format!("{n} lines  [o/l] scroll  [d] log ")
+        format!("{n} lines  [o/l] scroll  [d] detail ")
     };
     let block = Block::default().borders(Borders::ALL).title(format!(
         " Diff : {name} · {cmd_short} · {}→{} tok ({}{:.0}%) · {ts_short} · {scroll_hint}",
@@ -985,7 +1026,7 @@ fn render_log_panel<'a>(
         filtered,
         history_scroll,
         selected,
-        "[d] detail ",
+        "",
     );
     selected_item
 }

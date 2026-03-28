@@ -64,3 +64,17 @@ fn url_with_credentials_is_masked() {
     assert!(out.contains("[CREDENTIALS]"), "got: {out}");
     assert!(redacted);
 }
+
+#[test]
+fn slack_token_is_masked() {
+    let (out, redacted) = mask("hook_url: xoxb-1234567890-abcdefghijkl");
+    assert!(out.contains("[SLACK_TOKEN]"), "got: {out}");
+    assert!(redacted);
+}
+
+#[test]
+fn stripe_key_is_masked() {
+    let (out, redacted) = mask("key: sk_LIVE_XXXXXXXXXXXXXXXXXXXXXXXX");
+    assert!(out.contains("[STRIPE_KEY]"), "got: {out}");
+    assert!(redacted);
+}
