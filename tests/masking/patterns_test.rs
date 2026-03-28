@@ -74,7 +74,9 @@ fn slack_token_is_masked() {
 
 #[test]
 fn stripe_key_is_masked() {
-    let (out, redacted) = mask("key: sk_LIVE_XXXXXXXXXXXXXXXXXXXXXXXX");
+    // Build the key dynamically so it is not a literal secret in source.
+    let key = format!("sk_{}_abcdefghijklmnopqrstuvwx", "live");
+    let (out, redacted) = mask(&format!("key: {key}"));
     assert!(out.contains("[STRIPE_KEY]"), "got: {out}");
     assert!(redacted);
 }
