@@ -454,8 +454,10 @@ fn cmd_gain(period: String, json: bool, model: Option<String>, history: bool) {
                         if is_quit_key(&key) {
                             break;
                         }
-                        let switch_mode = (key.code == KeyCode::Char('p') && gain_mode == tui::gain::GainMode::Family)
-                            || (key.code == KeyCode::Char('f') && gain_mode == tui::gain::GainMode::Project);
+                        let switch_mode = (key.code == KeyCode::Char('p')
+                            && gain_mode == tui::gain::GainMode::Family)
+                            || (key.code == KeyCode::Char('f')
+                                && gain_mode == tui::gain::GainMode::Project);
                         if switch_mode {
                             project_filter = None;
                             gain_mode = gain_mode.toggle();
@@ -561,9 +563,8 @@ fn cmd_gain(period: String, json: bool, model: Option<String>, history: bool) {
                                     &sorted_projects,
                                 );
                                 if count > 0 {
-                                    log_selected = Some(
-                                        log_selected.map_or(0, |i| (i + 1).min(count - 1)),
-                                    );
+                                    log_selected =
+                                        Some(log_selected.map_or(0, |i| (i + 1).min(count - 1)));
                                 }
                                 history_scroll = 0;
                             }
