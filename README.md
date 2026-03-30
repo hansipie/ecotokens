@@ -16,7 +16,7 @@
 Token-saving companion for [Claude Code](https://claude.ai/code), [Gemini CLI](https://github.com/google-gemini/gemini-cli), and [Qwen Code](https://github.com/QwenLM/qwen-code). Built on a *"set it and forget it!"* philosophy: one install command, zero configuration, and ecotokens works automatically from there — intercepting tool outputs before they reach the model, filtering the noise, and recording how many tokens you saved.
 
 <p align="center">
-  <img src="assets/demo.gif" alt="ecotokens demo" width="800">
+  <img src="assets/demo.0.10.0.gif" alt="ecotokens demo" width="800">
 </p>
 
 ## Features highlight
