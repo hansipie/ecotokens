@@ -1825,6 +1825,14 @@ fn cmd_auto_watch_disable() {
     println!("✓ auto-watch disabled");
 }
 
+fn parse_version(v: &str) -> Option<(u32, u32, u32)> {
+    let mut parts = v.splitn(3, '.');
+    let major = parts.next()?.parse().ok()?;
+    let minor = parts.next()?.parse().ok()?;
+    let patch = parts.next()?.parse().ok()?;
+    Some((major, minor, patch))
+}
+
 fn cmd_update(check: bool) {
     let current = env!("CARGO_PKG_VERSION");
     let client = match reqwest::blocking::Client::builder()
@@ -1860,7 +1868,10 @@ fn cmd_update(check: bool) {
         return;
     }
 
-    if latest == current {
+    let v_latest = parse_version(latest);
+    let v_current = parse_version(current);
+
+    if v_latest <= v_current {
         println!("Already up to date (v{}).", current);
         return;
     }
