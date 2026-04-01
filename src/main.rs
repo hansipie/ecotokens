@@ -200,6 +200,12 @@ enum Commands {
         #[arg(long, short = 'y')]
         yes: bool,
     },
+    /// Check for and install the latest ecotokens version
+    Update {
+        /// Only check for updates, do not install
+        #[arg(long)]
+        check: bool,
+    },
 }
 
 #[derive(Subcommand)]
@@ -1819,6 +1825,73 @@ fn cmd_auto_watch_disable() {
     println!("✓ auto-watch disabled");
 }
 
+fn cmd_update(check: bool) {
+    let current = env!("CARGO_PKG_VERSION");
+    let client = match reqwest::blocking::Client::builder()
+        .user_agent(format!("ecotokens/{}", current))
+        .build()
+    {
+        Ok(c) => c,
+        Err(e) => {
+            eprintln!("Failed to build HTTP client: {}", e);
+            return;
+        }
+    };
+
+    let resp = match client
+        .get("https://api.github.com/repos/hansipie/ecotokens/releases/latest")
+        .send()
+        .and_then(|r| r.json::<serde_json::Value>())
+    {
+        Ok(v) => v,
+        Err(e) => {
+            eprintln!("Failed to fetch latest release: {}", e);
+            return;
+        }
+    };
+
+    let latest = resp["tag_name"]
+        .as_str()
+        .unwrap_or("")
+        .trim_start_matches('v');
+
+    if latest.is_empty() {
+        eprintln!("Could not determine latest version.");
+        return;
+    }
+
+    if latest == current {
+        println!("Already up to date (v{}).", current);
+        return;
+    }
+
+    println!(
+        "New version available: v{} (current: v{}).",
+        latest, current
+    );
+
+    if check {
+        println!("Run 'ecotokens update' to install.");
+        return;
+    }
+
+    println!("Running: cargo install ecotokens ...");
+    match std::process::Command::new("cargo")
+        .args(["install", "ecotokens"])
+        .status()
+    {
+        Ok(s) if s.success() => println!("Updated to v{}.", latest),
+        Ok(_) => eprintln!("cargo install failed."),
+        Err(_) => {
+            eprintln!("cargo not found.");
+            println!(
+                "Download manually: https://github.com/hansipie/ecotokens/releases/tag/v{}",
+                latest
+            );
+        }
+    }
+}
+
 fn main() {
     let cli = Cli::parse();
     match cli.command {
@@ -1899,6 +1972,7 @@ fn main() {
         } => cmd_clear(all, before, older_than, family, project, yes),
         Commands::SessionStart => cmd_session_start(),
         Commands::SessionEnd => cmd_session_end(),
+        Commands::Update { check } => cmd_update(check),
         Commands::AutoWatch { action } => match action {
             AutoWatchAction::Enable => cmd_auto_watch_enable(),
             AutoWatchAction::Disable => cmd_auto_watch_disable(),
