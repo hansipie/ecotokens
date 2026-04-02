@@ -337,19 +337,7 @@ Filtering is aggressive on noise, conservative on signal:
 - **Errors are always preserved** — `error[`, `FAILED`, `E   ` (pytest), `--- FAIL:` (Go), stack traces and panic messages are never removed
 - **Failure sections are fully kept** — structured blocks (`=== FAILURES ===`, `failures:`, failure diffs) are always passed through in their entirety
 - **Conservative fallback** — if a family filter doesn't improve the output (filtered ≥ original), the original is returned as-is
-- **Secrets are redacted before filtering** — sensitive values are detected and replaced before any content reaches the model:
-
-  | Pattern | Replaced by |
-  |---|---|
-  | AWS Access Key (`AKIA…`) | `[AWS_KEY]` |
-  | GitHub PAT (`ghp_…`) | `[GITHUB_TOKEN]` |
-  | Bearer token | `[BEARER_TOKEN]` |
-  | PEM private key | `[PRIVATE_KEY]` |
-  | `.env` secrets (`SECRET=`, `TOKEN=`, `API_KEY=`…) | `[REDACTED]` |
-  | JWT token | `[JWT_TOKEN]` |
-  | URL credentials (`user:pass@host`) | `[CREDENTIALS]` |
-  | Slack token (`xox[bpoa]-…`) | `[SLACK_TOKEN]` |
-  | Stripe secret key (`sk_live/test_…`) | `[STRIPE_KEY]` |
+- **Secrets are redacted before filtering** — 33 patterns covering cloud keys, AI APIs, VCS tokens, payment secrets and more are detected and replaced before any content reaches the model. See [`docs/secret-patterns.md`](docs/secret-patterns.md) for the full list.
 - **UTF-8 safe truncation** — truncation always happens at character boundaries, never mid-codepoint
 - **Head + tail preservation** — when generic truncation applies, the first and last 20 lines are always kept (start context + end result)
 
