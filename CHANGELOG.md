@@ -7,8 +7,17 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ## [0.13.0] - 2026-04-02
 
+### Added
+- SQLite metrics backend (`metrics.db`) via `rusqlite` with bundled SQLite
+
 ### Changed
-- No commits after tag v0.12.0 in git history at the time of this changelog update; release notes will be finalized once new commits are merged.
+- Metrics storage migrated from JSONL to SQLite with schema/index initialization on open
+- Default metrics path changed from `metrics.jsonl` to `metrics.db`
+- Legacy `metrics.jsonl` is migrated automatically and preserved as `metrics.jsonl.migrated`
+
+### Fixed
+- Read paths now trigger legacy migration too: `ecotokens gain` can migrate existing JSONL data even when no SQLite file exists yet
+- Integration/performance tests updated for SQLite-backed metrics store
 
 ## [0.12.0] - 2026-04-02
 
