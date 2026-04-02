@@ -118,6 +118,72 @@ fn old_jsonl_without_content_fields_deserializes_ok() {
 }
 
 #[test]
+fn migration_resumes_from_migrating_file_after_crash() {
+    let dir = TempDir::new().unwrap();
+    let path = metrics_file(&dir);
+    let migrating_path = path.with_extension("jsonl.migrating");
+
+    let line = r#"{"id":"crash-id","timestamp":"2026-01-01T00:00:00+00:00","command":"cargo test","command_family":"cargo","git_root":null,"tokens_before":500,"tokens_after":200,"savings_pct":60.0,"mode":"filtered","redacted":false,"duration_ms":5}"#;
+    std::fs::write(&migrating_path, format!("{line}\n")).unwrap();
+
+    let items = read_from(&path).unwrap();
+
+    assert_eq!(items.len(), 1);
+    assert_eq!(items[0].id, "crash-id");
+    assert!(
+        !migrating_path.exists(),
+        ".migrating doit être renommé en .migrated"
+    );
+    assert!(path.with_extension("jsonl.migrated").exists());
+}
+
+#[test]
+fn concurrent_migration_produces_no_duplicates_and_no_error() {
+    use std::sync::{Arc, Barrier};
+    use std::thread;
+
+    let dir = TempDir::new().unwrap();
+    let path = metrics_file(&dir);
+    let jsonl_path = path.with_extension("jsonl");
+
+    let lines: Vec<String> = (0..3)
+        .map(|i| format!(
+            r#"{{"id":"concurrent-{i}","timestamp":"2026-01-01T00:00:0{i}+00:00","command":"git log","command_family":"git","git_root":null,"tokens_before":100,"tokens_after":50,"savings_pct":50.0,"mode":"filtered","redacted":false,"duration_ms":1}}"#
+        ))
+        .collect();
+    std::fs::write(&jsonl_path, lines.join("\n") + "\n").unwrap();
+
+    let path = Arc::new(path);
+    let barrier = Arc::new(Barrier::new(2));
+
+    let handles: Vec<_> = (0..2)
+        .map(|_| {
+            let path = Arc::clone(&path);
+            let barrier = Arc::clone(&barrier);
+            thread::spawn(move || {
+                barrier.wait();
+                read_from(&path)
+            })
+        })
+        .collect();
+
+    for h in handles {
+        assert!(
+            h.join().unwrap().is_ok(),
+            "read_from doit réussir en concurrence"
+        );
+    }
+
+    let final_items = read_from(&path).unwrap();
+    assert_eq!(
+        final_items.len(),
+        3,
+        "exactement 3 enregistrements, pas de doublon"
+    );
+    assert!(!jsonl_path.exists(), "metrics.jsonl doit avoir été renommé");
+}
+
+#[test]
 fn content_is_stored_and_truncated() {
     let long = "x".repeat(5000);
     let item = Interception::new(
