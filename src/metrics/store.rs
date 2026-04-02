@@ -180,11 +180,27 @@ fn open_conn(path: &Path) -> io::Result<Connection> {
 
 fn migrate_from_jsonl_if_needed(db_path: &Path, conn: &Connection) -> io::Result<()> {
     let jsonl_path = db_path.with_extension("jsonl");
-    if !jsonl_path.exists() {
-        return Ok(());
-    }
+    let migrating_path = db_path.with_extension("jsonl.migrating");
+    let migrated_path = db_path.with_extension("jsonl.migrated");
 
-    let content = std::fs::read_to_string(&jsonl_path)?;
+    // Claim atomique via rename : sur POSIX, rename() est atomique sur le même
+    // filesystem. Un seul processus peut réussir ; les autres reçoivent NotFound
+    // et retournent immédiatement.
+    //
+    // Crash recovery : si .migrating existe déjà (processus crashé entre les
+    // deux renames), on reprend la migration depuis ce fichier. Les INSERT OR
+    // IGNORE rendent l'opération idempotente.
+    let source = if migrating_path.exists() {
+        migrating_path.clone()
+    } else {
+        match std::fs::rename(&jsonl_path, &migrating_path) {
+            Ok(()) => migrating_path.clone(),
+            Err(e) if e.kind() == io::ErrorKind::NotFound => return Ok(()),
+            Err(e) => return Err(e),
+        }
+    };
+
+    let content = std::fs::read_to_string(&source)?;
     let tx = conn.unchecked_transaction().map_err(io::Error::other)?;
 
     for line in content.lines() {
@@ -199,9 +215,13 @@ fn migrate_from_jsonl_if_needed(db_path: &Path, conn: &Connection) -> io::Result
 
     tx.commit().map_err(io::Error::other)?;
 
-    // Renommer en .migrated pour conserver une sauvegarde non-destructive
-    let migrated_path = db_path.with_extension("jsonl.migrated");
-    std::fs::rename(&jsonl_path, &migrated_path)?;
+    // Archivage final — ignorer NotFound : deux processus en crash-recovery
+    // peuvent tous deux arriver ici ; le second rename échoue sans dommage.
+    if let Err(e) = std::fs::rename(&source, &migrated_path) {
+        if e.kind() != io::ErrorKind::NotFound {
+            return Err(e);
+        }
+    }
 
     Ok(())
 }
@@ -283,7 +303,8 @@ pub fn append_to(path: &Path, interception: &Interception) -> io::Result<()> {
 /// Read all Interceptions from the SQLite store at `path`.
 pub fn read_from(path: &Path) -> io::Result<Vec<Interception>> {
     let legacy_jsonl_path = path.with_extension("jsonl");
-    if !path.exists() && !legacy_jsonl_path.exists() {
+    let migrating_path = path.with_extension("jsonl.migrating");
+    if !path.exists() && !legacy_jsonl_path.exists() && !migrating_path.exists() {
         return Ok(vec![]);
     }
     let conn = open_conn(path)?;
