@@ -5,6 +5,20 @@ All notable changes to this project will be documented in this file.
 The format is based on [Keep a Changelog](https://keepachangelog.com/en/1.0.0/),
 and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0.html).
 
+## [0.13.0] - 2026-04-02
+
+### Added
+- SQLite metrics backend (`metrics.db`) via `rusqlite` with bundled SQLite
+
+### Changed
+- Metrics storage migrated from JSONL to SQLite with schema/index initialization on open
+- Default metrics path changed from `metrics.jsonl` to `metrics.db`
+- Legacy `metrics.jsonl` is migrated automatically and preserved as `metrics.jsonl.migrated`
+
+### Fixed
+- Read paths now trigger legacy migration too: `ecotokens gain` can migrate existing JSONL data even when no SQLite file exists yet
+- Integration/performance tests updated for SQLite-backed metrics store
+
 ## [0.12.0] - 2026-04-02
 
 ### Security
@@ -141,9 +155,10 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 - `ecotokens install` / `uninstall` / `config` commands
 - MIT license
 
-[0.12.0]: https://github.com/hansipie/ecotokens/compare/v0.11.0...v0.12.0
-[0.11.0]: https://github.com/hansipie/ecotokens/compare/v0.10.0...v0.11.0
-[0.10.0]: https://github.com/hansipie/ecotokens/compare/v0.9.0...v0.10.0
+[0.13.0]: https://github.com/hansipie/ecotokens/releases/tag/v0.13.0
+[0.12.0]: https://github.com/hansipie/ecotokens/releases/tag/v0.12.0
+[0.11.0]: https://github.com/hansipie/ecotokens/releases/tag/v0.11.0
+[0.10.0]: https://github.com/hansipie/ecotokens/releases/tag/v0.10.0
 [0.9.0]: https://github.com/hansipie/ecotokens/releases/tag/v0.9.0
 [0.8.0]: https://github.com/hansipie/ecotokens/releases/tag/v0.8.0
 [0.7.0]: https://github.com/hansipie/ecotokens/releases/tag/v0.7.0

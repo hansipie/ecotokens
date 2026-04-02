@@ -1,9 +1,8 @@
 use ecotokens::metrics::store::{append_to, read_from, CommandFamily, FilterMode, Interception};
-use serde_json;
 use tempfile::TempDir;
 
 fn metrics_file(dir: &TempDir) -> std::path::PathBuf {
-    dir.path().join("metrics.jsonl")
+    dir.path().join("metrics.db")
 }
 
 fn make_interception(tokens_before: u32, tokens_after: u32, mode: FilterMode) -> Interception {
@@ -29,10 +28,10 @@ fn append_creates_file_and_valid_json_line() {
     let item = make_interception(100, 40, FilterMode::Filtered);
     append_to(&path, &item).unwrap();
 
-    assert!(path.exists(), "metrics.jsonl should be created");
-    let content = std::fs::read_to_string(&path).unwrap();
-    let parsed: serde_json::Value = serde_json::from_str(content.trim()).unwrap();
-    assert_eq!(parsed["command"].as_str().unwrap(), "git status");
+    assert!(path.exists(), "metrics.db should be created");
+    let items = read_from(&path).unwrap();
+    assert_eq!(items.len(), 1);
+    assert_eq!(items[0].command, "git status");
 }
 
 #[test]
@@ -51,9 +50,32 @@ fn read_existing_file_returns_interceptions() {
 #[test]
 fn absent_file_returns_ok_empty() {
     let dir = TempDir::new().unwrap();
-    let path = dir.path().join("nonexistent.jsonl");
+    let path = dir.path().join("nonexistent.db");
     let items = read_from(&path).unwrap();
     assert!(items.is_empty(), "absent file should return empty vec");
+}
+
+#[test]
+fn read_triggers_jsonl_migration_when_db_absent() {
+    let dir = TempDir::new().unwrap();
+    let path = metrics_file(&dir);
+    let jsonl_path = path.with_extension("jsonl");
+
+    let line = r#"{"id":"abc","timestamp":"2026-01-01T00:00:00+00:00","command":"git status","command_family":"git","git_root":null,"tokens_before":100,"tokens_after":40,"savings_pct":60.0,"mode":"filtered","redacted":false,"duration_ms":10}"#;
+    std::fs::write(&jsonl_path, format!("{line}\n")).unwrap();
+
+    let items = read_from(&path).unwrap();
+
+    assert_eq!(items.len(), 1);
+    assert!(path.exists(), "metrics.db should be created by migration");
+    assert!(
+        !jsonl_path.exists(),
+        "legacy metrics.jsonl should be renamed after migration"
+    );
+    assert!(
+        path.with_extension("jsonl.migrated").exists(),
+        "migration should preserve a backup as metrics.jsonl.migrated"
+    );
 }
 
 #[test]
