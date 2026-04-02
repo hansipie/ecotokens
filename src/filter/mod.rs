@@ -160,6 +160,7 @@ pub fn run_filter_pipeline_with_cwd(
         (filtered, filtered_tokens)
     };
 
+    #[cfg(not(test))]
     if let Some(path) = crate::metrics::store::metrics_path() {
         let mode = if tokens_after < tokens_before {
             crate::metrics::store::FilterMode::Filtered
@@ -167,15 +168,14 @@ pub fn run_filter_pipeline_with_cwd(
             crate::metrics::store::FilterMode::Summarized
         };
         let family = detect_family(command);
-        let mut git_cmd = std::process::Command::new("git");
-        git_cmd.args(["rev-parse", "--show-toplevel"]);
-        if let Some(dir) = cwd {
-            git_cmd.current_dir(dir);
-        }
-        let git_root = git_cmd
-            .output()
-            .ok()
-            .map(|o| String::from_utf8_lossy(&o.stdout).trim().to_string());
+        let git_root = cwd.and_then(|dir| {
+            std::process::Command::new("git")
+                .args(["rev-parse", "--show-toplevel"])
+                .current_dir(dir)
+                .output()
+                .ok()
+                .map(|o| String::from_utf8_lossy(&o.stdout).trim().to_string())
+        });
         let rec = crate::metrics::store::Interception::new(
             command.to_string(),
             family,
