@@ -213,7 +213,7 @@ pub fn mask(text: &str) -> (String, bool) {
     // ── Observability ────────────────────────────────────────────────────────
 
     // Grafana API Key (legacy, starts with eyJrIjoi in base64)
-    let re_grafana_key = regex!(r"eyJrIjoi[A-Za-z0-9+/]{70,400}={0,3}");
+    let re_grafana_key = regex!(r"eyJrIjoi[A-Za-z0-9+/]{70,150}={0,3}");
     if re_grafana_key.is_match(&out) {
         out = re_grafana_key
             .replace_all(&out, "[GRAFANA_KEY]")
@@ -222,7 +222,7 @@ pub fn mask(text: &str) -> (String, bool) {
     }
 
     // Grafana Cloud API Token
-    let re_grafana_cloud = regex!(r"glc_[A-Za-z0-9+/]{32,400}={0,3}");
+    let re_grafana_cloud = regex!(r"glc_[A-Za-z0-9+/]{32,150}={0,3}");
     if re_grafana_cloud.is_match(&out) {
         out = re_grafana_cloud
             .replace_all(&out, "[GRAFANA_KEY]")
