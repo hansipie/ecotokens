@@ -5,6 +5,17 @@ All notable changes to this project will be documented in this file.
 The format is based on [Keep a Changelog](https://keepachangelog.com/en/1.0.0/),
 and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0.html).
 
+## [0.12.0] - 2026-04-02
+
+### Security
+- Secret scanner expanded from 9 to 41 patterns — now covers GCP, Azure AD, DigitalOcean, Anthropic, OpenAI, HuggingFace, GitHub (fine-grained PAT, app token, OAuth, refresh), GitLab (PAT, deploy token), Slack app-token, Twilio, SendGrid, npm, PyPI, Databricks, HashiCorp TF, Pulumi, Postman, Grafana (API key, cloud token, service account), Sentry (user + org), Shopify (access token + shared secret)
+- AWS pattern extended to cover `ASIA`, `ABIA`, `ACCA`, `A3T…` prefixes in addition to `AKIA`
+- Stripe pattern extended to cover `rk_` keys and `prod` environment
+
+### Docs
+- Secret redaction reference table moved from README to [`docs/secret-patterns.md`](docs/secret-patterns.md)
+- Added [`docs/self-interference-analysis.md`](docs/self-interference-analysis.md) — analysis of the race condition between ecotokens hooks and the pre-commit hook when developing ecotokens itself
+
 ## [0.11.0] - 2026-04-01
 
 ### Added
@@ -130,6 +141,8 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 - `ecotokens install` / `uninstall` / `config` commands
 - MIT license
 
+[0.12.0]: https://github.com/hansipie/ecotokens/compare/v0.11.0...v0.12.0
+[0.11.0]: https://github.com/hansipie/ecotokens/compare/v0.10.0...v0.11.0
 [0.10.0]: https://github.com/hansipie/ecotokens/compare/v0.9.0...v0.10.0
 [0.9.0]: https://github.com/hansipie/ecotokens/releases/tag/v0.9.0
 [0.8.0]: https://github.com/hansipie/ecotokens/releases/tag/v0.8.0
