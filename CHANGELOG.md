@@ -5,6 +5,11 @@ All notable changes to this project will be documented in this file.
 The format is based on [Keep a Changelog](https://keepachangelog.com/en/1.0.0/),
 and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0.html).
 
+## [0.13.0] - 2026-04-02
+
+### Changed
+- No commits after tag v0.12.0 in git history at the time of this changelog update; release notes will be finalized once new commits are merged.
+
 ## [0.12.0] - 2026-04-02
 
 ### Security
@@ -141,6 +146,7 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 - `ecotokens install` / `uninstall` / `config` commands
 - MIT license
 
+[0.13.0]: https://github.com/hansipie/ecotokens/compare/v0.12.0...v0.13.0
 [0.12.0]: https://github.com/hansipie/ecotokens/compare/v0.11.0...v0.12.0
 [0.11.0]: https://github.com/hansipie/ecotokens/compare/v0.10.0...v0.11.0
 [0.10.0]: https://github.com/hansipie/ecotokens/compare/v0.9.0...v0.10.0

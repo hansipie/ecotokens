@@ -45,7 +45,7 @@ fn gain_report_with_large_store_is_fast() {
     use ecotokens::metrics::store::{append_to, CommandFamily, FilterMode, Interception};
 
     let tmp = TempDir::new().unwrap();
-    let store = tmp.path().join("metrics.jsonl");
+    let store = tmp.path().join("metrics.db");
 
     // Write 1000 entries (keeping test fast; production would be 10k)
     for i in 0u32..1000 {

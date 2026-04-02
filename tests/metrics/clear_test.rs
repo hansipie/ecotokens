@@ -5,7 +5,7 @@ use ecotokens::metrics::store::{
 use tempfile::TempDir;
 
 fn metrics_file(dir: &TempDir) -> std::path::PathBuf {
-    dir.path().join("metrics.jsonl")
+    dir.path().join("metrics.db")
 }
 
 fn make_interception_with(

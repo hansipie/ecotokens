@@ -1,6 +1,8 @@
 use chrono::Utc;
-use serde::{Deserialize, Serialize};
-use std::path::PathBuf;
+use rusqlite::{params, Connection, Row};
+use serde::{de::DeserializeOwned, Deserialize, Serialize};
+use std::io;
+use std::path::{Path, PathBuf};
 use uuid::Uuid;
 
 const CONTENT_MAX_CHARS: usize = 4096;
@@ -116,91 +118,214 @@ impl Interception {
     }
 }
 
-pub fn metrics_path() -> Option<PathBuf> {
-    dirs::config_dir().map(|d| d.join("ecotokens").join("metrics.jsonl"))
+// ── Enum ↔ TEXT helpers ───────────────────────────────────────────────────────
+
+fn enum_to_str<T: Serialize>(val: &T) -> String {
+    serde_json::to_string(val)
+        .unwrap_or_default()
+        .trim_matches('"')
+        .to_string()
 }
 
-/// Append one Interception as a JSONL line to `path`.
-pub fn append_to(path: &std::path::Path, interception: &Interception) -> std::io::Result<()> {
+fn str_to_enum<T: DeserializeOwned>(s: &str) -> io::Result<T> {
+    serde_json::from_str(&format!("\"{s}\""))
+        .map_err(|e| io::Error::new(io::ErrorKind::InvalidData, e))
+}
+
+// ── Schema ────────────────────────────────────────────────────────────────────
+
+fn create_schema(conn: &Connection) -> io::Result<()> {
+    conn.execute_batch(
+        "CREATE TABLE IF NOT EXISTS interceptions (
+            id              TEXT    NOT NULL PRIMARY KEY,
+            timestamp       TEXT    NOT NULL,
+            command         TEXT    NOT NULL,
+            command_family  TEXT    NOT NULL,
+            git_root        TEXT,
+            tokens_before   INTEGER NOT NULL,
+            tokens_after    INTEGER NOT NULL,
+            savings_pct     REAL    NOT NULL,
+            mode            TEXT    NOT NULL,
+            redacted        INTEGER NOT NULL,
+            duration_ms     INTEGER NOT NULL,
+            content_before  TEXT,
+            content_after   TEXT,
+            hook_type       TEXT    NOT NULL DEFAULT 'pre_tool_use'
+        );
+        CREATE INDEX IF NOT EXISTS idx_timestamp      ON interceptions(timestamp);
+        CREATE INDEX IF NOT EXISTS idx_command_family ON interceptions(command_family);
+        CREATE INDEX IF NOT EXISTS idx_git_root       ON interceptions(git_root);",
+    )
+    .map_err(io::Error::other)
+}
+
+// ── Connection ────────────────────────────────────────────────────────────────
+
+fn open_conn(path: &Path) -> io::Result<Connection> {
     if let Some(parent) = path.parent() {
         std::fs::create_dir_all(parent)?;
     }
-    let line = serde_json::to_string(interception)
-        .map_err(|e| std::io::Error::new(std::io::ErrorKind::InvalidData, e))?;
-    use std::io::Write;
-    let mut file = std::fs::OpenOptions::new()
-        .create(true)
-        .append(true)
-        .open(path)?;
-    writeln!(file, "{line}")
+    let conn = Connection::open(path).map_err(io::Error::other)?;
+    conn.execute_batch(
+        "PRAGMA journal_mode = WAL;
+         PRAGMA synchronous = NORMAL;",
+    )
+    .map_err(io::Error::other)?;
+    create_schema(&conn)?;
+    migrate_from_jsonl_if_needed(path, &conn)?;
+    Ok(conn)
 }
 
-/// Read all Interceptions from the JSONL store at `path`.
-pub fn read_from(path: &std::path::Path) -> std::io::Result<Vec<Interception>> {
-    if !path.exists() {
-        return Ok(vec![]);
+// ── Migration JSONL → SQLite ──────────────────────────────────────────────────
+
+fn migrate_from_jsonl_if_needed(db_path: &Path, conn: &Connection) -> io::Result<()> {
+    let jsonl_path = db_path.with_extension("jsonl");
+    if !jsonl_path.exists() {
+        return Ok(());
     }
-    let content = std::fs::read_to_string(path)?;
-    let mut items = Vec::new();
+
+    let content = std::fs::read_to_string(&jsonl_path)?;
+    let tx = conn.unchecked_transaction().map_err(io::Error::other)?;
+
     for line in content.lines() {
         let line = line.trim();
         if line.is_empty() {
             continue;
         }
-        if let Ok(item) = serde_json::from_str(line) {
-            items.push(item);
+        if let Ok(item) = serde_json::from_str::<Interception>(line) {
+            insert_one(&tx, &item)?;
         }
     }
+
+    tx.commit().map_err(io::Error::other)?;
+
+    // Renommer en .migrated pour conserver une sauvegarde non-destructive
+    let migrated_path = db_path.with_extension("jsonl.migrated");
+    std::fs::rename(&jsonl_path, &migrated_path)?;
+
+    Ok(())
+}
+
+// ── Row mapping ───────────────────────────────────────────────────────────────
+
+fn row_to_interception(row: &Row) -> rusqlite::Result<Interception> {
+    let command_family: String = row.get(3)?;
+    let mode: String = row.get(8)?;
+    let redacted: i32 = row.get(9)?;
+    let hook_type: String = row.get(13)?;
+
+    Ok(Interception {
+        id: row.get(0)?,
+        timestamp: row.get(1)?,
+        command: row.get(2)?,
+        command_family: str_to_enum(&command_family).map_err(|e| {
+            rusqlite::Error::InvalidColumnType(3, e.to_string(), rusqlite::types::Type::Text)
+        })?,
+        git_root: row.get(4)?,
+        tokens_before: row.get::<_, i64>(5)? as u32,
+        tokens_after: row.get::<_, i64>(6)? as u32,
+        savings_pct: row.get::<_, f64>(7)? as f32,
+        mode: str_to_enum(&mode).map_err(|e| {
+            rusqlite::Error::InvalidColumnType(8, e.to_string(), rusqlite::types::Type::Text)
+        })?,
+        redacted: redacted != 0,
+        duration_ms: row.get::<_, i64>(10)? as u32,
+        content_before: row.get(11)?,
+        content_after: row.get(12)?,
+        hook_type: str_to_enum(&hook_type).map_err(|e| {
+            rusqlite::Error::InvalidColumnType(13, e.to_string(), rusqlite::types::Type::Text)
+        })?,
+    })
+}
+
+// ── Insert ────────────────────────────────────────────────────────────────────
+
+fn insert_one(conn: &Connection, i: &Interception) -> io::Result<()> {
+    conn.execute(
+        "INSERT OR IGNORE INTO interceptions
+         (id, timestamp, command, command_family, git_root,
+          tokens_before, tokens_after, savings_pct, mode, redacted,
+          duration_ms, content_before, content_after, hook_type)
+         VALUES (?1,?2,?3,?4,?5,?6,?7,?8,?9,?10,?11,?12,?13,?14)",
+        params![
+            i.id,
+            i.timestamp,
+            i.command,
+            enum_to_str(&i.command_family),
+            i.git_root,
+            i.tokens_before as i64,
+            i.tokens_after as i64,
+            i.savings_pct as f64,
+            enum_to_str(&i.mode),
+            i.redacted as i32,
+            i.duration_ms as i64,
+            i.content_before,
+            i.content_after,
+            enum_to_str(&i.hook_type),
+        ],
+    )
+    .map_err(io::Error::other)?;
+    Ok(())
+}
+
+// ── Public API ────────────────────────────────────────────────────────────────
+
+pub fn metrics_path() -> Option<PathBuf> {
+    dirs::config_dir().map(|d| d.join("ecotokens").join("metrics.db"))
+}
+
+/// Append one Interception to the SQLite store at `path`.
+pub fn append_to(path: &Path, interception: &Interception) -> io::Result<()> {
+    let conn = open_conn(path)?;
+    insert_one(&conn, interception)
+}
+
+/// Read all Interceptions from the SQLite store at `path`.
+pub fn read_from(path: &Path) -> io::Result<Vec<Interception>> {
+    let legacy_jsonl_path = path.with_extension("jsonl");
+    if !path.exists() && !legacy_jsonl_path.exists() {
+        return Ok(vec![]);
+    }
+    let conn = open_conn(path)?;
+    let mut stmt = conn
+        .prepare("SELECT id, timestamp, command, command_family, git_root, tokens_before, tokens_after, savings_pct, mode, redacted, duration_ms, content_before, content_after, hook_type FROM interceptions ORDER BY timestamp ASC")
+        .map_err(io::Error::other)?;
+    let items = stmt
+        .query_map([], row_to_interception)
+        .map_err(io::Error::other)?
+        .filter_map(|r| r.ok())
+        .collect();
     Ok(items)
 }
 
-/// Append to default metrics path (~/.config/ecotokens/metrics.jsonl).
+/// Append to default metrics path (~/.config/ecotokens/metrics.db).
 #[allow(dead_code)]
-pub fn append(interception: &Interception) -> std::io::Result<()> {
-    let path = metrics_path().ok_or_else(|| {
-        std::io::Error::new(std::io::ErrorKind::NotFound, "cannot resolve config dir")
-    })?;
+pub fn append(interception: &Interception) -> io::Result<()> {
+    let path = metrics_path()
+        .ok_or_else(|| io::Error::new(io::ErrorKind::NotFound, "cannot resolve config dir"))?;
     append_to(&path, interception)
 }
 
 /// Read from default metrics path.
 #[allow(dead_code)]
-pub fn read_all() -> std::io::Result<Vec<Interception>> {
+pub fn read_all() -> io::Result<Vec<Interception>> {
     match metrics_path() {
         Some(p) => read_from(&p),
         None => Ok(vec![]),
     }
 }
 
-/// Atomically rewrite `path` with the given interceptions.
+/// Atomically replace all interceptions at `path` with `items`.
 ///
-/// Writes to a `.tmp` sidecar first, then renames to `path` — safe against
-/// interruption (Ctrl-C, crash) because the rename is atomic on the same
-/// filesystem.
-pub fn write_to(path: &std::path::Path, items: &[Interception]) -> std::io::Result<()> {
-    use std::io::Write;
-
-    if let Some(parent) = path.parent() {
-        std::fs::create_dir_all(parent)?;
-    }
-
-    let tmp_path = {
-        let name = path
-            .file_name()
-            .unwrap_or_default()
-            .to_string_lossy()
-            .to_string();
-        path.with_file_name(format!("{name}.tmp"))
-    };
-
-    let mut file = std::fs::File::create(&tmp_path)?;
+/// Implemented as a single transaction (DELETE all + INSERT batch) which is
+/// equivalent to the previous atomic rename approach.
+pub fn write_to(path: &Path, items: &[Interception]) -> io::Result<()> {
+    let conn = open_conn(path)?;
+    let tx = conn.unchecked_transaction().map_err(io::Error::other)?;
+    tx.execute("DELETE FROM interceptions", [])
+        .map_err(io::Error::other)?;
     for item in items {
-        let line = serde_json::to_string(item)
-            .map_err(|e| std::io::Error::new(std::io::ErrorKind::InvalidData, e))?;
-        writeln!(file, "{line}")?;
+        insert_one(&tx, item)?;
     }
-    file.flush()?;
-    drop(file);
-
-    std::fs::rename(&tmp_path, path)
+    tx.commit().map_err(io::Error::other)
 }
