@@ -13,7 +13,7 @@
 </p>
 <br>
 
-Token-saving companion for [Claude Code](https://claude.ai/code), [Gemini CLI](https://github.com/google-gemini/gemini-cli), and [Qwen Code](https://github.com/QwenLM/qwen-code). Built on a *"set it and forget it!"* philosophy: one install command, zero configuration, and ecotokens works automatically from there — intercepting tool outputs before they reach the model, filtering the noise, and recording how many tokens you saved.
+Token-saving companion for [Claude Code](https://claude.ai/code), [Gemini CLI](https://github.com/google-gemini/gemini-cli), [Qwen Code](https://github.com/QwenLM/qwen-code), and [Pi](https://pi.dev). Built on a *"set it and forget it!"* philosophy: one install command, zero configuration, and ecotokens works automatically from there — intercepting tool outputs before they reach the model, filtering the noise, and recording how many tokens you saved.
 
 <p align="center">
   <img src="assets/demo.0.10.0.gif" alt="ecotokens demo" width="800">
@@ -26,7 +26,7 @@ Token-saving companion for [Claude Code](https://claude.ai/code), [Gemini CLI](h
 | **PreToolUse hook** | Intercepts every shell (`Bash`) command before its output reaches the model — filters, compresses, and records savings |
 | **PostToolUse hook** *(Claude Code)* | Intercepts native tool results (`Read`, `Grep`, `Glob`) — outline-based compression for source files, grep trimming, glob denoising |
 | **Gain dashboard** | Interactive TUI — token savings by command family or project, sparkline, diff view, history log |
-| **Multi-agent support** | Works with Claude Code, Gemini CLI, and Qwen Code out of the box |
+| **Multi-agent support** | Works with Claude Code, Gemini CLI, Qwen Code, and Pi out of the box |
 | **Precision guarantees** | Errors, failures, and stack traces are never removed; secrets are redacted before filtering |
 | **Code intelligence** | BM25 + semantic search, symbol lookup, call graph tracing, near-duplicate detection |
 | **AI summarization** *(optional)* | Large outputs compressed by a local Ollama model instead of being truncated |
@@ -51,7 +51,7 @@ ecotokens installs hooks that intercept tool outputs before they reach the model
 3. Returns the compressed result to the model
 4. Records the savings under the `native_read`, `grep`, or `fs` family
 
-Claude Code uses the `PreToolUse` + `PostToolUse` hooks (`~/.claude/settings.json`). Gemini CLI uses the `BeforeTool` hook (`~/.gemini/settings.json`). Qwen Code uses the `PreToolUse` hook (`~/.qwen/settings.json`).
+Claude Code uses the `PreToolUse` + `PostToolUse` hooks (`~/.claude/settings.json`). Gemini CLI uses the `BeforeTool` hook (`~/.gemini/settings.json`). Qwen Code uses the `PreToolUse` hook (`~/.qwen/settings.json`). Pi uses a TypeScript extension (`~/.pi/agent/extensions/ecotokens.ts`) that intercepts `tool_call` (bash pre-exec) and `tool_result` (read/grep/find/ls post-exec) events in-process.
 
 For a focused view of the runtime path, see [`docs/hook-filter-metrics-flow.md`](docs/hook-filter-metrics-flow.md).
 
@@ -100,13 +100,24 @@ ecotokens install --target qwen
 
 This writes a `PreToolUse` hook entry into `~/.qwen/settings.json`.
 
+### Pi
+
+Requires [Pi](https://pi.dev) (`@mariozechner/pi-coding-agent` ≥ 0.62.0).
+
+```bash
+cargo install --path .
+ecotokens install --target pi
+```
+
+This writes a TypeScript extension to `~/.pi/agent/extensions/ecotokens.ts`. Pi auto-discovers it on next startup (or `/reload` inside an active session). The extension intercepts bash commands before execution and filters native tool results (`read`, `grep`, `find`, `ls`) after execution.
+
 ### All targets at once
 
 ```bash
 ecotokens install --target all
 ```
 
-`--target all` covers Claude Code, Gemini CLI, and Qwen Code in a single command.
+`--target all` covers Claude Code, Gemini CLI, Qwen Code, and Pi in a single command.
 
 ### With exact token counting
 
@@ -135,6 +146,7 @@ This writes `ai_summary_enabled` and `ai_summary_model` to `~/.config/ecotokens/
 ecotokens uninstall                    # Claude Code
 ecotokens uninstall --target gemini    # Gemini CLI
 ecotokens uninstall --target qwen      # Qwen Code
+ecotokens uninstall --target pi        # Pi
 ecotokens uninstall --target all       # all targets
 ```
 
@@ -344,7 +356,7 @@ Filtering is aggressive on noise, conservative on signal:
 ## Requirements
 
 - Rust ≥ 1.75 (stable)
-- One or more of: Claude Code (with hook support), Gemini CLI ≥ 0.1.0, Qwen Code
+- One or more of: Claude Code (with hook support), Gemini CLI ≥ 0.1.0, Qwen Code, Pi ≥ 0.62.0
 - Ollama (optional, for semantic search embeddings and AI summarization)
 
 ## Contributing

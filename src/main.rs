@@ -71,9 +71,9 @@ enum Commands {
         #[arg(long)]
         history: bool,
     },
-    /// Install ecotokens hook in ~/.claude/settings.json, ~/.gemini/settings.json, or ~/.qwen/settings.json
+    /// Install ecotokens hook in ~/.claude/settings.json, ~/.gemini/settings.json, ~/.qwen/settings.json, or ~/.pi/agent/extensions/
     Install {
-        /// Target AI tool to install for: claude, gemini, qwen, or all (default: claude)
+        /// Target AI tool to install for: claude, gemini, qwen, pi, or all (default: claude)
         #[arg(long, default_value = "claude")]
         target: String,
         /// Enable AI-powered output summarization via Ollama
@@ -83,9 +83,9 @@ enum Commands {
         #[arg(long)]
         ai_summary_model: Option<String>,
     },
-    /// Remove ecotokens hook from ~/.claude/settings.json, ~/.gemini/settings.json, or ~/.qwen/settings.json
+    /// Remove ecotokens hook from ~/.claude/settings.json, ~/.gemini/settings.json, ~/.qwen/settings.json, or ~/.pi/agent/extensions/
     Uninstall {
-        /// Target to uninstall from: claude, gemini, qwen, or all (default: claude)
+        /// Target to uninstall from: claude, gemini, qwen, pi, or all (default: claude)
         #[arg(long, default_value = "claude")]
         target: String,
     },
@@ -638,10 +638,11 @@ fn cmd_install(target: String, ai_summary: bool, ai_summary_model: Option<String
     let install_claude = matches!(target.as_str(), "claude" | "all");
     let install_gemini = matches!(target.as_str(), "gemini" | "all");
     let install_qwen = matches!(target.as_str(), "qwen" | "all");
+    let install_pi = matches!(target.as_str(), "pi" | "all");
 
-    if !install_claude && !install_gemini && !install_qwen {
+    if !install_claude && !install_gemini && !install_qwen && !install_pi {
         eprintln!(
-            "unknown target '{}'. Valid values: claude, gemini, qwen, all",
+            "unknown target '{}'. Valid values: claude, gemini, qwen, pi, all",
             target
         );
         std::process::exit(1);
@@ -715,6 +716,25 @@ fn cmd_install(target: String, ai_summary: bool, ai_summary_model: Option<String
         }
     }
 
+    if install_pi {
+        match install::default_pi_extension_path() {
+            Some(ref p) => match install::install_pi_extension(p) {
+                Ok(()) => {
+                    println!("ecotokens extension installed (Pi) → {}", p.display());
+                    println!("  Reload in pi with: /reload");
+                }
+                Err(e) => {
+                    eprintln!("install error (pi): {e}");
+                    std::process::exit(1);
+                }
+            },
+            None => {
+                eprintln!("cannot determine Pi extension path on this system");
+                std::process::exit(1);
+            }
+        }
+    }
+
     let enable_ai = ai_summary || ai_summary_model.is_some();
     if enable_ai {
         let mut settings = config::Settings::load();
@@ -739,10 +759,11 @@ fn cmd_uninstall(target: String) {
     let uninstall_claude = matches!(target.as_str(), "claude" | "all");
     let uninstall_gemini = matches!(target.as_str(), "gemini" | "all");
     let uninstall_qwen = matches!(target.as_str(), "qwen" | "all");
+    let uninstall_pi = matches!(target.as_str(), "pi" | "all");
 
-    if !uninstall_claude && !uninstall_gemini && !uninstall_qwen {
+    if !uninstall_claude && !uninstall_gemini && !uninstall_qwen && !uninstall_pi {
         eprintln!(
-            "unknown target '{}'. Valid values: claude, gemini, qwen, all",
+            "unknown target '{}'. Valid values: claude, gemini, qwen, pi, all",
             target
         );
         std::process::exit(1);
@@ -849,6 +870,31 @@ fn cmd_uninstall(target: String) {
             }
             None => {
                 eprintln!("cannot determine Qwen settings path on this system");
+                std::process::exit(1);
+            }
+        }
+    }
+
+    if uninstall_pi {
+        match install::default_pi_extension_path() {
+            Some(ref p) => {
+                let had = install::is_pi_extension_installed(p);
+                match install::uninstall_pi(p) {
+                    Ok(()) => {
+                        if had {
+                            println!("ecotokens extension removed (Pi) ← {}", p.display());
+                        } else {
+                            println!("ecotokens: nothing to uninstall (pi)");
+                        }
+                    }
+                    Err(e) => {
+                        eprintln!("uninstall error (pi): {e}");
+                        std::process::exit(1);
+                    }
+                }
+            }
+            None => {
+                eprintln!("cannot determine Pi extension path on this system");
                 std::process::exit(1);
             }
         }
