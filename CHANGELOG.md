@@ -5,6 +5,23 @@ All notable changes to this project will be documented in this file.
 The format is based on [Keep a Changelog](https://keepachangelog.com/en/1.0.0/),
 and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0.html).
 
+## [0.14.0] - 2026-04-05
+
+### Added
+- Pi coding agent support via TypeScript extension installed at `~/.pi/agent/extensions/ecotokens.ts`
+- `bash` tool calls intercepted in-process: `event.input.command` rewritten to pipe through `ecotokens filter` (équivalent au PreToolUse de Claude Code)
+- `read`/`grep`/`find`/`ls` tool results piped through `ecotokens hook-post` pour compression outline-based (équivalent au PostToolUse)
+- `session_start` / `session_shutdown` hooks wired to auto-watch lifecycle
+- `/gain` et `/eco-search` slash commands exposés via `registerCommand`
+- `ecotokens install --target pi` et `ecotokens uninstall --target pi`
+- Extension source embarquée dans le binaire via `include_str!("pi_extension.ts")`
+
+## [0.13.1] - 2026-04-05
+
+### Fixed
+- `CONN_INIT_LOCK` (`OnceLock<Mutex>`) sérialise `open_conn` pour éviter `SQLITE_BUSY` sur `PRAGMA journal_mode=WAL` lors de migrations concurrentes
+- `read_to_string` traite désormais `NotFound` comme "déjà migré" pour gérer la fenêtre TOCTOU entre le test `migrating_path.exists()` et la lecture effective
+
 ## [0.13.0] - 2026-04-02
 
 ### Added
@@ -155,6 +172,7 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 - `ecotokens install` / `uninstall` / `config` commands
 - MIT license
 
+[0.14.0]: https://github.com/hansipie/ecotokens/releases/tag/v0.14.0
 [0.13.0]: https://github.com/hansipie/ecotokens/releases/tag/v0.13.0
 [0.12.0]: https://github.com/hansipie/ecotokens/releases/tag/v0.12.0
 [0.11.0]: https://github.com/hansipie/ecotokens/releases/tag/v0.11.0
