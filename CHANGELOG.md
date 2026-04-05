@@ -5,6 +5,14 @@ All notable changes to this project will be documented in this file.
 The format is based on [Keep a Changelog](https://keepachangelog.com/en/1.0.0/),
 and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0.html).
 
+## [0.14.1] - 2026-04-05
+
+### Fixed
+- Pi extension: `read` tool results now correctly processed — `tool_response.output` and `tool_response.content` accepted as fallbacks to `tool_response.file.content`
+- Pi extension: `read` tool input field `path` accepted as fallback to `file_path` for file path extraction and metrics command naming
+- Pi extension: `find` tool results (mapped to Glob) now correctly processed — `tool_response.output` accepted as fallback to `tool_response.filenames`
+- Without these fixes, `NativeRead` and `Fs` interceptions from Pi were silently dropped and never visible in `ecotokens gain`
+
 ## [0.14.0] - 2026-04-05
 
 ### Added
