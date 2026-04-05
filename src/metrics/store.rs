@@ -3,7 +3,14 @@ use rusqlite::{params, Connection, Row};
 use serde::{de::DeserializeOwned, Deserialize, Serialize};
 use std::io;
 use std::path::{Path, PathBuf};
+use std::sync::{Mutex, OnceLock};
 use uuid::Uuid;
+
+// Sérialise les ouvertures de connexion pour éviter la race condition sur
+// PRAGMA journal_mode = WAL : rusqlite's busy handler est instable (#ignore),
+// et deux threads qui initialisent le même fichier DB simultanément peuvent
+// obtenir SQLITE_BUSY immédiatement même avec busy_timeout.
+static CONN_INIT_LOCK: OnceLock<Mutex<()>> = OnceLock::new();
 
 const CONTENT_MAX_CHARS: usize = 4096;
 
@@ -165,6 +172,10 @@ fn open_conn(path: &Path) -> io::Result<Connection> {
     if let Some(parent) = path.parent() {
         std::fs::create_dir_all(parent)?;
     }
+    let _guard = CONN_INIT_LOCK
+        .get_or_init(|| Mutex::new(()))
+        .lock()
+        .unwrap();
     let conn = Connection::open(path).map_err(io::Error::other)?;
     conn.execute_batch(
         "PRAGMA journal_mode = WAL;
@@ -200,7 +211,11 @@ fn migrate_from_jsonl_if_needed(db_path: &Path, conn: &Connection) -> io::Result
         }
     };
 
-    let content = std::fs::read_to_string(&source)?;
+    let content = match std::fs::read_to_string(&source) {
+        Ok(c) => c,
+        Err(e) if e.kind() == io::ErrorKind::NotFound => return Ok(()),
+        Err(e) => return Err(e),
+    };
     let tx = conn.unchecked_transaction().map_err(io::Error::other)?;
 
     for line in content.lines() {
