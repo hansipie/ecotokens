@@ -1,60 +1,58 @@
 # Benchmarks
 
-Real-world token savings measured on a developer workstation running ecotokens from **2026-03-06 to 2026-03-19**.
+Real-world token savings measured on a developer workstation running ecotokens from **2026-03-06 to 2026-03-12**.
 
 ## Global Results
 
 | Metric | Value |
 |--------|-------|
-| Total hook executions | 4 129 |
-| Tokens before filtering | 7 490 128 |
-| Tokens after filtering | 776 043 |
-| **Tokens saved** | **6 714 085** |
-| **Overall reduction** | **89.6 %** |
-| Avg. reduction (when active) | 64.8 % |
-| Commands with savings | 531 / 4 129 (12.9 %) |
+| Total hook executions | 2 594 |
+| Tokens before filtering | 5 209 201 |
+| Tokens after filtering | 515 022 |
+| **Tokens saved** | **4 694 179** |
+| **Overall reduction** | **90.1 %** |
+| Avg. reduction (when active) | 65.7 % |
+| Commands with savings | 327 / 2 594 (12.6 %) |
 
-> The 87 % of commands that pass through unchanged (passthrough mode) still contribute to the overall score because ecotokens only compresses outputs that are worth compressing — small outputs are returned as-is at zero overhead.
+> The passthrough mode (where outputs are too small to compress) still contributes to the overall score because ecotokens only compresses outputs that are worth compressing — small outputs are returned as-is at zero overhead.
 
 ## Savings by Command Family
 
 | Family | Executions | Tokens before | Tokens after | Saved | Reduction |
 |--------|-----------|--------------|-------------|-------|-----------|
-| generic | 2 834 | 4 667 326 | 525 326 | **4 142 000** | 88.7 % |
-| git | 401 | 2 146 597 | 73 865 | **2 072 732** | 96.6 % |
-| cargo | 324 | 274 031 | 67 535 | **206 496** | 75.4 % |
-| fs | 279 | 244 478 | 82 093 | **162 385** | 66.4 % |
-| cpp | 107 | 93 947 | 8 002 | **85 945** | 91.5 % |
-| network | 3 | 43 570 | 1 226 | **42 344** | 97.2 % |
-| grep | 102 | 14 602 | 12 421 | 2 181 | 14.9 % |
-| python | 46 | 3 805 | 3 803 | 2 | ~0 % |
-| gh | 33 | 1 772 | 1 772 | 0 | 0 % |
+| generic | 1 934 | 2 685 276 | 357 647 | **2 327 629** | 86.7 % |
+| git | 195 | 2 083 638 | 49 045 | **2 034 593** | 97.6 % |
+| fs | 96 | 189 842 | 44 099 | **145 743** | 76.8 % |
+| cargo | 242 | 165 308 | 51 864 | **113 444** | 68.6 % |
+| cpp | 77 | 77 687 | 5 932 | **71 755** | 92.4 % |
+| grep | 34 | 5 893 | 4 880 | 1 013 | 17.2 % |
+| python | 16 | 1 557 | 1 555 | 2 | 0.1 % |
 
-**Git commands are the biggest win** at 96.6 % reduction — `git diff`, `git log`, and `git status` outputs are often massive and compress extremely well.
+**Git commands are the biggest win** with a 97.6 % reduction — `git diff`, `git log`, and `git status` outputs are often massive and compress extremely well.
 
 ## Processing Modes
 
 | Mode | Count | Description |
 |------|-------|-------------|
-| summarized | 2 078 | Output rewritten by the AI summarizer (Ollama) |
 | passthrough | 1 521 | Output too small to compress — returned as-is |
-| filtered | 530 | Output trimmed by a family-specific rule-based filter |
+| summarized | 747 | Output rewritten by the AI summarizer (Ollama) |
+| filtered | 326 | Output trimmed by a family-specific rule-based filter |
 
 ## Top 5 Single-Command Savings
 
 | Command | Before | After | Saved | Reduction |
 |---------|--------|-------|-------|-----------|
-| `git diff --staged` | 1 682 049 | 782 | **1 681 267** | 100.0 % |
-| `strings SynologyDrive.app/bin/…` | 1 556 886 | 204 | **1 556 682** | 100.0 % |
+| `git -C /var/home/hansi/Code/ecotokens diff --staged` | 1 682 049 | 782 | **1 681 267** | 100.0 % |
 | `strings target/release/ecotokens` | 971 965 | 493 | **971 472** | 99.9 % |
 | `strings target/release/ecotokens` | 971 965 | 493 | **971 472** | 99.9 % |
-| `git status --short` | 104 658 | 939 | **103 719** | 99.1 % |
+| `git -C /var/home/hansi/Code/ecotokens status --short` | 104 658 | 939 | **103 719** | 99.1 % |
+| `git checkout 001-token-companion` | 103 277 | 966 | **102 311** | 99.1 % |
 
 A single `git diff --staged` on a large working tree saved **1.68 million tokens** — equivalent to roughly 10× the context window of most LLMs.
 
 ## Methodology
 
-Metrics are recorded by the ecotokens hook in `~/.config/ecotokens/metrics.jsonl`. Each entry captures:
+Metrics are recorded by the ecotokens hook in `~/.config/ecotokens/metrics.db`. Each entry captures:
 - `tokens_before` / `tokens_after` — token counts estimated via character heuristic (or tiktoken when the `exact-tokens` feature is enabled)
 - `command_family` — detected from the command name
 - `mode` — `passthrough`, `filtered`, or `summarized`
