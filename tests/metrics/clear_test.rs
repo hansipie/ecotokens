@@ -119,7 +119,7 @@ fn partition_by_project(
 ) -> (Vec<Interception>, Vec<Interception>) {
     items.into_iter().partition(|item| {
         let item_root = item.git_root.as_deref().unwrap_or("").trim();
-        if project.trim() == "(unknown)" {
+        if project.trim() == "[undefined]" {
             item_root.is_empty()
         } else {
             item_root == project.trim()
@@ -273,7 +273,7 @@ fn clear_by_project_unknown_removes_entries_without_git_root() {
         make_interception_with("git s", CommandFamily::Git, Some("/repo/a"), &now_rfc3339()),
     ];
 
-    let (deleted, kept) = partition_by_project(items, "(unknown)");
+    let (deleted, kept) = partition_by_project(items, "[undefined]");
 
     assert_eq!(
         deleted.len(),
