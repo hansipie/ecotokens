@@ -15,9 +15,6 @@ pub struct PostHookInput {
     pub tool_response: serde_json::Value,
     #[serde(default)]
     pub cwd: Option<String>,
-    #[serde(default)]
-    #[allow(dead_code)]
-    pub session_id: Option<String>,
 }
 
 #[derive(Debug, Clone, Serialize)]
@@ -70,6 +67,7 @@ pub fn handle_post_input(input: &PostHookInput, depth: u32) -> (PostFilterResult
             let file_path = input
                 .tool_input
                 .get("file_path")
+                .or_else(|| input.tool_input.get("path"))
                 .and_then(|v| v.as_str())
                 .unwrap_or("");
             let content = input
@@ -77,8 +75,17 @@ pub fn handle_post_input(input: &PostHookInput, depth: u32) -> (PostFilterResult
                 .get("file")
                 .and_then(|f| f.get("content"))
                 .and_then(|c| c.as_str())
+                // Pi format: { "output": "..." }
+                .or_else(|| input.tool_response.get("output").and_then(|v| v.as_str()))
+                // Flat format: { "content": "..." }
+                .or_else(|| input.tool_response.get("content").and_then(|v| v.as_str()))
                 .unwrap_or("");
-            let result = handle_read(file_path, content, depth);
+            let result = handle_read(
+                file_path,
+                content,
+                depth,
+                input.cwd.as_deref().map(std::path::Path::new),
+            );
             (result, CommandFamily::NativeRead)
         }
         "Grep" => {
@@ -113,12 +120,21 @@ fn extract_glob_filenames(tool_response: &serde_json::Value) -> String {
     if let Some(s) = tool_response.get("filenames").and_then(|v| v.as_str()) {
         return s.to_string();
     }
+    // Pi format: { "output": "a\nb\nc" }
+    if let Some(s) = tool_response.get("output").and_then(|v| v.as_str()) {
+        return s.to_string();
+    }
     String::new()
 }
 
 pub fn metrics_command(input: &PostHookInput) -> String {
     if input.tool_name == "Read" {
-        if let Some(file_path) = input.tool_input.get("file_path").and_then(|v| v.as_str()) {
+        if let Some(file_path) = input
+            .tool_input
+            .get("file_path")
+            .or_else(|| input.tool_input.get("path"))
+            .and_then(|v| v.as_str())
+        {
             let trimmed = file_path.trim();
             if !trimmed.is_empty() {
                 return format!("Read {trimmed}");

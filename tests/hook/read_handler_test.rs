@@ -14,6 +14,7 @@ fn read_nonindexed_returns_passthrough() {
         "/tmp/nonexistent_ecotokens_test_abc123.rs",
         "fn main() {}",
         1,
+        None,
     );
     assert!(
         matches!(result, PostFilterResult::Passthrough),
@@ -23,7 +24,7 @@ fn read_nonindexed_returns_passthrough() {
 
 #[test]
 fn read_binary_ext_returns_passthrough() {
-    let result = handle_read("image.png", "PNG binary data", 1);
+    let result = handle_read("image.png", "PNG binary data", 1, None);
     assert!(
         matches!(result, PostFilterResult::Passthrough),
         "binary extension should return Passthrough immediately"
@@ -32,7 +33,7 @@ fn read_binary_ext_returns_passthrough() {
 
 #[test]
 fn read_binary_ext_wasm_passthrough() {
-    let result = handle_read("module.wasm", "\0asm\x01\x00\x00\x00", 1);
+    let result = handle_read("module.wasm", "\0asm\x01\x00\x00\x00", 1, None);
     assert!(
         matches!(result, PostFilterResult::Passthrough),
         "wasm extension should return Passthrough"
@@ -41,7 +42,7 @@ fn read_binary_ext_wasm_passthrough() {
 
 #[test]
 fn read_empty_content_passthrough() {
-    let result = handle_read("/tmp/empty_ecotokens_test.rs", "", 1);
+    let result = handle_read("/tmp/empty_ecotokens_test.rs", "", 1, None);
     assert!(
         matches!(result, PostFilterResult::Passthrough),
         "empty content should return Passthrough"
@@ -63,7 +64,7 @@ fn read_indexed_file_returns_filtered_or_passthrough() {
     if content.is_empty() {
         return;
     }
-    let result = handle_read(file_path, &content, 1);
+    let result = handle_read(file_path, &content, 1, None);
     // If indexed: Filtered with outline content that is smaller than original content
     match result {
         PostFilterResult::Filtered {
@@ -91,6 +92,7 @@ fn read_outline_empty_returns_passthrough() {
         concat!(env!("CARGO_MANIFEST_DIR"), "/Cargo.toml"),
         "[package]\nname = \"ecotokens\"\n",
         1,
+        None,
     );
     // Toml may or may not have symbols — either result is acceptable
     // The test just verifies no panic occurs

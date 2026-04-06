@@ -87,9 +87,9 @@ fn project_label(name: &str) -> String {
 }
 
 /// Returns true when an interception belongs to `project`.
-/// `"(unknown)"` matches items with a blank or absent `git_root`.
+/// `"[undefined]"` matches items with a blank or absent `git_root`.
 fn matches_project(item: &Interception, project: &str) -> bool {
-    if project == "(unknown)" {
+    if project == "[undefined]" {
         item.git_root
             .as_deref()
             .map(|s| s.trim().is_empty())

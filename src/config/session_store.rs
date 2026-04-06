@@ -142,7 +142,14 @@ pub fn is_pid_running(pid: u32) -> bool {
     {
         std::path::Path::new(&format!("/proc/{pid}")).exists()
     }
-    #[cfg(not(target_os = "linux"))]
+    #[cfg(all(unix, not(target_os = "linux")))]
+    {
+        std::process::Command::new("kill")
+            .args(["-0", &pid.to_string()])
+            .status()
+            .map_or(true, |s| s.success())
+    }
+    #[cfg(not(unix))]
     {
         let _ = pid;
         true

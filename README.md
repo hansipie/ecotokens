@@ -177,7 +177,7 @@ ecotokens uninstall --target all       # all targets
 | `ecotokens clear --before DATE` | Delete interceptions recorded before DATE (YYYY-MM-DD) |
 | `ecotokens clear --older-than DURATION` | Delete interceptions older than a duration (e.g. `30d`, `2w`, `1m`) |
 | `ecotokens clear --family FAMILY` | Delete interceptions of a specific command family |
-| `ecotokens clear --project PATH` | Delete interceptions for a specific project (use `"(unknown)"` for entries without a git root) |
+| `ecotokens clear --project PATH` | Delete interceptions for a specific project (use `"[undefined]"` for entries without a git root) |
 
 ## Gain dashboard
 

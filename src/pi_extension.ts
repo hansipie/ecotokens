@@ -4,7 +4,7 @@
  * Do not edit manually — regenerate with: ecotokens install --target pi
  */
 import type { ExtensionAPI } from "@mariozechner/pi-coding-agent";
-import { spawnSync, execSync } from "child_process";
+import { spawnSync } from "child_process";
 
 // ─── helpers ────────────────────────────────────────────────────────────────
 
@@ -87,11 +87,11 @@ export default function (pi: ExtensionAPI) {
   // Mutation de event.input.command avant exécution (extensions.md:570).
   // Le rendering natif Pi est conservé (pas de tool override).
   // ecotokens filter exécute la commande, filtre stdout, enregistre les métriques.
-  pi.on("tool_call", async (event, _ctx) => {
+  pi.on("tool_call", async (event, ctx) => {
     if (event.toolName !== "bash") return;
     const input = event.input as { command?: string };
     if (!input.command) return;
-    input.command = `ecotokens filter -- bash -c ${JSON.stringify(input.command)}`;
+    input.command = `ecotokens filter --cwd ${JSON.stringify(ctx.cwd)} -- bash -c ${JSON.stringify(input.command)}`;
   });
 
   // ── 2. Outils natifs post-execution : équivalent PostToolUse ─────────────
@@ -126,9 +126,8 @@ export default function (pi: ExtensionAPI) {
     handler: async (args, ctx) => {
       const period = args?.trim() || "all";
       try {
-        const out = execSync(`ecotokens gain --period ${JSON.stringify(period)}`, {
-          encoding: "utf-8",
-        });
+        const result = spawnSync("ecotokens", ["gain", "--period", period], { encoding: "utf-8" });
+        const out = (result.stdout as string) || "";
         ctx.ui.notify(out.trim().slice(0, 500), "info");
       } catch (e: unknown) {
         ctx.ui.notify(`ecotokens gain failed: ${(e as Error).message}`, "error");
@@ -144,10 +143,11 @@ export default function (pi: ExtensionAPI) {
         return;
       }
       try {
-        const out = execSync(`ecotokens search ${JSON.stringify(args.trim())}`, {
-          encoding: "utf-8",
-        });
-        ctx.ui.notify(out.trim().slice(0, 800), "info");
+        const result = spawnSync("ecotokens", ["search", args.trim()], { encoding: "utf-8" });
+        const out = (result.stdout as string) || "";
+        const raw = out.trim();
+        const display = raw.length > 800 ? raw.slice(0, 800) + " …(truncated)" : raw;
+        ctx.ui.notify(display, "info");
       } catch (e: unknown) {
         ctx.ui.notify(`eco-search failed: ${(e as Error).message}`, "error");
       }

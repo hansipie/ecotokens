@@ -15,7 +15,7 @@ fn filter_p90_latency_under_50ms() {
     let mut durations_ms = Vec::new();
     for _ in 0..20 {
         let start = Instant::now();
-        let _result = ecotokens::filter::run_filter_pipeline("cat", &content, 0);
+        let _result = ecotokens::filter::run_filter_pipeline_with_cwd("cat", &content, 0, None);
         let elapsed = start.elapsed().as_millis() as u64;
         durations_ms.push(elapsed);
     }
