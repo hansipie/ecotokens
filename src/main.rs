@@ -52,6 +52,9 @@ enum Commands {
         args: Vec<String>,
         #[arg(long)]
         debug: bool,
+        /// Working directory for git root detection (used by Pi extension)
+        #[arg(long)]
+        cwd: Option<PathBuf>,
     },
     /// Show token savings report
     Gain {
@@ -193,7 +196,7 @@ enum Commands {
         /// Delete only interceptions of a specific command family (e.g. git, cargo, python)
         #[arg(long, value_name = "FAMILY")]
         family: Option<String>,
-        /// Delete only interceptions for a specific project (git root path, or "(unknown)" for entries without a git root)
+        /// Delete only interceptions for a specific project (git root path, or "[undefined]" for entries without a git root)
         #[arg(long, value_name = "PATH")]
         project: Option<String>,
         /// Skip the confirmation prompt
@@ -283,7 +286,7 @@ fn default_claude_json_path() -> PathBuf {
         .join(".claude.json")
 }
 
-fn cmd_filter(args: Vec<String>, debug: bool) {
+fn cmd_filter(args: Vec<String>, debug: bool, cwd: Option<PathBuf>) {
     if args.is_empty() {
         eprintln!("ecotokens filter: no command given");
         std::process::exit(1);
@@ -313,7 +316,7 @@ fn cmd_filter(args: Vec<String>, debug: bool) {
 
     let duration_ms = start.elapsed().as_millis() as u32;
     let (filtered, tokens_before, tokens_after) =
-        filter::run_filter_pipeline(&command, &raw, duration_ms);
+        filter::run_filter_pipeline_with_cwd(&command, &raw, duration_ms, cwd.as_deref());
 
     if debug {
         eprintln!("[ecotokens debug] command={command} tokens_before={tokens_before} tokens_after={tokens_after}");
@@ -1730,7 +1733,7 @@ fn cmd_clear(
 
         if let Some(ref proj) = project {
             let item_root = item.git_root.as_deref().unwrap_or("").trim();
-            let matches = if proj.trim() == "(unknown)" {
+            let matches = if proj.trim() == "[undefined]" {
                 item_root.is_empty()
             } else {
                 item_root == proj.trim()
@@ -1914,8 +1917,14 @@ fn cmd_update(check: bool) {
         return;
     }
 
-    let v_latest = parse_version(latest);
-    let v_current = parse_version(current);
+    let Some(v_latest) = parse_version(latest) else {
+        eprintln!("Could not parse latest version: {latest}");
+        return;
+    };
+    let Some(v_current) = parse_version(current) else {
+        eprintln!("Could not parse current version: {current}");
+        return;
+    };
 
     if v_latest <= v_current {
         println!("Already up to date (v{}).", current);
@@ -1934,7 +1943,7 @@ fn cmd_update(check: bool) {
 
     println!("Running: cargo install ecotokens ...");
     match std::process::Command::new("cargo")
-        .args(["install", "ecotokens"])
+        .args(["install", "ecotokens", "--version", latest])
         .status()
     {
         Ok(s) if s.success() => println!("Updated to v{}.", latest),
@@ -1956,7 +1965,7 @@ fn main() {
         Commands::HookGemini => hook::handle_gemini(),
         Commands::HookQwen => hook::handle_qwen(),
         Commands::HookPost => hook::handle_post(),
-        Commands::Filter { args, debug } => cmd_filter(args, debug),
+        Commands::Filter { args, debug, cwd } => cmd_filter(args, debug, cwd),
         Commands::Gain {
             period,
             json,

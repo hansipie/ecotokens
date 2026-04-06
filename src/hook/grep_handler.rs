@@ -127,7 +127,6 @@ pub fn handle_grep(output: &str, depth: u32) -> PostFilterResult {
     let tokens_compacted = count_tokens(&compacted) as u32;
     let tokens_enriched = count_tokens(&enriched) as u32;
 
-    // Always return Filtered (grep output always gets some transformation)
     if tokens_enriched < tokens_before {
         PostFilterResult::Filtered {
             output: enriched,
@@ -135,12 +134,14 @@ pub fn handle_grep(output: &str, depth: u32) -> PostFilterResult {
             tokens_after: tokens_enriched,
             content_before: output.to_string(),
         }
-    } else {
+    } else if tokens_compacted < tokens_before {
         PostFilterResult::Filtered {
             output: compacted,
             tokens_before,
             tokens_after: tokens_compacted,
             content_before: output.to_string(),
         }
+    } else {
+        PostFilterResult::Passthrough
     }
 }

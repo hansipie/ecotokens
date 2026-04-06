@@ -68,7 +68,12 @@ fn format_symbol_with_trace(
     lines.join("\n")
 }
 
-pub fn handle_read(file_path: &str, content: &str, depth: u32) -> PostFilterResult {
+pub fn handle_read(
+    file_path: &str,
+    content: &str,
+    depth: u32,
+    cwd: Option<&std::path::Path>,
+) -> PostFilterResult {
     // Guard: empty content
     if content.is_empty() {
         return PostFilterResult::Passthrough;
@@ -89,7 +94,9 @@ pub fn handle_read(file_path: &str, content: &str, depth: u32) -> PostFilterResu
 
     // Get outline via tree-sitter (works even without tantivy index)
     let path = Path::new(file_path);
-    let cwd = std::env::current_dir().unwrap_or_else(|_| PathBuf::from("."));
+    let cwd = cwd
+        .map(|p| p.to_path_buf())
+        .unwrap_or_else(|| std::env::current_dir().unwrap_or_else(|_| PathBuf::from(".")));
 
     let symbols = match crate::search::outline::outline_path(OutlineOptions {
         path: path.to_path_buf(),

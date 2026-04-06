@@ -124,12 +124,6 @@ pub fn apply_filter(command: &str, output: &str) -> String {
     }
 }
 
-/// Run the full filter pipeline: masking → family filter → token counting → metrics recording.
-/// Returns `(filtered_output, tokens_before, tokens_after)`.
-pub fn run_filter_pipeline(command: &str, raw: &str, duration_ms: u32) -> (String, u32, u32) {
-    run_filter_pipeline_with_cwd(command, raw, duration_ms, None)
-}
-
 /// Run the full filter pipeline with an optional working directory for git_root detection.
 /// Returns `(filtered_output, tokens_before, tokens_after)`.
 pub fn run_filter_pipeline_with_cwd(
@@ -140,7 +134,7 @@ pub fn run_filter_pipeline_with_cwd(
 ) -> (String, u32, u32) {
     let settings = crate::config::Settings::load();
     let (masked, redacted) = crate::masking::mask(raw);
-    let filtered = if raw.len() < 200 {
+    let filtered = if raw.chars().count() < 200 {
         masked.clone()
     } else {
         let mut f = apply_filter(command, &masked);
@@ -165,7 +159,14 @@ pub fn run_filter_pipeline_with_cwd(
         let mode = if tokens_after < tokens_before {
             crate::metrics::store::FilterMode::Filtered
         } else {
-            crate::metrics::store::FilterMode::Summarized
+            #[cfg(feature = "ai-summary")]
+            {
+                crate::metrics::store::FilterMode::Summarized
+            }
+            #[cfg(not(feature = "ai-summary"))]
+            {
+                crate::metrics::store::FilterMode::Filtered
+            }
         };
         let family = detect_family(command);
         let git_root = cwd.and_then(|dir| {

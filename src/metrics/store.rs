@@ -244,29 +244,29 @@ fn migrate_from_jsonl_if_needed(db_path: &Path, conn: &Connection) -> io::Result
 // ── Row mapping ───────────────────────────────────────────────────────────────
 
 fn row_to_interception(row: &Row) -> rusqlite::Result<Interception> {
-    let command_family: String = row.get(3)?;
-    let mode: String = row.get(8)?;
-    let redacted: i32 = row.get(9)?;
-    let hook_type: String = row.get(13)?;
+    let command_family: String = row.get("command_family")?;
+    let mode: String = row.get("mode")?;
+    let redacted: i32 = row.get("redacted")?;
+    let hook_type: String = row.get("hook_type")?;
 
     Ok(Interception {
-        id: row.get(0)?,
-        timestamp: row.get(1)?,
-        command: row.get(2)?,
+        id: row.get("id")?,
+        timestamp: row.get("timestamp")?,
+        command: row.get("command")?,
         command_family: str_to_enum(&command_family).map_err(|e| {
             rusqlite::Error::InvalidColumnType(3, e.to_string(), rusqlite::types::Type::Text)
         })?,
-        git_root: row.get(4)?,
-        tokens_before: row.get::<_, i64>(5)? as u32,
-        tokens_after: row.get::<_, i64>(6)? as u32,
-        savings_pct: row.get::<_, f64>(7)? as f32,
+        git_root: row.get("git_root")?,
+        tokens_before: row.get::<_, i64>("tokens_before")? as u32,
+        tokens_after: row.get::<_, i64>("tokens_after")? as u32,
+        savings_pct: row.get::<_, f64>("savings_pct")? as f32,
         mode: str_to_enum(&mode).map_err(|e| {
             rusqlite::Error::InvalidColumnType(8, e.to_string(), rusqlite::types::Type::Text)
         })?,
         redacted: redacted != 0,
-        duration_ms: row.get::<_, i64>(10)? as u32,
-        content_before: row.get(11)?,
-        content_after: row.get(12)?,
+        duration_ms: row.get::<_, i64>("duration_ms")? as u32,
+        content_before: row.get("content_before")?,
+        content_after: row.get("content_after")?,
         hook_type: str_to_enum(&hook_type).map_err(|e| {
             rusqlite::Error::InvalidColumnType(13, e.to_string(), rusqlite::types::Type::Text)
         })?,

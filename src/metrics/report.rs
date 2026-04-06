@@ -50,12 +50,16 @@ pub struct Report {
     pub by_project: HashMap<String, ProjectStats>,
 }
 
-fn default_pricing_usd_per_1m(model: &str) -> f64 {
+fn pricing_usd_per_1m(model: &str) -> f64 {
+    let settings = crate::config::settings::Settings::load();
+    if let Some(p) = settings.model_pricing.get(model) {
+        return p.input_usd_per_1m;
+    }
     match model {
         "claude-haiku-4-5" => 0.80,
         "claude-opus-4-6" => 15.00,
         "github-copilot" => 0.0,
-        _ => 3.00, // sonnet default
+        _ => 3.00,
     }
 }
 
@@ -131,7 +135,7 @@ pub fn aggregate(items: &[Interception], period: Period, model: &str) -> Report 
     };
 
     let tokens_saved = total_before.saturating_sub(total_after);
-    let price_per_1m = default_pricing_usd_per_1m(model);
+    let price_per_1m = pricing_usd_per_1m(model);
     let cost_avoided_usd = (tokens_saved as f64 / 1_000_000.0) * price_per_1m;
 
     // by_family
@@ -162,18 +166,25 @@ pub fn aggregate(items: &[Interception], period: Period, model: &str) -> Report 
     // by_project
     let mut by_project: HashMap<String, ProjectStats> = HashMap::new();
     for item in &filtered {
-        if let Some(root) = &item.git_root {
-            let root = root.trim();
-            let key = if root.is_empty() { "(unknown)" } else { root };
-            let entry = by_project.entry(key.to_string()).or_insert(ProjectStats {
-                count: 0,
-                tokens_before: 0,
-                tokens_after: 0,
-            });
-            entry.count += 1;
-            entry.tokens_before += item.tokens_before as u64;
-            entry.tokens_after += item.tokens_after as u64;
-        }
+        let key = match &item.git_root {
+            Some(root) => {
+                let root = root.trim();
+                if root.is_empty() {
+                    "[undefined]"
+                } else {
+                    root
+                }
+            }
+            None => "[undefined]",
+        };
+        let entry = by_project.entry(key.to_string()).or_insert(ProjectStats {
+            count: 0,
+            tokens_before: 0,
+            tokens_after: 0,
+        });
+        entry.count += 1;
+        entry.tokens_before += item.tokens_before as u64;
+        entry.tokens_after += item.tokens_after as u64;
     }
 
     Report {

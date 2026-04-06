@@ -15,9 +15,6 @@ pub struct PostHookInput {
     pub tool_response: serde_json::Value,
     #[serde(default)]
     pub cwd: Option<String>,
-    #[serde(default)]
-    #[allow(dead_code)]
-    pub session_id: Option<String>,
 }
 
 #[derive(Debug, Clone, Serialize)]
@@ -83,7 +80,12 @@ pub fn handle_post_input(input: &PostHookInput, depth: u32) -> (PostFilterResult
                 // Flat format: { "content": "..." }
                 .or_else(|| input.tool_response.get("content").and_then(|v| v.as_str()))
                 .unwrap_or("");
-            let result = handle_read(file_path, content, depth);
+            let result = handle_read(
+                file_path,
+                content,
+                depth,
+                input.cwd.as_deref().map(std::path::Path::new),
+            );
             (result, CommandFamily::NativeRead)
         }
         "Grep" => {

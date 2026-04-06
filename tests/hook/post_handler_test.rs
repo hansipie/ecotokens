@@ -13,7 +13,6 @@ fn make_input(
         tool_input,
         tool_response,
         cwd: None,
-        session_id: None,
     }
 }
 

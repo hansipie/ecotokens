@@ -77,7 +77,7 @@ pub fn mask(text: &str) -> (String, bool) {
     }
 
     // HuggingFace Access Token
-    let re_hf = regex!(r"hf_[a-zA-Z]{34}");
+    let re_hf = regex!(r"hf_[a-zA-Z0-9_]{34}");
     if re_hf.is_match(&out) {
         out = re_hf.replace_all(&out, "[HF_TOKEN]").into_owned();
         redacted = true;
