@@ -4,7 +4,7 @@
  * Do not edit manually — regenerate with: ecotokens install --target pi
  */
 import type { ExtensionAPI } from "@mariozechner/pi-coding-agent";
-import { spawnSync } from "child_process";
+import { execSync, spawnSync } from "child_process";
 
 // ─── helpers ────────────────────────────────────────────────────────────────
 
