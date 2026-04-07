@@ -4,7 +4,7 @@
  * Do not edit manually — regenerate with: ecotokens install --target pi
  */
 import type { ExtensionAPI } from "@mariozechner/pi-coding-agent";
-import { spawnSync } from "child_process";
+import { execSync, spawnSync } from "child_process";
 
 // ─── helpers ────────────────────────────────────────────────────────────────
 
@@ -112,8 +112,10 @@ export default function (pi: ExtensionAPI) {
   });
 
   // ── 3. Session lifecycle : auto-watch ────────────────────────────────────
-  pi.on("session_start", async (_event, _ctx) => {
-    spawnSync("ecotokens", ["session-start"], { stdio: "ignore" });
+  pi.on("session_start", async (event, _ctx) => {
+    if (event.reason === "startup") {
+      spawnSync("ecotokens", ["session-start"], { stdio: "ignore" });
+    }
   });
 
   pi.on("session_shutdown", async (_event, _ctx) => {
