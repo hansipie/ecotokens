@@ -3,6 +3,7 @@ use ecotokens::hook::handler::{handle_hook_input, HookInput, HookOutput};
 fn make_input(command: &str) -> HookInput {
     HookInput {
         command: command.to_string(),
+        cwd: None,
     }
 }
 
@@ -97,7 +98,7 @@ mod gemini_handler {
             .as_str()
             .unwrap_or("")
             .to_string();
-        let input = ecotokens::hook::handler::HookInput { command };
+        let input = ecotokens::hook::handler::HookInput { command, cwd: None };
         let out = ecotokens::hook::handler::handle_hook_input(&input, &[], false);
 
         match out {
@@ -120,6 +121,7 @@ mod gemini_handler {
         // An empty command (no command field) should be treated as passthrough.
         let input = ecotokens::hook::handler::HookInput {
             command: String::new(),
+            cwd: None,
         };
         // An empty command is an edge case — handle_hook_input trims and rewrites non-excluded
         // commands including empty ones. The actual guard for non-shell tools is in handle_gemini().
@@ -137,6 +139,7 @@ mod gemini_handler {
     fn excluded_shell_command_passes_through() {
         let input = ecotokens::hook::handler::HookInput {
             command: "echo hello".to_string(),
+            cwd: None,
         };
         let exclusions = vec!["echo".to_string()];
         let out = ecotokens::hook::handler::handle_hook_input(&input, &exclusions, false);

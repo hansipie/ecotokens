@@ -3,6 +3,8 @@ use serde::{Deserialize, Serialize};
 #[derive(Debug, Clone, Deserialize, Serialize)]
 pub struct HookInput {
     pub command: String,
+    #[serde(default)]
+    pub cwd: Option<String>,
 }
 
 #[derive(Debug, Clone)]
@@ -16,6 +18,8 @@ pub enum HookOutput {
 struct ShellToolPayload {
     tool_name: String,
     tool_input: serde_json::Value,
+    #[serde(default)]
+    cwd: Option<String>,
 }
 
 /// Shared response structure for shell-tool hooks.
@@ -46,7 +50,10 @@ pub fn handle_hook_input(input: &HookInput, exclusions: &[String], _debug: bool)
     }
 
     // Rewrite to ecotokens filter
-    let rewritten = format!("ecotokens filter -- {cmd}");
+    let rewritten = match &input.cwd {
+        Some(cwd) => format!("ecotokens filter --cwd \"{cwd}\" -- {cmd}"),
+        None => format!("ecotokens filter -- {cmd}"),
+    };
     HookOutput::Rewrite(rewritten)
 }
 
@@ -79,8 +86,9 @@ pub fn handle() {
         .as_str()
         .unwrap_or("")
         .to_string();
+    let cwd = v["cwd"].as_str().map(|s| s.to_string());
     let settings = crate::config::Settings::load();
-    let input = HookInput { command };
+    let input = HookInput { command, cwd };
     let debug = settings.debug;
     let output = handle_hook_input(&input, &settings.exclusions, debug);
 
@@ -171,7 +179,10 @@ fn handle_shell_tool_hook(hook_event_name: &str, label: &str) {
     }
 
     let settings = crate::config::Settings::load();
-    let input = HookInput { command };
+    let input = HookInput {
+        command,
+        cwd: payload.cwd,
+    };
     let debug = settings.debug;
     let output = handle_hook_input(&input, &settings.exclusions, debug);
 
