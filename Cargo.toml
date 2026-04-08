@@ -8,6 +8,7 @@ repository = "https://github.com/hansipie/ecotokens"
 homepage = "https://github.com/hansipie/ecotokens"
 keywords = ["claude", "gemini", "tokens", "cli", "ai"]
 categories = ["command-line-utilities", "development-tools"]
+exclude = ["assets/*.gif", "assets/picture.png", "assets/icon.png"]
 
 [features]
 default = ["embeddings", "ai-summary"]
