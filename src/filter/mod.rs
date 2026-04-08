@@ -169,13 +169,24 @@ pub fn run_filter_pipeline_with_cwd(
             }
         };
         let family = detect_family(command);
-        let git_root = cwd.and_then(|dir| {
+        let effective_cwd = cwd
+            .map(|p| p.to_path_buf())
+            .or_else(|| std::env::current_dir().ok());
+        let git_root = effective_cwd.as_deref().map(|dir| {
             std::process::Command::new("git")
                 .args(["rev-parse", "--show-toplevel"])
                 .current_dir(dir)
                 .output()
                 .ok()
-                .map(|o| String::from_utf8_lossy(&o.stdout).trim().to_string())
+                .and_then(|o| {
+                    let s = String::from_utf8_lossy(&o.stdout).trim().to_string();
+                    if s.is_empty() {
+                        None
+                    } else {
+                        Some(s)
+                    }
+                })
+                .unwrap_or_else(|| dir.to_string_lossy().to_string())
         });
         let rec = crate::metrics::store::Interception::new(
             command.to_string(),
