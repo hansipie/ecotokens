@@ -157,6 +157,7 @@ ecotokens uninstall --target all       # all targets
 | `ecotokens install` | Install the PreToolUse + PostToolUse hooks in `~/.claude/settings.json` |
 | `ecotokens uninstall` | Remove the hooks |
 | `ecotokens filter -- CMD [ARGS]` | Run a command, filter its output, record metrics |
+| `ecotokens filter --cwd DIR -- CMD [ARGS]` | Same, with an explicit working directory |
 | `ecotokens hook-post` | PostToolUse handler — intercept native tool results (Read, Grep, Glob) |
 | `ecotokens gain` | Interactive TUI dashboard — savings by family or project |
 | `ecotokens gain --period PERIOD` | Filter TUI to a time window (`all`, `today`, `week`, `month`) |
@@ -211,6 +212,7 @@ Interactive TUI showing token savings per command family and per project, with a
 ```bash
 ecotokens filter -- cargo test
 ecotokens filter --debug -- git log --oneline -50
+ecotokens filter --cwd /path/to/project -- cargo test
 ```
 
 The output is compressed by the same family-specific filters used by the hook, and token savings are recorded in the metrics store.
