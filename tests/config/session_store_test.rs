@@ -50,6 +50,36 @@ fn session_counts_are_independent_per_path() {
     assert_eq!(store.0["/project-b"].sessions, 1);
 }
 
+#[test]
+fn child_session_reuses_live_parent_watcher() {
+    let mut store = SessionStore::default();
+    store.increment("/vault");
+    store.register_watcher("/vault", live_pid(), None);
+
+    let decision = store.increment_for_session("/vault/projects/petales");
+
+    assert_eq!(decision.watch_path, "/vault");
+    assert!(!decision.needs_watcher);
+    assert!(decision.reused_existing_watcher);
+    assert_eq!(store.0["/vault"].sessions, 2);
+    assert!(!store.0.contains_key("/vault/projects/petales"));
+}
+
+#[test]
+fn child_session_restarts_parent_watch_when_parent_entry_exists_without_live_watcher() {
+    let mut store = SessionStore::default();
+    store.increment("/vault");
+    store.register_watcher("/vault", dead_pid(), None);
+    store.cleanup_dead();
+
+    let decision = store.increment_for_session("/vault/projects/petales");
+
+    assert_eq!(decision.watch_path, "/vault");
+    assert!(decision.needs_watcher);
+    assert!(!decision.reused_existing_watcher);
+    assert_eq!(store.0["/vault"].sessions, 2);
+}
+
 // ── decrement / stop signal ───────────────────────────────────────────────────
 
 #[test]
@@ -111,6 +141,22 @@ fn two_paths_close_independently() {
     let pid_b = store.decrement("/project-b");
     assert_eq!(pid_b, Some(222));
     assert!(!store.0.contains_key("/project-b"));
+}
+
+#[test]
+fn child_session_decrements_parent_watcher_when_reused() {
+    let mut store = SessionStore::default();
+    store.increment("/vault");
+    store.register_watcher("/vault", 42, None);
+    store.increment_for_session("/vault/projects/petales");
+
+    let pid = store.decrement_for_session("/vault/projects/petales");
+
+    assert!(
+        pid.is_none(),
+        "parent watcher still has the original session"
+    );
+    assert_eq!(store.0["/vault"].sessions, 1);
 }
 
 // ── register_watcher ─────────────────────────────────────────────────────────
