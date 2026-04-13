@@ -1804,12 +1804,17 @@ fn cmd_session_start() {
 
     let mut store = config::SessionStore::load();
     store.cleanup_dead();
-    let needs_watcher = store.increment(&cwd_str);
+    let decision = store.increment_for_session(&cwd_str);
     let _ = store.save();
 
-    if needs_watcher {
+    if decision.reused_existing_watcher {
+        println!(
+            "ecotokens auto-watch: CWD is covered by existing watch on {}, skipping.",
+            decision.watch_path
+        );
+    } else if decision.needs_watcher {
         let _ = std::process::Command::new("ecotokens")
-            .args(["watch", "--background", "--path", &cwd_str])
+            .args(["watch", "--background", "--path", &decision.watch_path])
             .spawn();
     }
 }
@@ -1823,7 +1828,7 @@ fn cmd_session_end() {
     let cwd_str = cwd.to_string_lossy().to_string();
 
     let mut store = config::SessionStore::load();
-    if let Some(pid) = store.decrement(&cwd_str) {
+    if let Some(pid) = store.decrement_for_session(&cwd_str) {
         let _ = store.save();
         #[cfg(unix)]
         let _ = std::process::Command::new("kill")
