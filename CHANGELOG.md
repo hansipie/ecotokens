@@ -5,6 +5,11 @@ All notable changes to this project will be documented in this file.
 The format is based on [Keep a Changelog](https://keepachangelog.com/en/1.0.0/),
 and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0.html).
 
+## [0.14.5] - 2026-04-15
+
+### Fixed
+- `ecotokens watch`: when a session starts in a subdirectory already covered by an existing watcher, the parent watcher is reused instead of launching a duplicate background watch — a clear skip message is surfaced instead
+
 ## [0.14.4] - 2026-04-08
 
 ### Fixed
@@ -198,6 +203,7 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 - `ecotokens install` / `uninstall` / `config` commands
 - MIT license
 
+[0.14.5]: https://github.com/hansipie/ecotokens/releases/tag/v0.14.5
 [0.14.0]: https://github.com/hansipie/ecotokens/releases/tag/v0.14.0
 [0.13.0]: https://github.com/hansipie/ecotokens/releases/tag/v0.13.0
 [0.12.0]: https://github.com/hansipie/ecotokens/releases/tag/v0.12.0
