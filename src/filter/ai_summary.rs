@@ -8,6 +8,15 @@ use std::time::Duration;
 const DEFAULT_OLLAMA_URL: &str = "http://localhost:11434";
 
 #[cfg(feature = "ai-summary")]
+fn is_json_content(output: &str) -> bool {
+    let trimmed = output.trim();
+    if !(trimmed.starts_with('{') || trimmed.starts_with('[')) {
+        return false;
+    }
+    serde_json::from_str::<serde_json::Value>(trimmed).is_ok()
+}
+
+#[cfg(feature = "ai-summary")]
 /// Attempt AI-powered summarization via Ollama. Falls back to generic filter on error.
 pub fn try_ai_summary(output: &str, settings: &Settings) -> Result<String, String> {
     // Guard: check if AI summary is enabled in config
@@ -22,6 +31,11 @@ pub fn try_ai_summary(output: &str, settings: &Settings) -> Result<String, Strin
             "Output too small for AI summary ({} < {} tokens)",
             tokens, settings.ai_summary_min_tokens
         ));
+    }
+
+    // Guard: preserve structured JSON output (issue #53)
+    if is_json_content(output) {
+        return Err("Structured JSON content detected".into());
     }
 
     let ollama_url = settings
