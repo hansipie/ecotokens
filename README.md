@@ -30,6 +30,7 @@ Token-saving companion for [Claude Code](https://claude.ai/code), [Gemini CLI](h
 | **Precision guarantees** | Errors, failures, and stack traces are never removed; secrets are redacted before filtering |
 | **Code intelligence** | BM25 + semantic search, symbol lookup, call graph tracing, near-duplicate detection |
 | **AI summarization** *(optional)* | Large outputs compressed by a local Ollama model instead of being truncated |
+| **Word abbreviations** *(optional)* | Replace common words with shorter forms (`function`→`fn`, `configuration`→`config`, …) in narrative text, and nudge the model to do the same via a SessionStart instruction |
 | **Zero config** | One `ecotokens install` command — works automatically from there |
 
 ## How it works
@@ -173,6 +174,9 @@ ecotokens uninstall --target all       # all targets
 | `ecotokens watch [--path DIR]` | Watch a directory and keep the index up to date |
 | `ecotokens auto-watch enable` | Start watch automatically on each Claude Code session |
 | `ecotokens auto-watch disable` | Disable automatic watch |
+| `ecotokens abbreviations enable` | Replace common words with abbreviations in filtered outputs + inject a matching instruction at SessionStart |
+| `ecotokens abbreviations disable` | Turn abbreviations off (default) |
+| `ecotokens abbreviations list` | List the active dictionary (defaults merged with user overrides) |
 | `ecotokens duplicates` | Detect near-duplicate code blocks in the indexed codebase |
 | `ecotokens clear --all` | Delete all recorded interceptions |
 | `ecotokens clear --before DATE` | Delete interceptions recorded before DATE (YYYY-MM-DD) |
@@ -277,7 +281,31 @@ embed_provider        : ollama (http://localhost:11434)
 ai_summary_enabled    : false
 ai_summary_model      : llama3.2:3b (default)
 ai_summary_url        : http://localhost:11434 (default)
+abbreviations_enabled : false
 ```
+
+### Word abbreviations *(optional)*
+
+```bash
+ecotokens abbreviations enable    # transform narrative text + inject model instruction
+ecotokens abbreviations list      # show the active dictionary
+ecotokens abbreviations disable   # back to default
+```
+
+When enabled, a post-processing pass replaces full words with shorter forms in the narrative parts of tool outputs (code blocks between triple backticks are preserved). A matching `additionalContext` payload is emitted at `SessionStart` so the model adopts the same abbreviations in its own responses.
+
+Extend or override the built-in dictionary via `abbreviations_custom` in `~/.config/ecotokens/config.json`:
+
+```json
+{
+  "abbreviations_enabled": true,
+  "abbreviations_custom": {
+    "function": "func",
+    "repository": "repo"
+  }
+}
+```
+
 
 ## Supported command families
 

@@ -102,6 +102,12 @@ pub struct Settings {
     /// Depth for caller/callee trace in PostToolUse enrichment (default: 1)
     #[serde(default = "default_post_hook_depth")]
     pub post_hook_depth: u32,
+    /// Apply word abbreviations to narrative text/logs/messages (default: false)
+    #[serde(default)]
+    pub abbreviations_enabled: bool,
+    /// Extra word→abbreviation pairs that override/extend the built-in dictionary
+    #[serde(default)]
+    pub abbreviations_custom: HashMap<String, String>,
 }
 
 fn default_threshold_lines() -> u32 {
@@ -145,6 +151,8 @@ impl Default for Settings {
             ai_summary_timeout_ms: 3000,
             auto_watch: false,
             post_hook_depth: 1,
+            abbreviations_enabled: false,
+            abbreviations_custom: HashMap::new(),
         }
     }
 }

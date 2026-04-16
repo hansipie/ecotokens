@@ -183,8 +183,15 @@ pub fn handle_post() {
             tokens_after,
             content_before,
         } => {
-            // Record metrics
-            let mode = if tokens_after < tokens_before {
+            let (final_output, final_tokens_after) = if settings.abbreviations_enabled {
+                let abbreviated = crate::abbreviations::abbreviate(output, &settings).0;
+                let recomputed = crate::tokens::count_tokens(&abbreviated) as u32;
+                (abbreviated, recomputed.min(*tokens_after))
+            } else {
+                (output.clone(), *tokens_after)
+            };
+
+            let mode = if final_tokens_after < *tokens_before {
                 FilterMode::Filtered
             } else {
                 FilterMode::Passthrough
@@ -194,12 +201,12 @@ pub fn handle_post() {
                 family,
                 input.cwd.clone(),
                 *tokens_before,
-                *tokens_after,
+                final_tokens_after,
                 mode,
                 false,
                 0,
                 Some(content_before.clone()),
-                Some(output.clone()),
+                Some(final_output.clone()),
             )
             .with_hook_type(HookType::PostToolUse);
 
@@ -207,7 +214,7 @@ pub fn handle_post() {
                 let _ = crate::metrics::store::append_to(&path, &interception);
             }
 
-            PostHookOutput::with_context(output.clone())
+            PostHookOutput::with_context(final_output)
         }
         PostFilterResult::Passthrough => PostHookOutput::passthrough(),
     };

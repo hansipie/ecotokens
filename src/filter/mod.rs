@@ -146,6 +146,12 @@ pub fn run_filter_pipeline_with_cwd(
         f
     };
 
+    let filtered = if settings.abbreviations_enabled {
+        crate::abbreviations::abbreviate(&filtered, &settings).0
+    } else {
+        filtered
+    };
+
     let tokens_before = crate::tokens::count_tokens(raw) as u32;
     let filtered_tokens = crate::tokens::count_tokens(&filtered) as u32;
     let (filtered, tokens_after) = if filtered_tokens > tokens_before {

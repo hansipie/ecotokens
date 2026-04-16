@@ -1,3 +1,4 @@
+pub mod abbreviations;
 pub mod config;
 pub mod daemon;
 pub mod duplicates;
