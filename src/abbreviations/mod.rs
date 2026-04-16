@@ -47,6 +47,7 @@ fn apply_case(original: &str, replacement: &str) -> String {
             .all(|c| !c.is_alphabetic() || c.is_uppercase());
     match first {
         Some(_) if all_upper && original.len() > 1 => replacement.to_uppercase(),
+        Some(c) if all_upper && original.len() > 1 => replacement.to_uppercase(),
         Some(c) if c.is_uppercase() && !has_upper_tail => {
             let mut out = String::with_capacity(replacement.len());
             let mut rc = replacement.chars();
