@@ -126,6 +126,7 @@ pub fn apply_filter(command: &str, output: &str) -> String {
 
 /// Run the full filter pipeline with an optional working directory for git_root detection.
 /// Returns `(filtered_output, tokens_before, tokens_after)`.
+#[cfg_attr(test, allow(unused_variables))]
 pub fn run_filter_pipeline_with_cwd(
     command: &str,
     raw: &str,
