@@ -126,6 +126,7 @@ pub fn apply_filter(command: &str, output: &str) -> String {
 
 /// Run the full filter pipeline with an optional working directory for git_root detection.
 /// Returns `(filtered_output, tokens_before, tokens_after)`.
+#[cfg_attr(test, allow(unused_variables))]
 pub fn run_filter_pipeline_with_cwd(
     command: &str,
     raw: &str,
@@ -144,6 +145,12 @@ pub fn run_filter_pipeline_with_cwd(
             f = ai_summary::ai_summary_or_fallback(&masked, &settings);
         }
         f
+    };
+
+    let filtered = if settings.abbreviations_enabled {
+        crate::abbreviations::abbreviate(&filtered, &settings).0
+    } else {
+        filtered
     };
 
     let tokens_before = crate::tokens::count_tokens(raw) as u32;

@@ -255,16 +255,20 @@ pub fn is_gemini_mcp_registered(settings_path: &Path) -> bool {
     has_ecotokens_mcp_server(&read_settings(settings_path))
 }
 
-/// Remove the ecotokens hook and MCP server from ~/.gemini/settings.json.
-pub fn uninstall_gemini(settings_path: &Path) -> InstallResult {
+/// Shared logic: remove a hook + the MCP server entry from a settings file.
+fn uninstall_hook_and_mcp(settings_path: &Path, hook_type: &str, command: &str) -> InstallResult {
     if !settings_path.exists() {
         return Ok(());
     }
-
     let mut v = read_settings(settings_path);
-    remove_hook_generic(&mut v, "BeforeTool", GEMINI_HOOK_COMMAND);
+    remove_hook_generic(&mut v, hook_type, command);
     remove_ecotokens_mcp_server(&mut v);
     write_settings(settings_path, &v)
+}
+
+/// Remove the ecotokens hook and MCP server from ~/.gemini/settings.json.
+pub fn uninstall_gemini(settings_path: &Path) -> InstallResult {
+    uninstall_hook_and_mcp(settings_path, "BeforeTool", GEMINI_HOOK_COMMAND)
 }
 
 // ============================================================================
@@ -299,14 +303,7 @@ pub fn is_qwen_mcp_registered(settings_path: &Path) -> bool {
 
 /// Remove the ecotokens hook and MCP server from ~/.qwen/settings.json.
 pub fn uninstall_qwen(settings_path: &Path) -> InstallResult {
-    if !settings_path.exists() {
-        return Ok(());
-    }
-
-    let mut v = read_settings(settings_path);
-    remove_hook_generic(&mut v, "PreToolUse", QWEN_HOOK_COMMAND);
-    remove_ecotokens_mcp_server(&mut v);
-    write_settings(settings_path, &v)
+    uninstall_hook_and_mcp(settings_path, "PreToolUse", QWEN_HOOK_COMMAND)
 }
 
 // ============================================================================

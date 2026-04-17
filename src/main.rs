@@ -10,6 +10,7 @@ use std::path::PathBuf;
 
 use crate::config::default_index_dir;
 
+mod abbreviations;
 mod config;
 mod daemon;
 mod duplicates;
@@ -182,6 +183,11 @@ enum Commands {
         #[command(subcommand)]
         action: AutoWatchAction,
     },
+    /// Enable, disable or inspect the word abbreviations token-saving feature
+    Abbreviations {
+        #[command(subcommand)]
+        action: AbbreviationsAction,
+    },
     /// Delete recorded interceptions (selective or total)
     Clear {
         /// Delete ALL interceptions (required when no other filter is given)
@@ -239,6 +245,16 @@ enum AutoWatchAction {
     Enable,
     /// Disable automatic watch
     Disable,
+}
+
+#[derive(Subcommand)]
+enum AbbreviationsAction {
+    /// Turn on word abbreviation replacement in filtered outputs
+    Enable,
+    /// Turn off word abbreviation replacement
+    Disable,
+    /// List the active abbreviation dictionary (defaults merged with custom)
+    List,
 }
 
 /// RAII guard that restores terminal state when dropped, even on panic.
@@ -975,6 +991,7 @@ fn cmd_config(json: bool, embed_provider: Option<String>, embed_url: Option<Stri
                 .as_deref()
                 .unwrap_or("http://localhost:11434 (default)")
         );
+        println!("abbreviations_enabled : {}", settings.abbreviations_enabled);
     }
 }
 
@@ -1796,26 +1813,37 @@ fn watch_log_path(watch_path: &std::path::Path) -> PathBuf {
 
 fn cmd_session_start() {
     let settings = config::Settings::load();
-    if !settings.auto_watch {
-        return;
+
+    if settings.auto_watch {
+        let cwd = std::env::current_dir().unwrap_or_else(|_| PathBuf::from("."));
+        let cwd_str = cwd.to_string_lossy().to_string();
+
+        let mut store = config::SessionStore::load();
+        store.cleanup_dead();
+        let decision = store.increment_for_session(&cwd_str);
+        let _ = store.save();
+
+        if decision.reused_existing_watcher {
+            eprintln!(
+                "ecotokens auto-watch: CWD is covered by existing watch on {}, skipping.",
+                decision.watch_path
+            );
+        } else if decision.needs_watcher {
+            let _ = std::process::Command::new("ecotokens")
+                .args(["watch", "--background", "--path", &decision.watch_path])
+                .spawn();
+        }
     }
-    let cwd = std::env::current_dir().unwrap_or_else(|_| PathBuf::from("."));
-    let cwd_str = cwd.to_string_lossy().to_string();
 
-    let mut store = config::SessionStore::load();
-    store.cleanup_dead();
-    let decision = store.increment_for_session(&cwd_str);
-    let _ = store.save();
-
-    if decision.reused_existing_watcher {
-        println!(
-            "ecotokens auto-watch: CWD is covered by existing watch on {}, skipping.",
-            decision.watch_path
-        );
-    } else if decision.needs_watcher {
-        let _ = std::process::Command::new("ecotokens")
-            .args(["watch", "--background", "--path", &decision.watch_path])
-            .spawn();
+    if settings.abbreviations_enabled {
+        let instructions = crate::abbreviations::build_model_instructions(&settings);
+        let response = serde_json::json!({
+            "hookSpecificOutput": {
+                "hookEventName": "SessionStart",
+                "additionalContext": instructions,
+            }
+        });
+        println!("{}", response);
     }
 }
 
@@ -1877,6 +1905,41 @@ fn cmd_auto_watch_disable() {
         std::process::exit(1);
     }
     println!("✓ auto-watch disabled");
+}
+
+fn cmd_abbreviations_enable() {
+    let mut settings = config::settings::Settings::load();
+    settings.abbreviations_enabled = true;
+    if let Err(e) = settings.save() {
+        eprintln!("Error saving config: {e}");
+        std::process::exit(1);
+    }
+    println!(
+        "✓ abbreviations enabled — narrative text in filtered outputs will be abbreviated, \
+and new sessions will receive abbreviation instructions for the model"
+    );
+}
+
+fn cmd_abbreviations_disable() {
+    let mut settings = config::settings::Settings::load();
+    settings.abbreviations_enabled = false;
+    if let Err(e) = settings.save() {
+        eprintln!("Error saving config: {e}");
+        std::process::exit(1);
+    }
+    println!("✓ abbreviations disabled");
+}
+
+fn cmd_abbreviations_list() {
+    let settings = config::settings::Settings::load();
+    let pairs = abbreviations::dictionary::merged_pairs(&settings.abbreviations_custom);
+    let mut pairs = pairs;
+    pairs.sort_by(|a, b| a.0.cmp(&b.0));
+    println!("abbreviations_enabled : {}", settings.abbreviations_enabled);
+    println!("entries               : {}", pairs.len());
+    for (word, abbrev) in pairs {
+        println!("  {word} → {abbrev}");
+    }
 }
 
 fn parse_version(v: &str) -> Option<(u32, u32, u32)> {
@@ -2047,6 +2110,11 @@ fn main() {
         Commands::AutoWatch { action } => match action {
             AutoWatchAction::Enable => cmd_auto_watch_enable(),
             AutoWatchAction::Disable => cmd_auto_watch_disable(),
+        },
+        Commands::Abbreviations { action } => match action {
+            AbbreviationsAction::Enable => cmd_abbreviations_enable(),
+            AbbreviationsAction::Disable => cmd_abbreviations_disable(),
+            AbbreviationsAction::List => cmd_abbreviations_list(),
         },
     }
 }
