@@ -608,33 +608,32 @@ fn render_projects(
     projects.iter().map(|(name, _)| name.to_string()).collect()
 }
 
-fn render_project_log_panel<'a>(
+#[allow(clippy::too_many_arguments)]
+fn render_log_panel_inner<'a>(
     frame: &mut Frame,
     area: Rect,
-    project_name: Option<&str>,
+    name: Option<&str>,
     items: &'a [Interception],
     history_scroll: &mut usize,
     selected: Option<usize>,
+    empty_title: &str,
+    empty_hint: &str,
+    make_title: impl FnOnce(&str) -> String,
+    filter: impl Fn(&Interception, &str) -> bool,
 ) -> Option<&'a Interception> {
-    let Some(name) = project_name else {
+    let Some(name) = name else {
         let block = Block::default()
             .borders(Borders::ALL)
-            .title(" Project history ");
+            .title(empty_title.to_string());
         let p = Paragraph::new(Span::styled(
-            " j u: select a project",
+            empty_hint,
             Style::default().fg(Color::DarkGray),
         ))
         .block(block);
         frame.render_widget(p, area);
         return None;
     };
-
-    let label = project_label(name);
-    let filtered: Vec<&'a Interception> = items
-        .iter()
-        .filter(|i| matches_project(i, name))
-        .rev()
-        .collect();
+    let filtered: Vec<&'a Interception> = items.iter().filter(|i| filter(i, name)).rev().collect();
     let n = filtered.len();
     let selected_item = selected
         .map(|s| s.min(n.saturating_sub(1)))
@@ -642,7 +641,7 @@ fn render_project_log_panel<'a>(
     render_history_panel(
         frame,
         area,
-        &format!(" Project history: {label}"),
+        &make_title(name),
         filtered,
         history_scroll,
         selected,
@@ -651,7 +650,81 @@ fn render_project_log_panel<'a>(
     selected_item
 }
 
+fn render_project_log_panel<'a>(
+    frame: &mut Frame,
+    area: Rect,
+    project_name: Option<&str>,
+    items: &'a [Interception],
+    history_scroll: &mut usize,
+    selected: Option<usize>,
+) -> Option<&'a Interception> {
+    render_log_panel_inner(
+        frame,
+        area,
+        project_name,
+        items,
+        history_scroll,
+        selected,
+        " Project history ",
+        " j u: select a project",
+        |n| format!(" Project history: {}", project_label(n)),
+        matches_project,
+    )
+}
+
 // ── Detail panel ──────────────────────────────────────────────────────────────
+
+#[allow(clippy::too_many_arguments)]
+fn render_detail_inner<'a>(
+    frame: &mut Frame,
+    area: Rect,
+    name: Option<&str>,
+    items: &'a [Interception],
+    detail_mode: DetailMode,
+    history_scroll: &mut usize,
+    selected_item: Option<&'a Interception>,
+    empty_hint: &str,
+    display_name: impl FnOnce(&str) -> String,
+    matches: impl Fn(&Interception, &str) -> bool,
+    no_diff_msg: &str,
+) {
+    let Some(raw_name) = name else {
+        let block = Block::default().borders(Borders::ALL).title(" Detail ");
+        let p = Paragraph::new(Span::styled(
+            empty_hint,
+            Style::default().fg(Color::DarkGray),
+        ))
+        .block(block);
+        frame.render_widget(p, area);
+        return;
+    };
+
+    let label = display_name(raw_name);
+
+    // Use the explicitly selected item if provided, otherwise fall back to the last with differences.
+    let item = selected_item.or_else(|| {
+        items.iter().rev().find(|i| {
+            let has_diff = i.content_before != i.content_after
+                && (i.content_before.is_some() || i.content_after.is_some());
+            matches(i, raw_name) && has_diff
+        })
+    });
+
+    let Some(item) = item else {
+        let block = Block::default()
+            .borders(Borders::ALL)
+            .title(format!(" Detail: {label} "));
+        let p = Paragraph::new(no_diff_msg).block(block);
+        frame.render_widget(p, area);
+        return;
+    };
+
+    if detail_mode == DetailMode::Diff {
+        render_diff_panel(frame, area, &label, item, history_scroll);
+    } else {
+        render_details_panel(frame, area, &label, item, history_scroll);
+    }
+}
 
 fn render_detail<'a>(
     frame: &mut Frame,
@@ -662,44 +735,24 @@ fn render_detail<'a>(
     history_scroll: &mut usize,
     selected_item: Option<&'a Interception>,
 ) {
-    let Some(name) = family_name else {
-        let block = Block::default().borders(Borders::ALL).title(" Detail ");
-        let p = Paragraph::new(Span::styled(
-            " j u: select a family  [d] diff/log  [p] projects",
-            Style::default().fg(Color::DarkGray),
-        ))
-        .block(block);
-        frame.render_widget(p, area);
-        return;
-    };
-
-    // Use the explicitly selected item if provided, otherwise fall back to the last with differences.
-    let item = selected_item.or_else(|| {
-        items.iter().rev().find(|i| {
-            let matches_family = serde_json::to_value(&i.command_family)
+    render_detail_inner(
+        frame,
+        area,
+        family_name,
+        items,
+        detail_mode,
+        history_scroll,
+        selected_item,
+        " j u: select a family  [d] diff/log  [p] projects",
+        |n| n.to_string(),
+        |i, name| {
+            serde_json::to_value(&i.command_family)
                 .ok()
                 .and_then(|v| v.as_str().map(|s| s == name))
-                .unwrap_or(false);
-            let has_diff = i.content_before != i.content_after
-                && (i.content_before.is_some() || i.content_after.is_some());
-            matches_family && has_diff
-        })
-    });
-
-    let Some(item) = item else {
-        let block = Block::default()
-            .borders(Borders::ALL)
-            .title(format!(" Detail: {name} "));
-        let p = Paragraph::new("No interception with differences for this family.").block(block);
-        frame.render_widget(p, area);
-        return;
-    };
-
-    if detail_mode == DetailMode::Diff {
-        render_diff_panel(frame, area, name, item, history_scroll);
-    } else {
-        render_details_panel(frame, area, name, item, history_scroll);
-    }
+                .unwrap_or(false)
+        },
+        "No interception with differences for this family.",
+    )
 }
 
 fn render_project_detail<'a>(
@@ -711,42 +764,19 @@ fn render_project_detail<'a>(
     history_scroll: &mut usize,
     selected_item: Option<&'a Interception>,
 ) {
-    let Some(name) = project_name else {
-        let block = Block::default().borders(Borders::ALL).title(" Detail ");
-        let p = Paragraph::new(Span::styled(
-            " j u: select a project  [d] diff  [f] families",
-            Style::default().fg(Color::DarkGray),
-        ))
-        .block(block);
-        frame.render_widget(p, area);
-        return;
-    };
-
-    let label = project_label(name);
-
-    // Use the explicitly selected item if provided, otherwise fall back to the last with differences.
-    let item = selected_item.or_else(|| {
-        items.iter().rev().find(|i| {
-            let has_diff = i.content_before != i.content_after
-                && (i.content_before.is_some() || i.content_after.is_some());
-            matches_project(i, name) && has_diff
-        })
-    });
-
-    let Some(item) = item else {
-        let block = Block::default()
-            .borders(Borders::ALL)
-            .title(format!(" Detail: {label} "));
-        let p = Paragraph::new("No interception with differences for this project.").block(block);
-        frame.render_widget(p, area);
-        return;
-    };
-
-    if detail_mode == DetailMode::Diff {
-        render_diff_panel(frame, area, &label, item, history_scroll);
-    } else {
-        render_details_panel(frame, area, &label, item, history_scroll);
-    }
+    render_detail_inner(
+        frame,
+        area,
+        project_name,
+        items,
+        detail_mode,
+        history_scroll,
+        selected_item,
+        " j u: select a project  [d] diff  [f] families",
+        project_label,
+        matches_project,
+        "No interception with differences for this project.",
+    )
 }
 
 fn is_binary(s: &str) -> bool {
@@ -995,40 +1025,23 @@ fn render_log_panel<'a>(
     history_scroll: &mut usize,
     selected: Option<usize>,
 ) -> Option<&'a Interception> {
-    let Some(name) = name else {
-        let block = Block::default().borders(Borders::ALL).title(" History ");
-        let p = Paragraph::new(Span::styled(
-            " j u: select a family",
-            Style::default().fg(Color::DarkGray),
-        ))
-        .block(block);
-        frame.render_widget(p, area);
-        return None;
-    };
-    let filtered: Vec<&'a Interception> = items
-        .iter()
-        .filter(|i| {
+    render_log_panel_inner(
+        frame,
+        area,
+        name,
+        items,
+        history_scroll,
+        selected,
+        " History ",
+        " j u: select a family",
+        |n| format!(" History: {n}"),
+        |i, name| {
             serde_json::to_value(&i.command_family)
                 .ok()
                 .and_then(|v| v.as_str().map(|s| s == name))
                 .unwrap_or(false)
-        })
-        .rev()
-        .collect();
-    let n = filtered.len();
-    let selected_item = selected
-        .map(|s| s.min(n.saturating_sub(1)))
-        .and_then(|s| filtered.get(s).copied());
-    render_history_panel(
-        frame,
-        area,
-        &format!(" History: {name}"),
-        filtered,
-        history_scroll,
-        selected,
-        "",
-    );
-    selected_item
+        },
+    )
 }
 
 fn render_history_panel(

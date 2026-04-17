@@ -195,3 +195,73 @@ fn config_json_flag_outputs_valid_json() {
         "config --json should produce valid JSON: {stdout}"
     );
 }
+
+#[test]
+fn abbreviations_list_reads_separate_json_file() {
+    let home = temp_home_with_empty_metrics();
+    let config_dir = home.path().join(".config").join("ecotokens");
+    std::fs::write(
+        config_dir.join("config.json"),
+        r#"{"abbreviations_enabled":true}"#,
+    )
+    .unwrap();
+    std::fs::write(
+        config_dir.join("abbreviations.json"),
+        r#"{"function":"func","repository":"repo"}"#,
+    )
+    .unwrap();
+
+    let out = Command::new(ecotokens())
+        .args(["abbreviations", "list"])
+        .env("HOME", home.path())
+        .env("XDG_CONFIG_HOME", home.path().join(".config"))
+        .output()
+        .expect("failed to run abbreviations list");
+    assert!(
+        out.status.success(),
+        "abbreviations list should succeed: {}",
+        String::from_utf8_lossy(&out.stderr)
+    );
+    let stdout = String::from_utf8_lossy(&out.stdout);
+    assert!(stdout.contains("abbreviations_enabled : true"));
+    assert!(stdout.contains("function → func"));
+    assert!(stdout.contains("repository → repo"));
+}
+
+#[test]
+fn abbreviations_enable_migrates_custom_pairs_out_of_config_json() {
+    let home = temp_home_with_empty_metrics();
+    let config_dir = home.path().join(".config").join("ecotokens");
+    std::fs::write(
+        config_dir.join("config.json"),
+        r#"{"abbreviations_custom":{"function":"func"}}"#,
+    )
+    .unwrap();
+
+    let out = Command::new(ecotokens())
+        .args(["abbreviations", "enable"])
+        .env("HOME", home.path())
+        .env("XDG_CONFIG_HOME", home.path().join(".config"))
+        .output()
+        .expect("failed to run abbreviations enable");
+    assert!(
+        out.status.success(),
+        "abbreviations enable should succeed: {}",
+        String::from_utf8_lossy(&out.stderr)
+    );
+
+    let config: serde_json::Value =
+        serde_json::from_str(&std::fs::read_to_string(config_dir.join("config.json")).unwrap())
+            .unwrap();
+    assert_eq!(config["abbreviations_enabled"], true);
+    assert!(
+        config.get("abbreviations_custom").is_none(),
+        "custom abbreviations should no longer live in config.json: {config}"
+    );
+
+    let abbreviations: serde_json::Value = serde_json::from_str(
+        &std::fs::read_to_string(config_dir.join("abbreviations.json")).unwrap(),
+    )
+    .unwrap();
+    assert_eq!(abbreviations["function"], "func");
+}

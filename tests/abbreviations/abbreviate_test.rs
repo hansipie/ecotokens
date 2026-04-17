@@ -112,14 +112,13 @@ fn abbreviations_disabled_in_default_settings() {
 }
 
 #[test]
-fn settings_roundtrip_keeps_abbreviations_fields() {
+fn settings_json_omits_custom_abbreviations() {
     let mut s = Settings::default();
     s.abbreviations_enabled = true;
     s.abbreviations_custom.insert("foobar".into(), "fb".into());
     let json = serde_json::to_string(&s).unwrap();
-    let s2: Settings = serde_json::from_str(&json).unwrap();
-    assert!(s2.abbreviations_enabled);
-    assert_eq!(s2.abbreviations_custom.get("foobar").unwrap(), "fb");
+    assert!(json.contains("\"abbreviations_enabled\":true"));
+    assert!(!json.contains("abbreviations_custom"));
 }
 
 #[test]

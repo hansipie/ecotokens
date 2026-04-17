@@ -70,6 +70,27 @@ For exact token counting (tiktoken cl100k_base instead of the character heuristi
 cargo install --git https://github.com/hansipie/ecotokens --features exact-tokens
 ```
 
+## Build from source
+
+```bash
+git clone https://github.com/hansipie/ecotokens.git
+cd ecotokens
+cargo build --release
+./target/release/ecotokens --help
+```
+
+To install the locally built binary into Cargo's bin directory:
+
+```bash
+cargo install --path .
+```
+
+With exact token counting enabled:
+
+```bash
+cargo install --path . --features exact-tokens
+```
+
 ## Installation
 
 ### Claude Code
@@ -247,6 +268,79 @@ When enabled, `ecotokens watch --background` starts automatically when a session
 
 > **Note:** Auto-watch relies on `SessionStart` / `SessionEnd` hooks. <del>For Qwen Code, session hooks are installed automatically if ecotokens is already installed for Qwen (`ecotokens install --target qwen`).</del> Gemini CLI does not expose session lifecycle hooks.
 
+## Word abbreviations
+
+```bash
+ecotokens abbreviations enable    # transform narrative text + inject model instruction
+ecotokens abbreviations list      # show the active dictionary
+ecotokens abbreviations disable   # back to default
+```
+
+When enabled, a post-processing pass replaces full words with shorter forms in the narrative parts of tool outputs (code blocks between triple backticks are preserved). A matching `additionalContext` payload is emitted at `SessionStart` so the model adopts the same abbreviations in its own responses.
+
+Default abbreviations:
+
+| Word | Abbreviation |
+|------|--------------|
+| `administrator` | `admin` |
+| `administrators` | `admins` |
+| `application` | `app` |
+| `argument` | `arg` |
+| `arguments` | `args` |
+| `attribute` | `attr` |
+| `attributes` | `attrs` |
+| `command` | `cmd` |
+| `commands` | `cmds` |
+| `configuration` | `config` |
+| `database` | `db` |
+| `dependencies` | `deps` |
+| `dependency` | `dep` |
+| `development` | `dev` |
+| `directories` | `dirs` |
+| `directory` | `dir` |
+| `documentation` | `docs` |
+| `environment` | `env` |
+| `error` | `err` |
+| `errors` | `errs` |
+| `function` | `fn` |
+| `implementation` | `impl` |
+| `implementations` | `impls` |
+| `information` | `info` |
+| `message` | `msg` |
+| `messages` | `msgs` |
+| `package` | `pkg` |
+| `packages` | `pkgs` |
+| `parameter` | `param` |
+| `parameters` | `params` |
+| `production` | `prod` |
+| `reference` | `ref` |
+| `references` | `refs` |
+| `repositories` | `repos` |
+| `repository` | `repo` |
+| `request` | `req` |
+| `response` | `resp` |
+| `variable` | `var` |
+| `variables` | `vars` |
+| `warning` | `warn` |
+| `warnings` | `warns` |
+
+Keep the feature flag in `~/.config/ecotokens/config.json`
+
+```json
+{
+  "abbreviations_enabled": true
+}
+```
+
+... and put custom pairs in a separate `~/.config/ecotokens/abbreviations.json` file:
+
+```json
+{
+  "function": "func",
+  "repository": "repo"
+}
+```
+
 ## Bonus Tools
 
 _Less code is less tokens_
@@ -283,29 +377,6 @@ ai_summary_model      : llama3.2:3b (default)
 ai_summary_url        : http://localhost:11434 (default)
 abbreviations_enabled : false
 ```
-
-### Word abbreviations *(optional)*
-
-```bash
-ecotokens abbreviations enable    # transform narrative text + inject model instruction
-ecotokens abbreviations list      # show the active dictionary
-ecotokens abbreviations disable   # back to default
-```
-
-When enabled, a post-processing pass replaces full words with shorter forms in the narrative parts of tool outputs (code blocks between triple backticks are preserved). A matching `additionalContext` payload is emitted at `SessionStart` so the model adopts the same abbreviations in its own responses.
-
-Extend or override the built-in dictionary via `abbreviations_custom` in `~/.config/ecotokens/config.json`:
-
-```json
-{
-  "abbreviations_enabled": true,
-  "abbreviations_custom": {
-    "function": "func",
-    "repository": "repo"
-  }
-}
-```
-
 
 ## Supported command families
 
