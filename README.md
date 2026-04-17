@@ -378,6 +378,29 @@ ai_summary_url        : http://localhost:11434 (default)
 abbreviations_enabled : false
 ```
 
+### Word abbreviations *(optional)*
+
+```bash
+ecotokens abbreviations enable    # transform narrative text + inject model instruction
+ecotokens abbreviations list      # show the active dictionary
+ecotokens abbreviations disable   # back to default
+```
+
+When enabled, a post-processing pass replaces full words with shorter forms in the narrative parts of tool outputs (code blocks between triple backticks are preserved). A matching `additionalContext` payload is emitted at `SessionStart` so the model adopts the same abbreviations in its own responses.
+
+Extend or override the built-in dictionary via `abbreviations_custom` in `~/.config/ecotokens/config.json`:
+
+```json
+{
+  "abbreviations_enabled": true,
+  "abbreviations_custom": {
+    "function": "func",
+    "repository": "repo"
+  }
+}
+```
+
+
 ## Supported command families
 
 | Family | Examples |

@@ -5,20 +5,24 @@ All notable changes to this project will be documented in this file.
 The format is based on [Keep a Changelog](https://keepachangelog.com/en/1.0.0/),
 and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0.html).
 
-## [0.15.0] - 2026-04-16
+## [0.15.0] - 2026-04-17
 
 ### Added
 - Word abbreviation pass for narrative text, logs and tool-result messages — replaces full words with shorter forms (e.g. `function`→`fn`, `configuration`→`config`, `directory`→`dir`) after masking and family filtering to squeeze extra tokens out of every interception
-- Built-in dictionary of 41 safe pairs; users can extend or override it via `~/.config/ecotokens/abbreviations.json` while `config.json` keeps only the feature flag
+- Built-in dictionary of 41 safe pairs; users can extend or override via `~/.config/ecotokens/abbreviations.json` (separate from `config.json` which keeps only the feature flag)
 - `SessionStart` hook now injects an `additionalContext` instruction listing the active dictionary when abbreviations are enabled, nudging the model to adopt the same abbreviations in its own responses
 - New CLI: `ecotokens abbreviations enable | disable | list`
 - `ecotokens config` output now reports `abbreviations_enabled`
+- New doc: `docs/abbreviations-pipeline.md` — describes the three trigger points (SessionStart, filter cmd, hook-post)
 
 ### Changed
 - `cmd_session_start` auto-watch logs routed to stderr so stdout stays reserved for the hook JSON payload
+- Custom abbreviation pairs moved from `abbreviations_custom` key in `config.json` to a dedicated `~/.config/ecotokens/abbreviations.json` file; legacy `config.json` entries are migrated automatically on next `enable`
+- TUI gain panel: `render_detail` and `render_project_detail` refactored into shared `render_detail_inner` to eliminate duplication
 
 ### Fixed
 - AI summary: structured JSON output (objects and arrays) is now preserved as-is instead of being replaced by a natural-language summary — fixes automation breakage when CLI commands return large JSON payloads (e.g. `--json` flags) above the `ai_summary_min_tokens` threshold (#53)
+- Integration tests that assert on filtered output strings now isolate `HOME`/`XDG_CONFIG_HOME` to avoid abbreviation side-effects (e.g. `cpp_test`)
 
 ## [0.14.5] - 2026-04-15
 
