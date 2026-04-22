@@ -255,16 +255,20 @@ pub fn is_gemini_mcp_registered(settings_path: &Path) -> bool {
     has_ecotokens_mcp_server(&read_settings(settings_path))
 }
 
-/// Remove the ecotokens hook and MCP server from ~/.gemini/settings.json.
-pub fn uninstall_gemini(settings_path: &Path) -> InstallResult {
+/// Shared logic: remove a hook + the MCP server entry from a settings file.
+fn uninstall_hook_and_mcp(settings_path: &Path, hook_type: &str, command: &str) -> InstallResult {
     if !settings_path.exists() {
         return Ok(());
     }
-
     let mut v = read_settings(settings_path);
-    remove_hook_generic(&mut v, "BeforeTool", GEMINI_HOOK_COMMAND);
+    remove_hook_generic(&mut v, hook_type, command);
     remove_ecotokens_mcp_server(&mut v);
     write_settings(settings_path, &v)
+}
+
+/// Remove the ecotokens hook and MCP server from ~/.gemini/settings.json.
+pub fn uninstall_gemini(settings_path: &Path) -> InstallResult {
+    uninstall_hook_and_mcp(settings_path, "BeforeTool", GEMINI_HOOK_COMMAND)
 }
 
 // ============================================================================
@@ -299,12 +303,42 @@ pub fn is_qwen_mcp_registered(settings_path: &Path) -> bool {
 
 /// Remove the ecotokens hook and MCP server from ~/.qwen/settings.json.
 pub fn uninstall_qwen(settings_path: &Path) -> InstallResult {
-    if !settings_path.exists() {
-        return Ok(());
-    }
+    uninstall_hook_and_mcp(settings_path, "PreToolUse", QWEN_HOOK_COMMAND)
+}
 
-    let mut v = read_settings(settings_path);
-    remove_hook_generic(&mut v, "PreToolUse", QWEN_HOOK_COMMAND);
-    remove_ecotokens_mcp_server(&mut v);
-    write_settings(settings_path, &v)
+// ============================================================================
+// Pi Support (extension TypeScript déposée dans ~/.pi/agent/extensions/)
+// ============================================================================
+
+const PI_EXTENSION_CONTENT: &str = include_str!("pi_extension.ts");
+
+/// Get the default Pi extension path: ~/.pi/agent/extensions/ecotokens.ts
+pub fn default_pi_extension_path() -> Option<std::path::PathBuf> {
+    dirs::home_dir().map(|d| {
+        d.join(".pi")
+            .join("agent")
+            .join("extensions")
+            .join("ecotokens.ts")
+    })
+}
+
+/// Install the ecotokens extension for Pi (idempotent).
+pub fn install_pi_extension(extension_path: &Path) -> InstallResult {
+    if let Some(parent) = extension_path.parent() {
+        std::fs::create_dir_all(parent)?;
+    }
+    std::fs::write(extension_path, PI_EXTENSION_CONTENT)
+}
+
+/// Check if the ecotokens Pi extension is installed.
+pub fn is_pi_extension_installed(extension_path: &Path) -> bool {
+    extension_path.exists()
+}
+
+/// Remove the ecotokens Pi extension.
+pub fn uninstall_pi(extension_path: &Path) -> InstallResult {
+    if extension_path.exists() {
+        std::fs::remove_file(extension_path)?;
+    }
+    Ok(())
 }

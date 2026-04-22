@@ -1,6 +1,6 @@
 [package]
 name = "ecotokens"
-version = "0.12.0"
+version = "0.15.0"
 edition = "2021"
 description = "Token optimizer for AI coding assistants — hooks into Claude Code/Gemini CLI to compress shell outputs and track USD savings"
 license = "MIT"
@@ -8,6 +8,7 @@ repository = "https://github.com/hansipie/ecotokens"
 homepage = "https://github.com/hansipie/ecotokens"
 keywords = ["claude", "gemini", "tokens", "cli", "ai"]
 categories = ["command-line-utilities", "development-tools"]
+exclude = ["assets/*.gif", "assets/picture.png", "assets/icon.png"]
 
 [features]
 default = ["embeddings", "ai-summary"]
@@ -23,6 +24,7 @@ similar = "2"
 regex = "1.10"
 lazy-regex = "3"
 dirs = "5"
+rusqlite = { version = "0.31", features = ["bundled"] }
 toml = "0.8"
 ratatui = { version = "0.29", features = ["crossterm"] }
 uuid = { version = "1", features = ["v4"] }
@@ -256,3 +258,7 @@ path = "tests/duplicates/proposals_test.rs"
 [[test]]
 name = "duplicates_integration_test"
 path = "tests/duplicates/integration_test.rs"
+
+[[test]]
+name = "abbreviations_test"
+path = "tests/abbreviations/abbreviate_test.rs"

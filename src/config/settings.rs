@@ -1,6 +1,6 @@
 use serde::{Deserialize, Serialize};
 use std::collections::HashMap;
-use std::path::PathBuf;
+use std::path::{Path, PathBuf};
 
 #[derive(Debug, Clone, Default, Serialize, Deserialize, PartialEq)]
 #[serde(rename_all = "snake_case")]
@@ -102,6 +102,20 @@ pub struct Settings {
     /// Depth for caller/callee trace in PostToolUse enrichment (default: 1)
     #[serde(default = "default_post_hook_depth")]
     pub post_hook_depth: u32,
+    /// Apply word abbreviations to narrative text/logs/messages (default: false)
+    #[serde(default)]
+    pub abbreviations_enabled: bool,
+    /// Extra word→abbreviation pairs that override/extend the built-in dictionary
+    #[serde(skip_serializing, skip_deserializing, default)]
+    pub abbreviations_custom: HashMap<String, String>,
+}
+
+#[derive(Debug, Clone, Default, Deserialize)]
+struct LegacySettingsFile {
+    #[serde(flatten)]
+    settings: Settings,
+    #[serde(default)]
+    abbreviations_custom: HashMap<String, String>,
 }
 
 fn default_threshold_lines() -> u32 {
@@ -145,6 +159,8 @@ impl Default for Settings {
             ai_summary_timeout_ms: 3000,
             auto_watch: false,
             post_hook_depth: 1,
+            abbreviations_enabled: false,
+            abbreviations_custom: HashMap::new(),
         }
     }
 }
@@ -154,27 +170,78 @@ impl Settings {
         dirs::config_dir().map(|d| d.join("ecotokens").join("config.json"))
     }
 
-    pub fn load() -> Self {
-        let Some(path) = Self::config_path() else {
-            return Settings::default();
-        };
-        let Ok(data) = std::fs::read_to_string(&path) else {
-            return Settings::default();
+    fn abbreviations_path_for(config_path: &Path) -> PathBuf {
+        config_path
+            .parent()
+            .map(|parent| parent.join("abbreviations.json"))
+            .unwrap_or_else(|| PathBuf::from("abbreviations.json"))
+    }
+
+    fn load_legacy_config(path: &Path) -> LegacySettingsFile {
+        let Ok(data) = std::fs::read_to_string(path) else {
+            return LegacySettingsFile::default();
         };
         serde_json::from_str(&data).unwrap_or_default()
     }
 
-    #[allow(dead_code)]
-    pub fn save(&self) -> std::io::Result<()> {
-        let path = Self::config_path().ok_or_else(|| {
-            std::io::Error::new(std::io::ErrorKind::NotFound, "cannot resolve config dir")
-        })?;
-        if let Some(parent) = path.parent() {
+    fn load_abbreviations(path: &Path) -> Option<HashMap<String, String>> {
+        let data = std::fs::read_to_string(path).ok()?;
+        serde_json::from_str(&data).ok()
+    }
+
+    fn load_from_paths(config_path: &Path, abbreviations_path: &Path) -> Self {
+        let legacy = Self::load_legacy_config(config_path);
+        let mut settings = legacy.settings;
+        settings.abbreviations_custom =
+            Self::load_abbreviations(abbreviations_path).unwrap_or(legacy.abbreviations_custom);
+        settings
+    }
+
+    pub fn load() -> Self {
+        let Some(path) = Self::config_path() else {
+            return Settings::default();
+        };
+        let abbreviations_path = Self::abbreviations_path_for(&path);
+        Self::load_from_paths(&path, &abbreviations_path)
+    }
+
+    fn save_abbreviations(
+        abbreviations_path: &Path,
+        abbreviations_custom: &HashMap<String, String>,
+    ) -> std::io::Result<()> {
+        if abbreviations_custom.is_empty() {
+            return match std::fs::remove_file(abbreviations_path) {
+                Ok(()) => Ok(()),
+                Err(e) if e.kind() == std::io::ErrorKind::NotFound => Ok(()),
+                Err(e) => Err(e),
+            };
+        }
+
+        if let Some(parent) = abbreviations_path.parent() {
+            std::fs::create_dir_all(parent)?;
+        }
+        let json = serde_json::to_string_pretty(abbreviations_custom)
+            .map_err(|e| std::io::Error::new(std::io::ErrorKind::InvalidData, e))?;
+        std::fs::write(abbreviations_path, json)
+    }
+
+    fn save_to_paths(&self, config_path: &Path, abbreviations_path: &Path) -> std::io::Result<()> {
+        if let Some(parent) = config_path.parent() {
             std::fs::create_dir_all(parent)?;
         }
         let json = serde_json::to_string_pretty(self)
             .map_err(|e| std::io::Error::new(std::io::ErrorKind::InvalidData, e))?;
-        std::fs::write(&path, json)
+        std::fs::write(config_path, json)?;
+        Self::save_abbreviations(abbreviations_path, &self.abbreviations_custom)
+    }
+
+    #[allow(dead_code)]
+    pub fn save(&self) -> std::io::Result<()> {
+        let config_path = Self::config_path().ok_or_else(|| {
+            std::io::Error::new(std::io::ErrorKind::NotFound, "cannot resolve config dir")
+        })?;
+        let abbreviations_path = Self::abbreviations_path_for(&config_path);
+        self.save_to_paths(&config_path, &abbreviations_path)
     }
 
     #[allow(dead_code)]

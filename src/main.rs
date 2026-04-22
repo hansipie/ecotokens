@@ -10,6 +10,7 @@ use std::path::PathBuf;
 
 use crate::config::default_index_dir;
 
+mod abbreviations;
 mod config;
 mod daemon;
 mod duplicates;
@@ -52,6 +53,9 @@ enum Commands {
         args: Vec<String>,
         #[arg(long)]
         debug: bool,
+        /// Working directory for git root detection (used by Pi extension)
+        #[arg(long)]
+        cwd: Option<PathBuf>,
     },
     /// Show token savings report
     Gain {
@@ -71,9 +75,9 @@ enum Commands {
         #[arg(long)]
         history: bool,
     },
-    /// Install ecotokens hook in ~/.claude/settings.json, ~/.gemini/settings.json, or ~/.qwen/settings.json
+    /// Install ecotokens hook in ~/.claude/settings.json, ~/.gemini/settings.json, ~/.qwen/settings.json, or ~/.pi/agent/extensions/
     Install {
-        /// Target AI tool to install for: claude, gemini, qwen, or all (default: claude)
+        /// Target AI tool to install for: claude, gemini, qwen, pi, or all (default: claude)
         #[arg(long, default_value = "claude")]
         target: String,
         /// Enable AI-powered output summarization via Ollama
@@ -83,9 +87,9 @@ enum Commands {
         #[arg(long)]
         ai_summary_model: Option<String>,
     },
-    /// Remove ecotokens hook from ~/.claude/settings.json, ~/.gemini/settings.json, or ~/.qwen/settings.json
+    /// Remove ecotokens hook from ~/.claude/settings.json, ~/.gemini/settings.json, ~/.qwen/settings.json, or ~/.pi/agent/extensions/
     Uninstall {
-        /// Target to uninstall from: claude, gemini, qwen, or all (default: claude)
+        /// Target to uninstall from: claude, gemini, qwen, pi, or all (default: claude)
         #[arg(long, default_value = "claude")]
         target: String,
     },
@@ -179,6 +183,11 @@ enum Commands {
         #[command(subcommand)]
         action: AutoWatchAction,
     },
+    /// Enable, disable or inspect the word abbreviations token-saving feature
+    Abbreviations {
+        #[command(subcommand)]
+        action: AbbreviationsAction,
+    },
     /// Delete recorded interceptions (selective or total)
     Clear {
         /// Delete ALL interceptions (required when no other filter is given)
@@ -193,7 +202,7 @@ enum Commands {
         /// Delete only interceptions of a specific command family (e.g. git, cargo, python)
         #[arg(long, value_name = "FAMILY")]
         family: Option<String>,
-        /// Delete only interceptions for a specific project (git root path, or "(unknown)" for entries without a git root)
+        /// Delete only interceptions for a specific project (git root path, or "[undefined]" for entries without a git root)
         #[arg(long, value_name = "PATH")]
         project: Option<String>,
         /// Skip the confirmation prompt
@@ -236,6 +245,16 @@ enum AutoWatchAction {
     Enable,
     /// Disable automatic watch
     Disable,
+}
+
+#[derive(Subcommand)]
+enum AbbreviationsAction {
+    /// Turn on word abbreviation replacement in filtered outputs
+    Enable,
+    /// Turn off word abbreviation replacement
+    Disable,
+    /// List the active abbreviation dictionary (defaults merged with custom)
+    List,
 }
 
 /// RAII guard that restores terminal state when dropped, even on panic.
@@ -283,7 +302,7 @@ fn default_claude_json_path() -> PathBuf {
         .join(".claude.json")
 }
 
-fn cmd_filter(args: Vec<String>, debug: bool) {
+fn cmd_filter(args: Vec<String>, debug: bool, cwd: Option<PathBuf>) {
     if args.is_empty() {
         eprintln!("ecotokens filter: no command given");
         std::process::exit(1);
@@ -313,7 +332,7 @@ fn cmd_filter(args: Vec<String>, debug: bool) {
 
     let duration_ms = start.elapsed().as_millis() as u32;
     let (filtered, tokens_before, tokens_after) =
-        filter::run_filter_pipeline(&command, &raw, duration_ms);
+        filter::run_filter_pipeline_with_cwd(&command, &raw, duration_ms, cwd.as_deref());
 
     if debug {
         eprintln!("[ecotokens debug] command={command} tokens_before={tokens_before} tokens_after={tokens_after}");
@@ -638,10 +657,11 @@ fn cmd_install(target: String, ai_summary: bool, ai_summary_model: Option<String
     let install_claude = matches!(target.as_str(), "claude" | "all");
     let install_gemini = matches!(target.as_str(), "gemini" | "all");
     let install_qwen = matches!(target.as_str(), "qwen" | "all");
+    let install_pi = matches!(target.as_str(), "pi" | "all");
 
-    if !install_claude && !install_gemini && !install_qwen {
+    if !install_claude && !install_gemini && !install_qwen && !install_pi {
         eprintln!(
-            "unknown target '{}'. Valid values: claude, gemini, qwen, all",
+            "unknown target '{}'. Valid values: claude, gemini, qwen, pi, all",
             target
         );
         std::process::exit(1);
@@ -715,6 +735,25 @@ fn cmd_install(target: String, ai_summary: bool, ai_summary_model: Option<String
         }
     }
 
+    if install_pi {
+        match install::default_pi_extension_path() {
+            Some(ref p) => match install::install_pi_extension(p) {
+                Ok(()) => {
+                    println!("ecotokens extension installed (Pi) → {}", p.display());
+                    println!("  Reload in pi with: /reload");
+                }
+                Err(e) => {
+                    eprintln!("install error (pi): {e}");
+                    std::process::exit(1);
+                }
+            },
+            None => {
+                eprintln!("cannot determine Pi extension path on this system");
+                std::process::exit(1);
+            }
+        }
+    }
+
     let enable_ai = ai_summary || ai_summary_model.is_some();
     if enable_ai {
         let mut settings = config::Settings::load();
@@ -739,10 +778,11 @@ fn cmd_uninstall(target: String) {
     let uninstall_claude = matches!(target.as_str(), "claude" | "all");
     let uninstall_gemini = matches!(target.as_str(), "gemini" | "all");
     let uninstall_qwen = matches!(target.as_str(), "qwen" | "all");
+    let uninstall_pi = matches!(target.as_str(), "pi" | "all");
 
-    if !uninstall_claude && !uninstall_gemini && !uninstall_qwen {
+    if !uninstall_claude && !uninstall_gemini && !uninstall_qwen && !uninstall_pi {
         eprintln!(
-            "unknown target '{}'. Valid values: claude, gemini, qwen, all",
+            "unknown target '{}'. Valid values: claude, gemini, qwen, pi, all",
             target
         );
         std::process::exit(1);
@@ -853,6 +893,31 @@ fn cmd_uninstall(target: String) {
             }
         }
     }
+
+    if uninstall_pi {
+        match install::default_pi_extension_path() {
+            Some(ref p) => {
+                let had = install::is_pi_extension_installed(p);
+                match install::uninstall_pi(p) {
+                    Ok(()) => {
+                        if had {
+                            println!("ecotokens extension removed (Pi) ← {}", p.display());
+                        } else {
+                            println!("ecotokens: nothing to uninstall (pi)");
+                        }
+                    }
+                    Err(e) => {
+                        eprintln!("uninstall error (pi): {e}");
+                        std::process::exit(1);
+                    }
+                }
+            }
+            None => {
+                eprintln!("cannot determine Pi extension path on this system");
+                std::process::exit(1);
+            }
+        }
+    }
 }
 
 fn cmd_config(json: bool, embed_provider: Option<String>, embed_url: Option<String>) {
@@ -926,6 +991,7 @@ fn cmd_config(json: bool, embed_provider: Option<String>, embed_url: Option<Stri
                 .as_deref()
                 .unwrap_or("http://localhost:11434 (default)")
         );
+        println!("abbreviations_enabled : {}", settings.abbreviations_enabled);
     }
 }
 
@@ -1684,7 +1750,7 @@ fn cmd_clear(
 
         if let Some(ref proj) = project {
             let item_root = item.git_root.as_deref().unwrap_or("").trim();
-            let matches = if proj.trim() == "(unknown)" {
+            let matches = if proj.trim() == "[undefined]" {
                 item_root.is_empty()
             } else {
                 item_root == proj.trim()
@@ -1747,21 +1813,37 @@ fn watch_log_path(watch_path: &std::path::Path) -> PathBuf {
 
 fn cmd_session_start() {
     let settings = config::Settings::load();
-    if !settings.auto_watch {
-        return;
+
+    if settings.auto_watch {
+        let cwd = std::env::current_dir().unwrap_or_else(|_| PathBuf::from("."));
+        let cwd_str = cwd.to_string_lossy().to_string();
+
+        let mut store = config::SessionStore::load();
+        store.cleanup_dead();
+        let decision = store.increment_for_session(&cwd_str);
+        let _ = store.save();
+
+        if decision.reused_existing_watcher {
+            eprintln!(
+                "ecotokens auto-watch: CWD is covered by existing watch on {}, skipping.",
+                decision.watch_path
+            );
+        } else if decision.needs_watcher {
+            let _ = std::process::Command::new("ecotokens")
+                .args(["watch", "--background", "--path", &decision.watch_path])
+                .spawn();
+        }
     }
-    let cwd = std::env::current_dir().unwrap_or_else(|_| PathBuf::from("."));
-    let cwd_str = cwd.to_string_lossy().to_string();
 
-    let mut store = config::SessionStore::load();
-    store.cleanup_dead();
-    let needs_watcher = store.increment(&cwd_str);
-    let _ = store.save();
-
-    if needs_watcher {
-        let _ = std::process::Command::new("ecotokens")
-            .args(["watch", "--background", "--path", &cwd_str])
-            .spawn();
+    if settings.abbreviations_enabled {
+        let instructions = crate::abbreviations::build_model_instructions(&settings);
+        let response = serde_json::json!({
+            "hookSpecificOutput": {
+                "hookEventName": "SessionStart",
+                "additionalContext": instructions,
+            }
+        });
+        println!("{}", response);
     }
 }
 
@@ -1774,7 +1856,7 @@ fn cmd_session_end() {
     let cwd_str = cwd.to_string_lossy().to_string();
 
     let mut store = config::SessionStore::load();
-    if let Some(pid) = store.decrement(&cwd_str) {
+    if let Some(pid) = store.decrement_for_session(&cwd_str) {
         let _ = store.save();
         #[cfg(unix)]
         let _ = std::process::Command::new("kill")
@@ -1825,6 +1907,41 @@ fn cmd_auto_watch_disable() {
     println!("✓ auto-watch disabled");
 }
 
+fn cmd_abbreviations_enable() {
+    let mut settings = config::settings::Settings::load();
+    settings.abbreviations_enabled = true;
+    if let Err(e) = settings.save() {
+        eprintln!("Error saving config: {e}");
+        std::process::exit(1);
+    }
+    println!(
+        "✓ abbreviations enabled — narrative text in filtered outputs will be abbreviated, \
+and new sessions will receive abbreviation instructions for the model"
+    );
+}
+
+fn cmd_abbreviations_disable() {
+    let mut settings = config::settings::Settings::load();
+    settings.abbreviations_enabled = false;
+    if let Err(e) = settings.save() {
+        eprintln!("Error saving config: {e}");
+        std::process::exit(1);
+    }
+    println!("✓ abbreviations disabled");
+}
+
+fn cmd_abbreviations_list() {
+    let settings = config::settings::Settings::load();
+    let pairs = abbreviations::dictionary::merged_pairs(&settings.abbreviations_custom);
+    let mut pairs = pairs;
+    pairs.sort_by(|a, b| a.0.cmp(&b.0));
+    println!("abbreviations_enabled : {}", settings.abbreviations_enabled);
+    println!("entries               : {}", pairs.len());
+    for (word, abbrev) in pairs {
+        println!("  {word} → {abbrev}");
+    }
+}
+
 fn parse_version(v: &str) -> Option<(u32, u32, u32)> {
     let mut parts = v.splitn(3, '.');
     let major = parts.next()?.parse().ok()?;
@@ -1868,8 +1985,14 @@ fn cmd_update(check: bool) {
         return;
     }
 
-    let v_latest = parse_version(latest);
-    let v_current = parse_version(current);
+    let Some(v_latest) = parse_version(latest) else {
+        eprintln!("Could not parse latest version: {latest}");
+        return;
+    };
+    let Some(v_current) = parse_version(current) else {
+        eprintln!("Could not parse current version: {current}");
+        return;
+    };
 
     if v_latest <= v_current {
         println!("Already up to date (v{}).", current);
@@ -1888,7 +2011,7 @@ fn cmd_update(check: bool) {
 
     println!("Running: cargo install ecotokens ...");
     match std::process::Command::new("cargo")
-        .args(["install", "ecotokens"])
+        .args(["install", "ecotokens", "--version", latest])
         .status()
     {
         Ok(s) if s.success() => println!("Updated to v{}.", latest),
@@ -1910,7 +2033,7 @@ fn main() {
         Commands::HookGemini => hook::handle_gemini(),
         Commands::HookQwen => hook::handle_qwen(),
         Commands::HookPost => hook::handle_post(),
-        Commands::Filter { args, debug } => cmd_filter(args, debug),
+        Commands::Filter { args, debug, cwd } => cmd_filter(args, debug, cwd),
         Commands::Gain {
             period,
             json,
@@ -1987,6 +2110,11 @@ fn main() {
         Commands::AutoWatch { action } => match action {
             AutoWatchAction::Enable => cmd_auto_watch_enable(),
             AutoWatchAction::Disable => cmd_auto_watch_disable(),
+        },
+        Commands::Abbreviations { action } => match action {
+            AbbreviationsAction::Enable => cmd_abbreviations_enable(),
+            AbbreviationsAction::Disable => cmd_abbreviations_disable(),
+            AbbreviationsAction::List => cmd_abbreviations_list(),
         },
     }
 }

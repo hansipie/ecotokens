@@ -13,7 +13,7 @@
 </p>
 <br>
 
-Token-saving companion for [Claude Code](https://claude.ai/code), [Gemini CLI](https://github.com/google-gemini/gemini-cli), and [Qwen Code](https://github.com/QwenLM/qwen-code). Built on a *"set it and forget it!"* philosophy: one install command, zero configuration, and ecotokens works automatically from there — intercepting tool outputs before they reach the model, filtering the noise, and recording how many tokens you saved.
+Token-saving companion for [Claude Code](https://claude.ai/code), [Gemini CLI](https://github.com/google-gemini/gemini-cli), [Qwen Code](https://github.com/QwenLM/qwen-code), and [Pi](https://pi.dev). Built on a *"set it and forget it!"* philosophy: one install command, zero configuration, and ecotokens works automatically from there — intercepting tool outputs before they reach the model, filtering the noise, and recording how many tokens you saved.
 
 <p align="center">
   <img src="assets/demo.0.10.0.gif" alt="ecotokens demo" width="800">
@@ -26,10 +26,11 @@ Token-saving companion for [Claude Code](https://claude.ai/code), [Gemini CLI](h
 | **PreToolUse hook** | Intercepts every shell (`Bash`) command before its output reaches the model — filters, compresses, and records savings |
 | **PostToolUse hook** *(Claude Code)* | Intercepts native tool results (`Read`, `Grep`, `Glob`) — outline-based compression for source files, grep trimming, glob denoising |
 | **Gain dashboard** | Interactive TUI — token savings by command family or project, sparkline, diff view, history log |
-| **Multi-agent support** | Works with Claude Code, Gemini CLI, and Qwen Code out of the box |
+| **Multi-agent support** | Works with Claude Code, Gemini CLI, Qwen Code, and Pi out of the box |
 | **Precision guarantees** | Errors, failures, and stack traces are never removed; secrets are redacted before filtering |
 | **Code intelligence** | BM25 + semantic search, symbol lookup, call graph tracing, near-duplicate detection |
 | **AI summarization** *(optional)* | Large outputs compressed by a local Ollama model instead of being truncated |
+| **Word abbreviations** *(optional)* | Replace common words with shorter forms (`function`→`fn`, `configuration`→`config`, …) in narrative text, and nudge the model to do the same via a SessionStart instruction |
 | **Zero config** | One `ecotokens install` command — works automatically from there |
 
 ## How it works
@@ -51,7 +52,7 @@ ecotokens installs hooks that intercept tool outputs before they reach the model
 3. Returns the compressed result to the model
 4. Records the savings under the `native_read`, `grep`, or `fs` family
 
-Claude Code uses the `PreToolUse` + `PostToolUse` hooks (`~/.claude/settings.json`). Gemini CLI uses the `BeforeTool` hook (`~/.gemini/settings.json`). Qwen Code uses the `PreToolUse` hook (`~/.qwen/settings.json`).
+Claude Code uses the `PreToolUse` + `PostToolUse` hooks (`~/.claude/settings.json`). Gemini CLI uses the `BeforeTool` hook (`~/.gemini/settings.json`). Qwen Code uses the `PreToolUse` hook (`~/.qwen/settings.json`). Pi uses a TypeScript extension (`~/.pi/agent/extensions/ecotokens.ts`) that intercepts `tool_call` (bash pre-exec) and `tool_result` (read/grep/find/ls post-exec) events in-process.
 
 For a focused view of the runtime path, see [`docs/hook-filter-metrics-flow.md`](docs/hook-filter-metrics-flow.md).
 
@@ -67,6 +68,27 @@ For exact token counting (tiktoken cl100k_base instead of the character heuristi
 
 ```bash
 cargo install --git https://github.com/hansipie/ecotokens --features exact-tokens
+```
+
+## Build from source
+
+```bash
+git clone https://github.com/hansipie/ecotokens.git
+cd ecotokens
+cargo build --release
+./target/release/ecotokens --help
+```
+
+To install the locally built binary into Cargo's bin directory:
+
+```bash
+cargo install --path .
+```
+
+With exact token counting enabled:
+
+```bash
+cargo install --path . --features exact-tokens
 ```
 
 ## Installation
@@ -100,13 +122,24 @@ ecotokens install --target qwen
 
 This writes a `PreToolUse` hook entry into `~/.qwen/settings.json`.
 
+### Pi
+
+Requires [Pi](https://pi.dev) (`@mariozechner/pi-coding-agent` ≥ 0.62.0).
+
+```bash
+cargo install --path .
+ecotokens install --target pi
+```
+
+This writes a TypeScript extension to `~/.pi/agent/extensions/ecotokens.ts`. Pi auto-discovers it on next startup (or `/reload` inside an active session). The extension intercepts bash commands before execution and filters native tool results (`read`, `grep`, `find`, `ls`) after execution.
+
 ### All targets at once
 
 ```bash
 ecotokens install --target all
 ```
 
-`--target all` covers Claude Code, Gemini CLI, and Qwen Code in a single command.
+`--target all` covers Claude Code, Gemini CLI, Qwen Code, and Pi in a single command.
 
 ### With exact token counting
 
@@ -135,6 +168,7 @@ This writes `ai_summary_enabled` and `ai_summary_model` to `~/.config/ecotokens/
 ecotokens uninstall                    # Claude Code
 ecotokens uninstall --target gemini    # Gemini CLI
 ecotokens uninstall --target qwen      # Qwen Code
+ecotokens uninstall --target pi        # Pi
 ecotokens uninstall --target all       # all targets
 ```
 
@@ -145,6 +179,7 @@ ecotokens uninstall --target all       # all targets
 | `ecotokens install` | Install the PreToolUse + PostToolUse hooks in `~/.claude/settings.json` |
 | `ecotokens uninstall` | Remove the hooks |
 | `ecotokens filter -- CMD [ARGS]` | Run a command, filter its output, record metrics |
+| `ecotokens filter --cwd DIR -- CMD [ARGS]` | Same, with an explicit working directory |
 | `ecotokens hook-post` | PostToolUse handler — intercept native tool results (Read, Grep, Glob) |
 | `ecotokens gain` | Interactive TUI dashboard — savings by family or project |
 | `ecotokens gain --period PERIOD` | Filter TUI to a time window (`all`, `today`, `week`, `month`) |
@@ -160,12 +195,15 @@ ecotokens uninstall --target all       # all targets
 | `ecotokens watch [--path DIR]` | Watch a directory and keep the index up to date |
 | `ecotokens auto-watch enable` | Start watch automatically on each Claude Code session |
 | `ecotokens auto-watch disable` | Disable automatic watch |
+| `ecotokens abbreviations enable` | Replace common words with abbreviations in filtered outputs + inject a matching instruction at SessionStart |
+| `ecotokens abbreviations disable` | Turn abbreviations off (default) |
+| `ecotokens abbreviations list` | List the active dictionary (defaults merged with user overrides) |
 | `ecotokens duplicates` | Detect near-duplicate code blocks in the indexed codebase |
 | `ecotokens clear --all` | Delete all recorded interceptions |
 | `ecotokens clear --before DATE` | Delete interceptions recorded before DATE (YYYY-MM-DD) |
 | `ecotokens clear --older-than DURATION` | Delete interceptions older than a duration (e.g. `30d`, `2w`, `1m`) |
 | `ecotokens clear --family FAMILY` | Delete interceptions of a specific command family |
-| `ecotokens clear --project PATH` | Delete interceptions for a specific project (use `"(unknown)"` for entries without a git root) |
+| `ecotokens clear --project PATH` | Delete interceptions for a specific project (use `"[undefined]"` for entries without a git root) |
 
 ## Gain dashboard
 
@@ -199,6 +237,7 @@ Interactive TUI showing token savings per command family and per project, with a
 ```bash
 ecotokens filter -- cargo test
 ecotokens filter --debug -- git log --oneline -50
+ecotokens filter --cwd /path/to/project -- cargo test
 ```
 
 The output is compressed by the same family-specific filters used by the hook, and token savings are recorded in the metrics store.
@@ -228,6 +267,79 @@ ecotokens auto-watch disable   # disable (hooks remain installed but are no-ops)
 When enabled, `ecotokens watch --background` starts automatically when a session opens, and stops when it closes. The setting is stored in `~/.config/ecotokens/config.json` (`auto_watch: true/false`).
 
 > **Note:** Auto-watch relies on `SessionStart` / `SessionEnd` hooks. <del>For Qwen Code, session hooks are installed automatically if ecotokens is already installed for Qwen (`ecotokens install --target qwen`).</del> Gemini CLI does not expose session lifecycle hooks.
+
+## Word abbreviations
+
+```bash
+ecotokens abbreviations enable    # transform narrative text + inject model instruction
+ecotokens abbreviations list      # show the active dictionary
+ecotokens abbreviations disable   # back to default
+```
+
+When enabled, a post-processing pass replaces full words with shorter forms in the narrative parts of tool outputs (code blocks between triple backticks are preserved). A matching `additionalContext` payload is emitted at `SessionStart` so the model adopts the same abbreviations in its own responses.
+
+Default abbreviations:
+
+| Word | Abbreviation |
+|------|--------------|
+| `administrator` | `admin` |
+| `administrators` | `admins` |
+| `application` | `app` |
+| `argument` | `arg` |
+| `arguments` | `args` |
+| `attribute` | `attr` |
+| `attributes` | `attrs` |
+| `command` | `cmd` |
+| `commands` | `cmds` |
+| `configuration` | `config` |
+| `database` | `db` |
+| `dependencies` | `deps` |
+| `dependency` | `dep` |
+| `development` | `dev` |
+| `directories` | `dirs` |
+| `directory` | `dir` |
+| `documentation` | `docs` |
+| `environment` | `env` |
+| `error` | `err` |
+| `errors` | `errs` |
+| `function` | `fn` |
+| `implementation` | `impl` |
+| `implementations` | `impls` |
+| `information` | `info` |
+| `message` | `msg` |
+| `messages` | `msgs` |
+| `package` | `pkg` |
+| `packages` | `pkgs` |
+| `parameter` | `param` |
+| `parameters` | `params` |
+| `production` | `prod` |
+| `reference` | `ref` |
+| `references` | `refs` |
+| `repositories` | `repos` |
+| `repository` | `repo` |
+| `request` | `req` |
+| `response` | `resp` |
+| `variable` | `var` |
+| `variables` | `vars` |
+| `warning` | `warn` |
+| `warnings` | `warns` |
+
+Keep the feature flag in `~/.config/ecotokens/config.json`
+
+```json
+{
+  "abbreviations_enabled": true
+}
+```
+
+... and put custom pairs in a separate `~/.config/ecotokens/abbreviations.json` file:
+
+```json
+{
+  "function": "func",
+  "repository": "repo"
+}
+```
 
 ## Bonus Tools
 
@@ -263,7 +375,31 @@ embed_provider        : ollama (http://localhost:11434)
 ai_summary_enabled    : false
 ai_summary_model      : llama3.2:3b (default)
 ai_summary_url        : http://localhost:11434 (default)
+abbreviations_enabled : false
 ```
+
+### Word abbreviations *(optional)*
+
+```bash
+ecotokens abbreviations enable    # transform narrative text + inject model instruction
+ecotokens abbreviations list      # show the active dictionary
+ecotokens abbreviations disable   # back to default
+```
+
+When enabled, a post-processing pass replaces full words with shorter forms in the narrative parts of tool outputs (code blocks between triple backticks are preserved). A matching `additionalContext` payload is emitted at `SessionStart` so the model adopts the same abbreviations in its own responses.
+
+Extend or override the built-in dictionary via `abbreviations_custom` in `~/.config/ecotokens/config.json`:
+
+```json
+{
+  "abbreviations_enabled": true,
+  "abbreviations_custom": {
+    "function": "func",
+    "repository": "repo"
+  }
+}
+```
+
 
 ## Supported command families
 
@@ -344,7 +480,7 @@ Filtering is aggressive on noise, conservative on signal:
 ## Requirements
 
 - Rust ≥ 1.75 (stable)
-- One or more of: Claude Code (with hook support), Gemini CLI ≥ 0.1.0, Qwen Code
+- One or more of: Claude Code (with hook support), Gemini CLI ≥ 0.1.0, Qwen Code, Pi ≥ 0.62.0
 - Ollama (optional, for semantic search embeddings and AI summarization)
 
 ## Contributing

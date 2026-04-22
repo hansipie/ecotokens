@@ -124,14 +124,9 @@ pub fn apply_filter(command: &str, output: &str) -> String {
     }
 }
 
-/// Run the full filter pipeline: masking → family filter → token counting → metrics recording.
-/// Returns `(filtered_output, tokens_before, tokens_after)`.
-pub fn run_filter_pipeline(command: &str, raw: &str, duration_ms: u32) -> (String, u32, u32) {
-    run_filter_pipeline_with_cwd(command, raw, duration_ms, None)
-}
-
 /// Run the full filter pipeline with an optional working directory for git_root detection.
 /// Returns `(filtered_output, tokens_before, tokens_after)`.
+#[cfg_attr(test, allow(unused_variables))]
 pub fn run_filter_pipeline_with_cwd(
     command: &str,
     raw: &str,
@@ -140,7 +135,7 @@ pub fn run_filter_pipeline_with_cwd(
 ) -> (String, u32, u32) {
     let settings = crate::config::Settings::load();
     let (masked, redacted) = crate::masking::mask(raw);
-    let filtered = if raw.len() < 200 {
+    let filtered = if raw.chars().count() < 200 {
         masked.clone()
     } else {
         let mut f = apply_filter(command, &masked);
@@ -152,6 +147,12 @@ pub fn run_filter_pipeline_with_cwd(
         f
     };
 
+    let filtered = if settings.abbreviations_enabled {
+        crate::abbreviations::abbreviate(&filtered, &settings).0
+    } else {
+        filtered
+    };
+
     let tokens_before = crate::tokens::count_tokens(raw) as u32;
     let filtered_tokens = crate::tokens::count_tokens(&filtered) as u32;
     let (filtered, tokens_after) = if filtered_tokens > tokens_before {
@@ -160,22 +161,40 @@ pub fn run_filter_pipeline_with_cwd(
         (filtered, filtered_tokens)
     };
 
+    #[cfg(not(test))]
     if let Some(path) = crate::metrics::store::metrics_path() {
         let mode = if tokens_after < tokens_before {
             crate::metrics::store::FilterMode::Filtered
         } else {
-            crate::metrics::store::FilterMode::Summarized
+            #[cfg(feature = "ai-summary")]
+            {
+                crate::metrics::store::FilterMode::Summarized
+            }
+            #[cfg(not(feature = "ai-summary"))]
+            {
+                crate::metrics::store::FilterMode::Filtered
+            }
         };
         let family = detect_family(command);
-        let mut git_cmd = std::process::Command::new("git");
-        git_cmd.args(["rev-parse", "--show-toplevel"]);
-        if let Some(dir) = cwd {
-            git_cmd.current_dir(dir);
-        }
-        let git_root = git_cmd
-            .output()
-            .ok()
-            .map(|o| String::from_utf8_lossy(&o.stdout).trim().to_string());
+        let effective_cwd = cwd
+            .map(|p| p.to_path_buf())
+            .or_else(|| std::env::current_dir().ok());
+        let git_root = effective_cwd.as_deref().map(|dir| {
+            std::process::Command::new("git")
+                .args(["rev-parse", "--show-toplevel"])
+                .current_dir(dir)
+                .output()
+                .ok()
+                .and_then(|o| {
+                    let s = String::from_utf8_lossy(&o.stdout).trim().to_string();
+                    if s.is_empty() {
+                        None
+                    } else {
+                        Some(s)
+                    }
+                })
+                .unwrap_or_else(|| dir.to_string_lossy().to_string())
+        });
         let rec = crate::metrics::store::Interception::new(
             command.to_string(),
             family,

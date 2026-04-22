@@ -1,6 +1,6 @@
 use serde::{Deserialize, Serialize};
 use std::collections::HashMap;
-use std::path::PathBuf;
+use std::path::{Path, PathBuf};
 
 /// State for one watched directory: number of active Claude sessions + watcher PID.
 #[derive(Debug, Clone, Serialize, Deserialize, Default)]
@@ -15,6 +15,13 @@ pub struct WatcherEntry {
 /// Persisted to `~/.config/ecotokens/sessions.json`.
 #[derive(Debug, Clone, Serialize, Deserialize, Default)]
 pub struct SessionStore(pub HashMap<String, WatcherEntry>);
+
+#[derive(Debug, Clone, PartialEq, Eq)]
+pub struct SessionWatchDecision {
+    pub watch_path: String,
+    pub needs_watcher: bool,
+    pub reused_existing_watcher: bool,
+}
 
 impl SessionStore {
     fn path() -> Option<PathBuf> {
@@ -65,6 +72,42 @@ impl SessionStore {
             .unwrap_or(true)
     }
 
+    fn resolve_watch_path<'a>(&'a self, path: &'a str) -> &'a str {
+        let candidate = Path::new(path);
+        self.0
+            .iter()
+            .filter(|(stored_path, entry)| {
+                (entry.sessions > 0 || entry.watcher_pid.is_some())
+                    && candidate.starts_with(Path::new(stored_path))
+            })
+            .map(|(stored_path, entry)| {
+                let is_live = entry.watcher_pid.map(is_pid_running).unwrap_or(false);
+                let depth = Path::new(stored_path).components().count();
+                (stored_path.as_str(), is_live, depth)
+            })
+            .max_by_key(|(_, is_live, depth)| (*is_live, *depth))
+            .map(|(stored_path, _, _)| stored_path)
+            .unwrap_or(path)
+    }
+
+    pub fn increment_for_session(&mut self, path: &str) -> SessionWatchDecision {
+        let watch_path = self.resolve_watch_path(path).to_string();
+        let reused_existing_watcher = watch_path != path
+            && self
+                .0
+                .get(&watch_path)
+                .and_then(|entry| entry.watcher_pid)
+                .map(is_pid_running)
+                .unwrap_or(false);
+        let needs_watcher = self.increment(&watch_path);
+
+        SessionWatchDecision {
+            watch_path,
+            needs_watcher,
+            reused_existing_watcher,
+        }
+    }
+
     /// Decrement session count for `path`.
     /// Returns `Some(pid)` if the watcher should be stopped (last session closed).
     pub fn decrement(&mut self, path: &str) -> Option<u32> {
@@ -78,6 +121,11 @@ impl SessionStore {
             return pid;
         }
         None
+    }
+
+    pub fn decrement_for_session(&mut self, path: &str) -> Option<u32> {
+        let watch_path = self.resolve_watch_path(path).to_string();
+        self.decrement(&watch_path)
     }
 
     /// Called from inside the daemon after `daemonize().start()` succeeds.
@@ -142,7 +190,14 @@ pub fn is_pid_running(pid: u32) -> bool {
     {
         std::path::Path::new(&format!("/proc/{pid}")).exists()
     }
-    #[cfg(not(target_os = "linux"))]
+    #[cfg(all(unix, not(target_os = "linux")))]
+    {
+        std::process::Command::new("kill")
+            .args(["-0", &pid.to_string()])
+            .status()
+            .map_or(true, |s| s.success())
+    }
+    #[cfg(not(unix))]
     {
         let _ = pid;
         true

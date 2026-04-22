@@ -80,6 +80,8 @@ fn filter_command_routes_gpp_through_cpp_filter() {
     let out = Command::new(ecotokens())
         .args(["filter", "--", "g++", "main.cpp"])
         .env("PATH", combined_path)
+        .env("HOME", temp.path())
+        .env("XDG_CONFIG_HOME", temp.path().join(".config"))
         .output()
         .expect("failed to run ecotokens filter");
 

@@ -5,6 +5,87 @@ All notable changes to this project will be documented in this file.
 The format is based on [Keep a Changelog](https://keepachangelog.com/en/1.0.0/),
 and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0.html).
 
+## [0.15.0] - 2026-04-17
+
+### Added
+- Word abbreviation pass for narrative text, logs and tool-result messages — replaces full words with shorter forms (e.g. `function`→`fn`, `configuration`→`config`, `directory`→`dir`) after masking and family filtering to squeeze extra tokens out of every interception
+- Built-in dictionary of 41 safe pairs; users can extend or override via `~/.config/ecotokens/abbreviations.json` (separate from `config.json` which keeps only the feature flag)
+- `SessionStart` hook now injects an `additionalContext` instruction listing the active dictionary when abbreviations are enabled, nudging the model to adopt the same abbreviations in its own responses
+- New CLI: `ecotokens abbreviations enable | disable | list`
+- `ecotokens config` output now reports `abbreviations_enabled`
+- New doc: `docs/abbreviations-pipeline.md` — describes the three trigger points (SessionStart, filter cmd, hook-post)
+
+### Changed
+- `cmd_session_start` auto-watch logs routed to stderr so stdout stays reserved for the hook JSON payload
+- Custom abbreviation pairs moved from `abbreviations_custom` key in `config.json` to a dedicated `~/.config/ecotokens/abbreviations.json` file; legacy `config.json` entries are migrated automatically on next `enable`
+- TUI gain panel: `render_detail` and `render_project_detail` refactored into shared `render_detail_inner` to eliminate duplication
+
+### Fixed
+- AI summary: structured JSON output (objects and arrays) is now preserved as-is instead of being replaced by a natural-language summary — fixes automation breakage when CLI commands return large JSON payloads (e.g. `--json` flags) above the `ai_summary_min_tokens` threshold (#53)
+- Integration tests that assert on filtered output strings now isolate `HOME`/`XDG_CONFIG_HOME` to avoid abbreviation side-effects (e.g. `cpp_test`)
+
+## [0.14.5] - 2026-04-15
+
+### Fixed
+- `ecotokens watch`: when a session starts in a subdirectory already covered by an existing watcher, the parent watcher is reused instead of launching a duplicate background watch — a clear skip message is surfaced instead
+
+## [0.14.4] - 2026-04-08
+
+### Fixed
+- `ecotokens filter`: commands run outside a git repository (e.g. `cat`, `g++` in `/tmp`) no longer appear under `[undefined]` in the gain dashboard — the working directory is used as project key when `git rev-parse` finds no repo
+- `ecotokens filter`: when `--cwd` is not passed (hook without cwd context), falls back to the process working directory for git root detection
+
+## [0.14.3] - 2026-04-08
+
+### Fixed
+- Hook handler: `cwd` field from hook input and `ShellToolPayload` is now forwarded to `ecotokens filter --cwd` so project association works correctly for all hook sources
+
+## [0.14.2] - 2026-04-05
+
+### Fixed
+- Pi extension: bash commands now pass `--cwd` to `ecotokens filter`, enabling correct `git_root` detection and project association in `ecotokens gain`
+- `ecotokens filter` now accepts `--cwd <path>` to set the working directory for git root detection
+- `ecotokens gain`: interceptions with `git_root = None` (e.g. bash commands without cwd context) now appear in the `[undefined]` project bucket instead of being silently dropped from the project view
+
+## [0.14.1] - 2026-04-05
+
+### Fixed
+- Pi extension: `read` tool results now correctly processed — `tool_response.output` and `tool_response.content` accepted as fallbacks to `tool_response.file.content`
+- Pi extension: `read` tool input field `path` accepted as fallback to `file_path` for file path extraction and metrics command naming
+- Pi extension: `find` tool results (mapped to Glob) now correctly processed — `tool_response.output` accepted as fallback to `tool_response.filenames`
+- Without these fixes, `NativeRead` and `Fs` interceptions from Pi were silently dropped and never visible in `ecotokens gain`
+
+## [0.14.0] - 2026-04-05
+
+### Added
+- Pi coding agent support via TypeScript extension installed at `~/.pi/agent/extensions/ecotokens.ts`
+- `bash` tool calls intercepted in-process: `event.input.command` rewritten to pipe through `ecotokens filter` (équivalent au PreToolUse de Claude Code)
+- `read`/`grep`/`find`/`ls` tool results piped through `ecotokens hook-post` pour compression outline-based (équivalent au PostToolUse)
+- `session_start` / `session_shutdown` hooks wired to auto-watch lifecycle
+- `/gain` et `/eco-search` slash commands exposés via `registerCommand`
+- `ecotokens install --target pi` et `ecotokens uninstall --target pi`
+- Extension source embarquée dans le binaire via `include_str!("pi_extension.ts")`
+
+## [0.13.1] - 2026-04-05
+
+### Fixed
+- `CONN_INIT_LOCK` (`OnceLock<Mutex>`) sérialise `open_conn` pour éviter `SQLITE_BUSY` sur `PRAGMA journal_mode=WAL` lors de migrations concurrentes
+- `read_to_string` traite désormais `NotFound` comme "déjà migré" pour gérer la fenêtre TOCTOU entre le test `migrating_path.exists()` et la lecture effective
+
+## [0.13.0] - 2026-04-02
+
+### Added
+- SQLite metrics backend (`metrics.db`) via `rusqlite` with bundled SQLite
+
+### Changed
+- Metrics storage migrated from JSONL to SQLite with schema/index initialization on open
+- Default metrics path changed from `metrics.jsonl` to `metrics.db`
+- Legacy `metrics.jsonl` is migrated automatically and preserved as `metrics.jsonl.migrated`
+
+### Fixed
+- Read paths now trigger legacy migration too: `ecotokens gain` can migrate existing JSONL data even when no SQLite file exists yet
+- Integration/performance tests updated for SQLite-backed metrics store
+
 ## [0.12.0] - 2026-04-02
 
 ### Security
@@ -141,9 +222,12 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 - `ecotokens install` / `uninstall` / `config` commands
 - MIT license
 
-[0.12.0]: https://github.com/hansipie/ecotokens/compare/v0.11.0...v0.12.0
-[0.11.0]: https://github.com/hansipie/ecotokens/compare/v0.10.0...v0.11.0
-[0.10.0]: https://github.com/hansipie/ecotokens/compare/v0.9.0...v0.10.0
+[0.14.5]: https://github.com/hansipie/ecotokens/releases/tag/v0.14.5
+[0.14.0]: https://github.com/hansipie/ecotokens/releases/tag/v0.14.0
+[0.13.0]: https://github.com/hansipie/ecotokens/releases/tag/v0.13.0
+[0.12.0]: https://github.com/hansipie/ecotokens/releases/tag/v0.12.0
+[0.11.0]: https://github.com/hansipie/ecotokens/releases/tag/v0.11.0
+[0.10.0]: https://github.com/hansipie/ecotokens/releases/tag/v0.10.0
 [0.9.0]: https://github.com/hansipie/ecotokens/releases/tag/v0.9.0
 [0.8.0]: https://github.com/hansipie/ecotokens/releases/tag/v0.8.0
 [0.7.0]: https://github.com/hansipie/ecotokens/releases/tag/v0.7.0

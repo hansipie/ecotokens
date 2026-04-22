@@ -136,13 +136,13 @@ fn by_project_blank_git_root_groups_under_unknown() {
         "blank git_root should not create an empty-string key"
     );
     assert!(
-        report.by_project.contains_key("(unknown)"),
-        "blank git_root should be grouped under (unknown)"
+        report.by_project.contains_key("[undefined]"),
+        "blank git_root should be grouped under [undefined]"
     );
     assert_eq!(
         report.by_project.len(),
         2,
-        "/repo and (unknown) should both be present in by_project"
+        "/repo and [undefined] should both be present in by_project"
     );
 }
 
