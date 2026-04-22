@@ -76,6 +76,10 @@ name = "generic_test"
 path = "tests/filter/generic_test.rs"
 
 [[test]]
+name = "detect_family_test"
+path = "tests/filter/detect_family_test.rs"
+
+[[test]]
 name = "git_test"
 path = "tests/filter/git_test.rs"
 
