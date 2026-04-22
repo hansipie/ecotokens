@@ -5,6 +5,13 @@ All notable changes to this project will be documented in this file.
 The format is based on [Keep a Changelog](https://keepachangelog.com/en/1.0.0/),
 and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0.html).
 
+## [0.15.1] - 2026-04-22
+
+### Fixed
+- `ecotokens filter`: commands invoked via absolute path (`/usr/bin/git`), venv (`.venv/bin/pytest`), version managers (`~/.cargo/bin/cargo`) or wrappers (`poetry run`, `pipx`) no longer fall back to `Generic` — basename is now extracted from the first token before family matching, aligning with the existing `is_cpp_command()` behaviour
+- Added `poetry`, `pipx` → Python ; `jest`, `mocha`, `yarn` → JavaScript family mappings
+- Search: results are now restricted to BM25 chunk docs only — symbolic index entries are excluded via a `BooleanQuery` `Must kind=bm25` filter, preventing spurious hits from non-textual documents
+
 ## [0.15.0] - 2026-04-17
 
 ### Added
