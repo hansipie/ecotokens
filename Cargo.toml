@@ -1,6 +1,6 @@
 [package]
 name = "ecotokens"
-version = "0.15.0"
+version = "0.15.1"
 edition = "2021"
 description = "Token optimizer for AI coding assistants — hooks into Claude Code/Gemini CLI to compress shell outputs and track USD savings"
 license = "MIT"
@@ -74,6 +74,10 @@ path = "tests/masking/patterns_test.rs"
 [[test]]
 name = "generic_test"
 path = "tests/filter/generic_test.rs"
+
+[[test]]
+name = "detect_family_test"
+path = "tests/filter/detect_family_test.rs"
 
 [[test]]
 name = "git_test"

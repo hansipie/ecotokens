@@ -43,55 +43,61 @@ fn is_cpp_command(command: &str) -> bool {
 
 pub fn detect_family(command: &str) -> CommandFamily {
     let cmd = command.trim();
-    if cmd.starts_with("git ") {
+
+    // Normalize the first token to its basename so that absolute paths
+    // (/usr/bin/git), venv paths (.venv/bin/pytest) and version managers
+    // (~/.cargo/bin/cargo) are all matched by their bare command name.
+    let raw_prog = cmd.split_whitespace().next().unwrap_or("");
+    let prog = std::path::Path::new(raw_prog)
+        .file_name()
+        .and_then(|n| n.to_str())
+        .unwrap_or(raw_prog);
+
+    if prog == "git" {
         CommandFamily::Git
-    } else if cmd.starts_with("cargo ") {
+    } else if prog == "cargo" {
         CommandFamily::Cargo
     } else if is_cpp_command(cmd) {
         CommandFamily::Cpp
-    } else if cmd.starts_with("python")
-        || cmd.starts_with("pytest")
-        || cmd.starts_with("pip ")
-        || cmd.starts_with("ruff ")
-        || cmd.starts_with("mypy")
-        || cmd.starts_with("uv ")
+    } else if prog.starts_with("python")
+        || matches!(
+            prog,
+            "pytest" | "pip" | "ruff" | "mypy" | "uv" | "poetry" | "pipx"
+        )
     {
         CommandFamily::Python
-    } else if cmd.starts_with("ls")
-        || cmd.starts_with("find")
-        || cmd.starts_with("tree")
-        || cmd.starts_with("diff ")
-        || cmd.starts_with("wc")
-    {
+    } else if matches!(prog, "ls" | "find" | "tree" | "diff" | "wc") {
         CommandFamily::Fs
-    } else if cmd.starts_with("go ") || cmd.contains("golangci-lint") {
+    } else if prog == "go" || cmd.contains("golangci-lint") {
         CommandFamily::Go
-    } else if cmd.starts_with("npm ")
-        || cmd.starts_with("pnpm ")
-        || cmd.starts_with("npx ")
-        || cmd.starts_with("tsc")
-        || cmd.starts_with("vitest")
-        || cmd.starts_with("eslint")
-        || cmd.starts_with("prettier")
-        || cmd.starts_with("next ")
-        || cmd.contains("playwright")
+    } else if matches!(
+        prog,
+        "npm"
+            | "pnpm"
+            | "npx"
+            | "yarn"
+            | "tsc"
+            | "vitest"
+            | "jest"
+            | "mocha"
+            | "eslint"
+            | "prettier"
+            | "next"
+    ) || cmd.contains("playwright")
         || cmd.contains("prisma")
     {
         CommandFamily::Js
-    } else if cmd.starts_with("gh ") {
+    } else if prog == "gh" {
         CommandFamily::Gh
-    } else if cmd.starts_with("docker ")
-        || cmd.starts_with("podman ")
-        || cmd.starts_with("kubectl ")
-    {
+    } else if matches!(prog, "docker" | "podman" | "kubectl") {
         CommandFamily::Container
-    } else if cmd.starts_with("grep ") || cmd.starts_with("rg ") {
+    } else if matches!(prog, "grep" | "rg") {
         CommandFamily::Grep
-    } else if cmd.starts_with("aws ") {
+    } else if prog == "aws" {
         CommandFamily::Aws
-    } else if cmd.starts_with("curl ") || cmd.starts_with("wget ") {
+    } else if matches!(prog, "curl" | "wget") {
         CommandFamily::Network
-    } else if cmd.starts_with("psql ") {
+    } else if prog == "psql" {
         CommandFamily::Db
     } else {
         CommandFamily::Generic

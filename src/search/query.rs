@@ -1,8 +1,9 @@
 use serde::{Deserialize, Serialize};
 use std::path::PathBuf;
 use tantivy::collector::TopDocs;
-use tantivy::query::QueryParser;
-use tantivy::schema::Value;
+use tantivy::query::{BooleanQuery, Occur, QueryParser, TermQuery};
+use tantivy::schema::{IndexRecordOption, Value};
+use tantivy::Term;
 use tantivy::{Index, ReloadPolicy, TantivyDocument};
 
 use super::embed::{cosine_similarity, embed_text, load_embeddings};
@@ -27,7 +28,7 @@ pub struct SearchResult {
 
 pub fn search_index(opts: SearchOptions) -> tantivy::Result<Vec<SearchResult>> {
     let index = Index::open_in_dir(&opts.index_dir)?;
-    let (_, file_path_field, content_field, _, line_start_field, _) = build_schema();
+    let (_, file_path_field, content_field, kind_field, line_start_field, _) = build_schema();
 
     let reader = index
         .reader_builder()
@@ -36,7 +37,14 @@ pub fn search_index(opts: SearchOptions) -> tantivy::Result<Vec<SearchResult>> {
     let searcher = reader.searcher();
 
     let query_parser = QueryParser::for_index(&index, vec![content_field]);
-    let query = query_parser.parse_query(&opts.query)?;
+    let content_query = query_parser.parse_query(&opts.query)?;
+    // Keep search focused on textual BM25 chunks and exclude symbolic docs.
+    let kind_term = Term::from_field_text(kind_field, "bm25");
+    let kind_query = TermQuery::new(kind_term, IndexRecordOption::Basic);
+    let query = BooleanQuery::new(vec![
+        (Occur::Must, Box::new(content_query)),
+        (Occur::Must, Box::new(kind_query)),
+    ]);
 
     // Récupérer plus de résultats BM25 que nécessaire si on va re-scorer
     let fetch_k = opts.top_k * 3;

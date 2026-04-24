@@ -86,3 +86,20 @@ fn results_include_file_path_and_snippet() {
         assert!(results[0].score >= 0.0, "score should be non-negative");
     }
 }
+
+#[test]
+fn search_returns_only_bm25_chunks() {
+    let (_src, idx) = build_fixture_index();
+    let opts = SearchOptions {
+        query: "authenticate".to_string(),
+        top_k: 10,
+        index_dir: idx.path().to_path_buf(),
+        embed_provider: ecotokens::config::settings::EmbedProvider::None,
+    };
+    let results = search_index(opts).unwrap();
+    assert!(!results.is_empty(), "should return results");
+    assert!(
+        results.iter().all(|r| r.line_start % 50 == 0),
+        "search should only return BM25 chunk docs (line_start is a chunk boundary)"
+    );
+}
