@@ -407,13 +407,16 @@ Extend or override the built-in dictionary via `abbreviations_custom` in `~/.con
 |--------|----------|
 | `git` | `git status`, `git diff`, `git log` |
 | `cargo` | `cargo build`, `cargo test`, `cargo clippy` |
-| `python` | `pytest`, `ruff`, `uv run` |
+| `python` | `pytest`, `ruff`, `uv run`, `poetry`, `pipx` |
+| `javascript` | `jest`, `mocha`, `yarn` |
 | `cpp` | `gcc`, `clang`, `make`, `cmake` |
 | `fs` | `ls`, `find`, `tree` |
 | `markdown` | `.md` files |
 | `config` | `.toml`, `.json`, `.yaml` |
 | `generic` | Everything else (truncated to 200 lines / 50 KB) |
 | `native_read` | Claude Code `Read` tool results (PostToolUse, outline-based compression) |
+
+> **Note:** Family detection uses the basename of the first token, so commands invoked via absolute path (`/usr/bin/git`), venv (`.venv/bin/pytest`), version managers (`~/.cargo/bin/cargo`), or wrappers (`poetry run`) are correctly matched to their family.
 
 ## Embeddings (optional)
 
