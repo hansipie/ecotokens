@@ -13,6 +13,10 @@ pub enum HookOutput {
     Rewrite(String),
 }
 
+fn shell_single_quote(value: &str) -> String {
+    format!("'{}'", value.replace('\'', "'\"'\"'"))
+}
+
 /// Shared payload structure for Gemini BeforeTool and Qwen PreToolUse hooks.
 #[derive(Debug, Deserialize)]
 struct ShellToolPayload {
@@ -51,8 +55,12 @@ pub fn handle_hook_input(input: &HookInput, exclusions: &[String], _debug: bool)
 
     // Rewrite to ecotokens filter
     let rewritten = match &input.cwd {
-        Some(cwd) => format!("ecotokens filter --cwd \"{cwd}\" -- {cmd}"),
-        None => format!("ecotokens filter -- {cmd}"),
+        Some(cwd) => format!(
+            "ecotokens filter --cwd {} -- bash -c {}",
+            shell_single_quote(cwd),
+            shell_single_quote(cmd)
+        ),
+        None => format!("ecotokens filter -- bash -c {}", shell_single_quote(cmd)),
     };
     HookOutput::Rewrite(rewritten)
 }
