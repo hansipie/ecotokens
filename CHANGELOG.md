@@ -5,6 +5,11 @@ All notable changes to this project will be documented in this file.
 The format is based on [Keep a Changelog](https://keepachangelog.com/en/1.0.0/),
 and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0.html).
 
+## [0.15.2] - 2026-04-24
+
+### Fixed
+- Hook rewrite: commands containing shell builtins or operators (e.g. `cd /path && …`, `source .env`) no longer fail with `ENOENT` — the rewritten command is now wrapped as `ecotokens filter -- bash -c '…'` so shell builtins, `&&`, `||`, pipes and redirections are all handled by a shell rather than by direct `exec` ([#65](https://github.com/hansipie/ecotokens/issues/65))
+
 ## [0.15.1] - 2026-04-22
 
 ### Fixed
