@@ -63,6 +63,27 @@ fn command_with_shell_operators_is_wrapped_in_bash_c() {
 }
 
 #[test]
+fn command_with_output_redirect_is_wrapped_in_bash_c() {
+    // Regression test for https://github.com/hansipie/ecotokens/issues/52:
+    // a command like `cmd > file` must not have its ecotokens annotations
+    // injected into the redirect target. bash -c handles the redirect
+    // internally so ecotokens stdout never reaches the file.
+    let exclusions: Vec<String> = vec![];
+    let input = make_input("notebooklm source list --json > /tmp/output.json");
+    let out = handle_hook_input(&input, &exclusions, false);
+
+    match out {
+        HookOutput::Rewrite(cmd) => {
+            assert_eq!(
+                cmd,
+                "ecotokens filter -- bash -c 'notebooklm source list --json > /tmp/output.json'"
+            );
+        }
+        _ => panic!("expected Rewrite"),
+    }
+}
+
+#[test]
 fn cwd_and_command_are_shell_quoted_in_rewrite() {
     let exclusions: Vec<String> = vec![];
     let input = HookInput {
