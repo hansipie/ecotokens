@@ -1,6 +1,6 @@
 [package]
 name = "ecotokens"
-version = "0.15.1"
+version = "0.15.2"
 edition = "2021"
 description = "Token optimizer for AI coding assistants — hooks into Claude Code/Gemini CLI to compress shell outputs and track USD savings"
 license = "MIT"
