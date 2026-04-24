@@ -40,11 +40,45 @@ fn non_excluded_command_returns_rewrite() {
                 "rewritten cmd should call ecotokens"
             );
             assert!(
-                cmd.contains("git status"),
-                "rewritten cmd should include original"
+                cmd.contains("bash -c 'git status'"),
+                "rewritten cmd should shell-wrap original command"
             );
         }
         _ => panic!("expected Rewrite, got {out:?}"),
+    }
+}
+
+#[test]
+fn command_with_shell_operators_is_wrapped_in_bash_c() {
+    let exclusions: Vec<String> = vec![];
+    let input = make_input("cd /tmp && echo hello");
+    let out = handle_hook_input(&input, &exclusions, false);
+
+    match out {
+        HookOutput::Rewrite(cmd) => {
+            assert_eq!(cmd, "ecotokens filter -- bash -c 'cd /tmp && echo hello'");
+        }
+        _ => panic!("expected Rewrite"),
+    }
+}
+
+#[test]
+fn cwd_and_command_are_shell_quoted_in_rewrite() {
+    let exclusions: Vec<String> = vec![];
+    let input = HookInput {
+        command: "printf 'hello'".to_string(),
+        cwd: Some("/tmp/dir with spaces".to_string()),
+    };
+    let out = handle_hook_input(&input, &exclusions, false);
+
+    match out {
+        HookOutput::Rewrite(cmd) => {
+            assert_eq!(
+                cmd,
+                r#"ecotokens filter --cwd '/tmp/dir with spaces' -- bash -c 'printf '"'"'hello'"'"''"#
+            );
+        }
+        _ => panic!("expected Rewrite"),
     }
 }
 
@@ -104,10 +138,10 @@ mod gemini_handler {
         match out {
             ecotokens::hook::handler::HookOutput::Rewrite(cmd) => {
                 assert!(
-                    cmd.starts_with("ecotokens filter --"),
+                    cmd.starts_with("ecotokens filter -- bash -c "),
                     "should call ecotokens filter"
                 );
-                assert!(cmd.contains("ls -la"), "should retain original command");
+                assert!(cmd.contains("'ls -la'"), "should retain original command");
             }
             _ => panic!("expected Rewrite for shell command"),
         }
@@ -156,7 +190,7 @@ mod gemini_handler {
             "command": "git status",
             "timeout": 30
         });
-        let new_cmd = "ecotokens filter -- git status".to_string();
+        let new_cmd = "ecotokens filter -- bash -c 'git status'".to_string();
 
         // Simulate what handle_gemini does when rewriting
         let mut tool_input = original_tool_input.clone();
