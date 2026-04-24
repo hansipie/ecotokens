@@ -10,6 +10,7 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 ### Fixed
 - Hook rewrite: commands containing shell builtins or operators (e.g. `cd /path && …`, `source .env`) no longer fail with `ENOENT` — the rewritten command is now wrapped as `ecotokens filter -- bash -c '…'` so shell builtins, `&&`, `||`, pipes and redirections are all handled by a shell rather than by direct `exec` ([#65](https://github.com/hansipie/ecotokens/issues/65))
 - Hook rewrite: commands that redirect output to a file (e.g. `cmd --json > /tmp/out.json`) no longer have ecotokens annotation text injected into the redirect target — `bash -c` handles the redirection internally so ecotokens stdout never reaches the file ([#52](https://github.com/hansipie/ecotokens/issues/52))
+- Hook rewrite: heredoc commands (e.g. `python3 << 'EOF'\n…\nEOF`) no longer produce silent empty output — the heredoc stdin was previously consumed by `ecotokens filter` instead of the target interpreter; `bash -c` now handles the heredoc internally ([#54](https://github.com/hansipie/ecotokens/issues/54))
 
 ## [0.15.1] - 2026-04-22
 

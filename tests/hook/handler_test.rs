@@ -63,6 +63,32 @@ fn command_with_shell_operators_is_wrapped_in_bash_c() {
 }
 
 #[test]
+fn command_with_heredoc_is_wrapped_in_bash_c() {
+    // Regression test for https://github.com/hansipie/ecotokens/issues/54:
+    // a heredoc command like `python3 << 'EOF'\n...\nEOF` must not have its
+    // stdin consumed by ecotokens filter. bash -c handles the heredoc
+    // internally so the interpreter receives the correct stdin.
+    let exclusions: Vec<String> = vec![];
+    let cmd = "uv run python3 << 'PYEOF'\nprint('hello')\nPYEOF";
+    let input = make_input(cmd);
+    let out = handle_hook_input(&input, &exclusions, false);
+
+    match out {
+        HookOutput::Rewrite(rewritten) => {
+            assert!(
+                rewritten.starts_with("ecotokens filter -- bash -c '"),
+                "heredoc command must be wrapped in bash -c"
+            );
+            assert!(
+                rewritten.contains("uv run python3"),
+                "original command must be preserved in the rewrite"
+            );
+        }
+        _ => panic!("expected Rewrite"),
+    }
+}
+
+#[test]
 fn command_with_output_redirect_is_wrapped_in_bash_c() {
     // Regression test for https://github.com/hansipie/ecotokens/issues/52:
     // a command like `cmd > file` must not have its ecotokens annotations
