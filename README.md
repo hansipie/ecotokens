@@ -24,7 +24,7 @@ Token-saving companion for [Claude Code](https://claude.ai/code), [Gemini CLI](h
 | Feature | Details |
 |---------|---------|
 | **PreToolUse hook** | Intercepts every shell (`Bash`) command before its output reaches the model — filters, compresses, and records savings |
-| **PostToolUse hook** *(Claude Code)* | Intercepts native tool results (`Read`, `Grep`, `Glob`) — outline-based compression for source files, grep trimming, glob denoising |
+| **PostToolUse hook** *(Claude Code, Gemini CLI, Qwen Code)* | Intercepts native tool results (`Read`/`read_file`, `Grep`/`search_file_content`, `Glob`/`list_directory`) — outline-based compression for source files, grep trimming, glob denoising |
 | **Gain dashboard** | Interactive TUI — token savings by command family or project, sparkline, diff view, history log |
 | **Multi-agent support** | Works with Claude Code, Gemini CLI, Qwen Code, and Pi out of the box |
 | **Precision guarantees** | Errors, failures, and stack traces are never removed; secrets are redacted before filtering |
@@ -45,14 +45,14 @@ ecotokens installs hooks that intercept tool outputs before they reach the model
 4. Returns the compressed output to the model
 5. Records the before/after token counts in a local metrics store
 
-**PostToolUse** *(Claude Code only)* — fires after native tool calls (`Read`, `Grep`, `Glob`):
+**PostToolUse / AfterTool** *(Claude Code, Gemini CLI, Qwen Code)* — fires after native file-tool calls:
 
 1. Intercepts the tool result before it enters the context window
 2. Applies a specialized filter (outline for source files, grep result trimming, glob path denoising)
 3. Returns the compressed result to the model
 4. Records the savings under the `native_read`, `grep`, or `fs` family
 
-Claude Code uses the `PreToolUse` + `PostToolUse` hooks (`~/.claude/settings.json`). Gemini CLI uses the `BeforeTool` hook (`~/.gemini/settings.json`). Qwen Code uses the `PreToolUse` hook (`~/.qwen/settings.json`). Pi uses a TypeScript extension (`~/.pi/agent/extensions/ecotokens.ts`) that intercepts `tool_call` (bash pre-exec) and `tool_result` (read/grep/find/ls post-exec) events in-process.
+Claude Code uses the `PreToolUse` + `PostToolUse` hooks (`~/.claude/settings.json`). Gemini CLI uses the `BeforeTool` + `AfterTool` hooks (`~/.gemini/settings.json`). Qwen Code uses the `PreToolUse` + `PostToolUse` hooks (`~/.qwen/settings.json`). Pi uses a TypeScript extension (`~/.pi/agent/extensions/ecotokens.ts`) that intercepts `tool_call` (bash pre-exec) and `tool_result` (read/grep/find/ls post-exec) events in-process.
 
 For a focused view of the runtime path, see [`docs/hook-filter-metrics-flow.md`](docs/hook-filter-metrics-flow.md).
 
@@ -109,7 +109,7 @@ cargo install --path .
 ecotokens install --target gemini
 ```
 
-This writes a `BeforeTool` hook entry into `~/.gemini/settings.json`.
+This writes `BeforeTool` and `AfterTool` hook entries into `~/.gemini/settings.json`. The `AfterTool` hook intercepts `read_file`, `search_file_content`, and `list_directory` results.
 
 ### Qwen Code
 
@@ -120,7 +120,7 @@ cargo install --path .
 ecotokens install --target qwen
 ```
 
-This writes a `PreToolUse` hook entry into `~/.qwen/settings.json`.
+This writes `PreToolUse` and `PostToolUse` hook entries into `~/.qwen/settings.json`. The `PostToolUse` hook intercepts `read_file`, `search_files`, and `list_dir` results.
 
 ### Pi
 

@@ -5,6 +5,13 @@ All notable changes to this project will be documented in this file.
 The format is based on [Keep a Changelog](https://keepachangelog.com/en/1.0.0/),
 and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0.html).
 
+## [0.16.0] - 2026-04-26
+
+### Added
+- **Gemini CLI AfterTool hook**: intercepts `read_file`, `search_file_content`, and `list_directory` tool results via the `AfterTool` hook using deny+reason substitution — routes through the existing read/grep/glob handlers for the same token savings as Claude Code
+- **Qwen Code PostToolUse hook**: intercepts `read_file`, `search_files`, and `list_dir` tool results via the `PostToolUse` hook using `additionalContext` — same compression pipeline as above
+- `ecotokens install --target gemini` and `--target qwen` (and `--target all`) now also install the respective post-hooks; `uninstall` removes them
+
 ## [0.15.2] - 2026-04-24
 
 ### Fixed

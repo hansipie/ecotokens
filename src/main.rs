@@ -47,6 +47,10 @@ enum Commands {
     HookQwen,
     /// Intercept a native Claude Code tool result via PostToolUse hook (reads JSON from stdin)
     HookPost,
+    /// Intercept a Gemini CLI tool result via AfterTool hook (reads JSON from stdin)
+    HookPostGemini,
+    /// Intercept a Qwen Code tool result via PostToolUse hook (reads JSON from stdin)
+    HookPostQwen,
     /// Execute a command, filter its output, record metrics
     Filter {
         #[arg(last = true)]
@@ -690,13 +694,24 @@ fn cmd_install(target: String, ai_summary: bool, ai_summary_model: Option<String
 
     if install_gemini {
         match gemini_path {
-            Some(ref p) => match install::install_gemini_hook(p) {
-                Ok(()) => println!("ecotokens hook installed (Gemini) → {}", p.display()),
-                Err(e) => {
-                    eprintln!("install error (gemini hook): {e}");
-                    std::process::exit(1);
+            Some(ref p) => {
+                match install::install_gemini_hook(p) {
+                    Ok(()) => println!("ecotokens hook installed (Gemini) → {}", p.display()),
+                    Err(e) => {
+                        eprintln!("install error (gemini hook): {e}");
+                        std::process::exit(1);
+                    }
                 }
-            },
+                match install::install_gemini_post_hook(p) {
+                    Ok(()) => {
+                        println!("ecotokens post-hook installed (Gemini) → {}", p.display())
+                    }
+                    Err(e) => {
+                        eprintln!("install error (gemini post-hook): {e}");
+                        std::process::exit(1);
+                    }
+                }
+            }
             None => {
                 eprintln!("cannot determine Gemini settings path on this system");
                 std::process::exit(1);
@@ -711,6 +726,18 @@ fn cmd_install(target: String, ai_summary: bool, ai_summary_model: Option<String
                     Ok(()) => println!("ecotokens hook installed (Qwen Code) → {}", p.display()),
                     Err(e) => {
                         eprintln!("install error (qwen hook): {e}");
+                        std::process::exit(1);
+                    }
+                }
+                match install::install_qwen_post_hook(p) {
+                    Ok(()) => {
+                        println!(
+                            "ecotokens post-hook installed (Qwen Code) → {}",
+                            p.display()
+                        )
+                    }
+                    Err(e) => {
+                        eprintln!("install error (qwen post-hook): {e}");
                         std::process::exit(1);
                     }
                 }
@@ -817,11 +844,15 @@ fn cmd_uninstall(target: String) {
         match gemini_path {
             Some(ref p) => {
                 let had_hook = install::is_gemini_hook_installed(p);
+                let had_post_hook = install::is_gemini_post_hook_installed(p);
                 let had_mcp = install::is_gemini_mcp_registered(p);
                 match install::uninstall_gemini(p) {
                     Ok(()) => {
                         if had_hook {
                             println!("ecotokens hook removed (Gemini) ← {}", p.display());
+                        }
+                        if had_post_hook {
+                            println!("ecotokens post-hook removed (Gemini) ← {}", p.display());
                         }
                         if had_mcp {
                             println!(
@@ -829,7 +860,7 @@ fn cmd_uninstall(target: String) {
                                 p.display()
                             );
                         }
-                        if !had_hook && !had_mcp {
+                        if !had_hook && !had_post_hook && !had_mcp {
                             println!("ecotokens: nothing to uninstall (gemini)");
                         }
                     }
@@ -850,6 +881,7 @@ fn cmd_uninstall(target: String) {
         match qwen_path {
             Some(ref p) => {
                 let had_hook = install::is_qwen_hook_installed(p);
+                let had_post_hook = install::is_qwen_post_hook_installed(p);
                 let had_mcp = install::is_qwen_mcp_registered(p);
                 let had_session = install::are_session_hooks_installed(p);
                 match install::uninstall_qwen(p) {
@@ -857,13 +889,16 @@ fn cmd_uninstall(target: String) {
                         if had_hook {
                             println!("ecotokens hook removed (Qwen Code) ← {}", p.display());
                         }
+                        if had_post_hook {
+                            println!("ecotokens post-hook removed (Qwen Code) ← {}", p.display());
+                        }
                         if had_mcp {
                             println!(
                                 "ecotokens MCP server unregistered (Qwen Code) ← {}",
                                 p.display()
                             );
                         }
-                        if !had_hook && !had_mcp && !had_session {
+                        if !had_hook && !had_post_hook && !had_mcp && !had_session {
                             println!("ecotokens: nothing to uninstall (qwen)");
                         }
                     }
@@ -2033,6 +2068,8 @@ fn main() {
         Commands::HookGemini => hook::handle_gemini(),
         Commands::HookQwen => hook::handle_qwen(),
         Commands::HookPost => hook::handle_post(),
+        Commands::HookPostGemini => hook::handle_post_gemini(),
+        Commands::HookPostQwen => hook::handle_post_qwen(),
         Commands::Filter { args, debug, cwd } => cmd_filter(args, debug, cwd),
         Commands::Gain {
             period,
