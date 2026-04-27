@@ -195,7 +195,7 @@ ecotokens uninstall --target all       # all targets
 | Command | Description |
 |---------|-------------|
 | `ecotokens install` | Install the PreToolUse + PostToolUse hooks in `~/.claude/settings.json` |
-| `ecotokens uninstall` | Remove the hooks |
+| `ecotokens uninstall` | Remove the PreToolUse + PostToolUse hooks and MCP server entry |
 | `ecotokens filter -- CMD [ARGS]` | Run a command, filter its output, record metrics |
 | `ecotokens filter --cwd DIR -- CMD [ARGS]` | Same, with an explicit working directory |
 | `ecotokens hook-post` | PostToolUse handler — intercept native tool results (Read, Grep, Glob) |
@@ -362,9 +362,7 @@ Keep the feature flag in `~/.config/ecotokens/config.json`
 
 ## Bonus Tools
 
-_Less code is less tokens_
-
-### MCP server (Claude Code)
+### MCP server (Claude Code, Gemini CLI, Qwen Code)
 
 `ecotokens mcp-server` starts a stdio MCP server backed by the ecotokens index and trace engines.
 
@@ -419,6 +417,8 @@ When the query matches a symbol name, callers are automatically appended:
 Results are automatically scoped to the current git project when using the global index — files from other indexed projects are silently filtered out.
 
 ### Duplicates command
+
+_Less code is less tokens_
 
 `ecotokens duplicates` scans the indexed codebase for near-identical code blocks and reports them grouped by similarity.
 

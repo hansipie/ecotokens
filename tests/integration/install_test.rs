@@ -4,8 +4,9 @@ use helpers::ecotokens_bin;
 
 use ecotokens::install::{
     install_gemini_hook, install_hook, install_post_hook, install_qwen_hook,
-    is_gemini_hook_installed, is_gemini_mcp_registered, is_qwen_hook_installed,
-    is_qwen_mcp_registered, uninstall_gemini, uninstall_hook, uninstall_qwen,
+    is_gemini_hook_installed, is_gemini_mcp_registered, is_post_hook_installed,
+    is_qwen_hook_installed, is_qwen_mcp_registered, uninstall_gemini, uninstall_hook,
+    uninstall_qwen,
 };
 use std::process::Command;
 use tempfile::TempDir;
@@ -635,5 +636,29 @@ fn post_hook_preserves_existing_pretooluse_hook() {
             .map(|c| c == "ecotokens hook")
             .unwrap_or(false)),
         "PreToolUse hook should be preserved after install_post_hook"
+    );
+}
+
+#[test]
+fn uninstall_removes_post_hook() {
+    let dir = TempDir::new().unwrap();
+    let settings_path = temp_claude_settings(&dir);
+    let claude_json = temp_claude_json(&dir);
+
+    install_post_hook(&settings_path).unwrap();
+    assert!(is_post_hook_installed(&settings_path));
+
+    uninstall_hook(&settings_path, &claude_json).unwrap();
+    assert!(
+        !is_post_hook_installed(&settings_path),
+        "PostToolUse hook should be removed after uninstall"
+    );
+
+    let content = std::fs::read_to_string(&settings_path).unwrap();
+    let v: serde_json::Value = serde_json::from_str(&content).unwrap();
+    let post_hooks = &v["hooks"]["PostToolUse"];
+    assert!(
+        post_hooks.is_null() || post_hooks.as_array().map(|a| a.is_empty()).unwrap_or(false),
+        "PostToolUse array should be empty or absent"
     );
 }

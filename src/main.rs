@@ -871,11 +871,15 @@ fn cmd_uninstall(target: String) {
 
     if uninstall_claude {
         let had_hook = install::is_hook_installed(&claude_path);
+        let had_post_hook = install::is_post_hook_installed(&claude_path);
         let had_mcp = install::is_mcp_registered(&claude_json);
         match install::uninstall_hook(&claude_path, &claude_json) {
             Ok(()) => {
                 if had_hook {
                     println!("ecotokens hook removed ← {}", claude_path.display());
+                }
+                if had_post_hook {
+                    println!("ecotokens post-hook removed ← {}", claude_path.display());
                 }
                 if had_mcp {
                     println!(
@@ -883,7 +887,7 @@ fn cmd_uninstall(target: String) {
                         claude_json.display()
                     );
                 }
-                if !had_hook && !had_mcp {
+                if !had_hook && !had_post_hook && !had_mcp {
                     println!("ecotokens: nothing to uninstall (claude)");
                 }
             }
