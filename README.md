@@ -24,7 +24,7 @@ Token-saving companion for [Claude Code](https://claude.ai/code), [Gemini CLI](h
 | Feature | Details |
 |---------|---------|
 | **PreToolUse hook** | Intercepts every shell (`Bash`) command before its output reaches the model — filters, compresses, and records savings |
-| **PostToolUse hook** *(Claude Code)* | Intercepts native tool results (`Read`, `Grep`, `Glob`) — outline-based compression for source files, grep trimming, glob denoising |
+| **PostToolUse hook** *(Claude Code, Gemini CLI, Qwen Code)* | Intercepts native tool results (`Read`/`read_file`, `Grep`/`search_file_content`, `Glob`/`list_directory`) — outline-based compression for source files, grep trimming, glob denoising |
 | **Gain dashboard** | Interactive TUI — token savings by command family or project, sparkline, diff view, history log |
 | **Multi-agent support** | Works with Claude Code, Gemini CLI, Qwen Code, and Pi out of the box |
 | **Precision guarantees** | Errors, failures, and stack traces are never removed; secrets are redacted before filtering |
@@ -45,14 +45,14 @@ ecotokens installs hooks that intercept tool outputs before they reach the model
 4. Returns the compressed output to the model
 5. Records the before/after token counts in a local metrics store
 
-**PostToolUse** *(Claude Code only)* — fires after native tool calls (`Read`, `Grep`, `Glob`):
+**PostToolUse / AfterTool** *(Claude Code, Gemini CLI, Qwen Code)* — fires after native file-tool calls:
 
 1. Intercepts the tool result before it enters the context window
 2. Applies a specialized filter (outline for source files, grep result trimming, glob path denoising)
 3. Returns the compressed result to the model
 4. Records the savings under the `native_read`, `grep`, or `fs` family
 
-Claude Code uses the `PreToolUse` + `PostToolUse` hooks (`~/.claude/settings.json`). Gemini CLI uses the `BeforeTool` hook (`~/.gemini/settings.json`). Qwen Code uses the `PreToolUse` hook (`~/.qwen/settings.json`). Pi uses a TypeScript extension (`~/.pi/agent/extensions/ecotokens.ts`) that intercepts `tool_call` (bash pre-exec) and `tool_result` (read/grep/find/ls post-exec) events in-process.
+Claude Code uses the `PreToolUse` + `PostToolUse` hooks (`~/.claude/settings.json`). Gemini CLI uses the `BeforeTool` + `AfterTool` hooks (`~/.gemini/settings.json`). Qwen Code uses the `PreToolUse` + `PostToolUse` hooks (`~/.qwen/settings.json`). Pi uses a TypeScript extension (`~/.pi/agent/extensions/ecotokens.ts`) that intercepts `tool_call` (bash pre-exec) and `tool_result` (read/grep/find/ls post-exec) events in-process.
 
 For a focused view of the runtime path, see [`docs/hook-filter-metrics-flow.md`](docs/hook-filter-metrics-flow.md).
 
@@ -109,7 +109,7 @@ cargo install --path .
 ecotokens install --target gemini
 ```
 
-This writes a `BeforeTool` hook entry into `~/.gemini/settings.json`.
+This writes `BeforeTool` and `AfterTool` hook entries into `~/.gemini/settings.json`. The `AfterTool` hook intercepts `read_file`, `search_file_content`, and `list_directory` results.
 
 ### Qwen Code
 
@@ -120,7 +120,7 @@ cargo install --path .
 ecotokens install --target qwen
 ```
 
-This writes a `PreToolUse` hook entry into `~/.qwen/settings.json`.
+This writes `PreToolUse` and `PostToolUse` hook entries into `~/.qwen/settings.json`. The `PostToolUse` hook intercepts `read_file`, `search_files`, and `list_dir` results.
 
 ### Pi
 
@@ -187,7 +187,7 @@ ecotokens uninstall --target all       # all targets
 | `ecotokens gain --json` | JSON report |
 | `ecotokens config` | Show current configuration |
 | `ecotokens index [--path DIR]` | Index a codebase for BM25 + symbolic search |
-| `ecotokens search QUERY` | Search the indexed codebase |
+| `ecotokens search QUERY [--context N] [--include GLOB] [--exclude GLOB] [--no-trace]` | Search the indexed codebase with line numbers, context, and optional trace augmentation |
 | `ecotokens outline PATH` | List symbols in a file or directory |
 | `ecotokens symbol ID` | Look up a symbol by its stable ID |
 | `ecotokens trace callers SYMBOL` | Find callers of a symbol |
@@ -345,6 +345,40 @@ Keep the feature flag in `~/.config/ecotokens/config.json`
 
 _Less code is less tokens_
 
+### Search command
+
+`ecotokens search QUERY` performs BM25 (+ optional semantic) search over the indexed codebase and returns results anchored to the matching line.
+
+```bash
+ecotokens search "embed_text"                        # top 5 results, 2 lines of context
+ecotokens search "embed_text" --context 4            # 4 lines above and below the match
+ecotokens search "error" --include "*.rs"            # Rust files only
+ecotokens search "TODO" --exclude "*.md" --exclude "*.toml"
+ecotokens search "find_callers" --no-trace           # pure BM25, no trace augmentation
+ecotokens search "find_callers" --json               # JSON output with callers array
+ecotokens search "query" --top-k 10                  # more results
+```
+
+Output format:
+
+```
+src/search/query.rs:29 (score: 11.068)
+  27:  
+  28:  pub fn search_index(opts: SearchOptions) -> tantivy::Result<Vec<SearchResult>> {
+  29:      let index = Index::open_in_dir(&opts.index_dir)?;
+  30:      let (_, file_path_field, content_field, kind_field, line_start_field, _) = build_schema();
+  31:  
+```
+
+When the query matches a symbol name, callers are automatically appended:
+
+```
+# Symbol match — call sites via trace
+  src/main.rs:1301 [caller]  cmd_search
+```
+
+Results are automatically scoped to the current git project when using the global index — files from other indexed projects are silently filtered out.
+
 ### Duplicates command
 
 `ecotokens duplicates` scans the indexed codebase for near-identical code blocks and reports them grouped by similarity.
@@ -371,7 +405,7 @@ Output includes:
 hook_installed        : true
 debug                 : false
 exclusions            : []
-embed_provider        : ollama (http://localhost:11434)
+embed_provider        : ollama (http://localhost:11434) model=qwen3-embedding:latest
 ai_summary_enabled    : false
 ai_summary_model      : llama3.2:3b (default)
 ai_summary_url        : http://localhost:11434 (default)
@@ -420,17 +454,61 @@ Extend or override the built-in dictionary via `abbreviations_custom` in `~/.con
 
 ## Embeddings (optional)
 
-For semantic search, configure a local embedding provider:
+When an embedding provider is configured, `ecotokens search` uses a hybrid BM25 + cosine similarity scoring (50/50) for more relevant results. Without a provider, pure BM25 is used.
+
+### Providers
+
+| Provider | Default URL | Default model |
+|----------|-------------|---------------|
+| `ollama` | `http://localhost:11434` | `nomic-embed-text` |
+| `lmstudio` | `http://localhost:1234` | `nomic-embed-text-v1.5` |
+
+### Configuration
 
 ```bash
-# Ollama
+# Ollama with default model (nomic-embed-text)
 ecotokens config --embed-provider ollama --embed-url http://localhost:11434
 
-# LM Studio
+# Ollama with a custom model
+ecotokens config --embed-provider ollama --embed-url http://localhost:11434 --embed-model mxbai-embed-large
+
+# LM Studio with default model (nomic-embed-text-v1.5)
 ecotokens config --embed-provider lmstudio --embed-url http://localhost:1234
 
-# Disable
+# LM Studio with a custom model
+ecotokens config --embed-provider lmstudio --embed-url http://localhost:1234 --embed-model text-embedding-nomic-embed-text-v1.5
+
+# Change the model only (provider and URL are preserved)
+ecotokens config --embed-model all-minilm
+
+# View current configuration
+ecotokens config
+
+# Disable embeddings (fallback to BM25 only)
 ecotokens config --embed-provider none
+```
+
+### Model compatibility
+
+- **Ollama**: any model pulled via `ollama pull <model>` — e.g. `nomic-embed-text`, `mxbai-embed-large`, `all-minilm`, `bge-m3`
+- **LM Studio**: any embedding model loaded in LM Studio that exposes a `/v1/embeddings` endpoint (OpenAI-compatible)
+
+> **Note:** The embedding model must match the one used during indexing. If you change the model, re-run `ecotokens index` to regenerate the embeddings.
+
+### Workflow
+
+```bash
+# 1. Pull the model (Ollama example)
+ollama pull mxbai-embed-large
+
+# 2. Configure ecotokens
+ecotokens config --embed-provider ollama --embed-model mxbai-embed-large
+
+# 3. Re-index your project
+ecotokens index --path /your/project --reset
+
+# 4. Search with semantic scoring
+ecotokens search "your query"
 ```
 
 ## AI summarization (optional)
@@ -484,7 +562,7 @@ Filtering is aggressive on noise, conservative on signal:
 
 - Rust ≥ 1.75 (stable)
 - One or more of: Claude Code (with hook support), Gemini CLI ≥ 0.1.0, Qwen Code, Pi ≥ 0.62.0
-- Ollama (optional, for semantic search embeddings and AI summarization)
+- Ollama or LM Studio (optional, for semantic search embeddings and AI summarization)
 
 ## Contributing
 

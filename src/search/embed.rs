@@ -55,19 +55,19 @@ fn fetch_embedding(text: &str, base_url: &str, config: &EmbedConfig) -> Result<V
 pub fn embed_text(text: &str, provider: &EmbedProvider) -> Option<Vec<f32>> {
     match provider {
         EmbedProvider::None => None,
-        EmbedProvider::Ollama { url } => {
+        EmbedProvider::Ollama { url, model } => {
             let config = EmbedConfig {
                 url_pattern: "{}/api/embeddings",
-                model: "nomic-embed-text",
+                model,
                 input_field: "prompt",
                 embedding_path: "embedding",
             };
             fetch_embedding(text, url, &config).ok()
         }
-        EmbedProvider::LmStudio { url } => {
+        EmbedProvider::LmStudio { url, model } => {
             let config = EmbedConfig {
                 url_pattern: "{}/v1/embeddings",
-                model: "nomic-embed-text-v1.5",
+                model,
                 input_field: "input",
                 embedding_path: "data[0].embedding",
             };

@@ -28,6 +28,7 @@ fn test_ollama_invalid_url_returns_error() {
 fn test_ollama_provider_unavailable_falls_back_to_none() {
     let provider = EmbedProvider::Ollama {
         url: "http://127.0.0.1:1".into(),
+        model: "nomic-embed-text".into(),
     };
     let result = embed_text("hello", &provider);
     assert!(
@@ -59,6 +60,7 @@ fn test_lmstudio_invalid_url_returns_error() {
 fn test_lmstudio_provider_unavailable_falls_back_to_none() {
     let provider = EmbedProvider::LmStudio {
         url: "http://127.0.0.1:1".into(),
+        model: "nomic-embed-text-v1.5".into(),
     };
     let result = embed_text("hello", &provider);
     assert!(

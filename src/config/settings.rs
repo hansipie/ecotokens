@@ -10,10 +10,21 @@ pub enum EmbedProvider {
     #[serde(alias = "ollama")]
     Ollama {
         url: String,
+        #[serde(default = "default_ollama_model")]
+        model: String,
     },
     LmStudio {
         url: String,
+        #[serde(default = "default_lmstudio_model")]
+        model: String,
     },
+}
+
+fn default_ollama_model() -> String {
+    "nomic-embed-text".to_string()
+}
+fn default_lmstudio_model() -> String {
+    "nomic-embed-text-v1.5".to_string()
 }
 
 #[derive(Debug, Clone, Serialize, Deserialize)]

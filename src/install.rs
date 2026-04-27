@@ -10,6 +10,11 @@ const QWEN_HOOK_COMMAND: &str = "ecotokens hook-qwen";
 const POST_HOOK_COMMAND: &str = "ecotokens hook-post";
 const POST_HOOK_MATCHER: &str = "Read|Grep|Glob";
 
+const GEMINI_POST_HOOK_COMMAND: &str = "ecotokens hook-post-gemini";
+const GEMINI_POST_HOOK_MATCHER: &str = "read_file|search_file_content|list_directory";
+const QWEN_POST_HOOK_COMMAND: &str = "ecotokens hook-post-qwen";
+const QWEN_POST_HOOK_MATCHER: &str = "read_file|search_files|list_dir";
+
 fn read_settings(path: &Path) -> serde_json::Value {
     if path.exists() {
         let s = std::fs::read_to_string(path).unwrap_or_default();
@@ -255,20 +260,37 @@ pub fn is_gemini_mcp_registered(settings_path: &Path) -> bool {
     has_ecotokens_mcp_server(&read_settings(settings_path))
 }
 
-/// Shared logic: remove a hook + the MCP server entry from a settings file.
-fn uninstall_hook_and_mcp(settings_path: &Path, hook_type: &str, command: &str) -> InstallResult {
+/// Install the AfterTool post-hook for read_file/search_file_content/list_directory (idempotent).
+pub fn install_gemini_post_hook(settings_path: &Path) -> InstallResult {
+    let mut v = read_settings(settings_path);
+    let _ = install_hook_generic(
+        &mut v,
+        "AfterTool",
+        GEMINI_POST_HOOK_MATCHER,
+        GEMINI_POST_HOOK_COMMAND,
+    );
+    write_settings(settings_path, &v)
+}
+
+/// Check if the Gemini AfterTool post-hook is installed.
+pub fn is_gemini_post_hook_installed(settings_path: &Path) -> bool {
+    has_hook_command(
+        &read_settings(settings_path),
+        "AfterTool",
+        GEMINI_POST_HOOK_COMMAND,
+    )
+}
+
+/// Remove the ecotokens hook, post-hook, and MCP server from ~/.gemini/settings.json.
+pub fn uninstall_gemini(settings_path: &Path) -> InstallResult {
     if !settings_path.exists() {
         return Ok(());
     }
     let mut v = read_settings(settings_path);
-    remove_hook_generic(&mut v, hook_type, command);
+    remove_hook_generic(&mut v, "BeforeTool", GEMINI_HOOK_COMMAND);
+    remove_hook_generic(&mut v, "AfterTool", GEMINI_POST_HOOK_COMMAND);
     remove_ecotokens_mcp_server(&mut v);
     write_settings(settings_path, &v)
-}
-
-/// Remove the ecotokens hook and MCP server from ~/.gemini/settings.json.
-pub fn uninstall_gemini(settings_path: &Path) -> InstallResult {
-    uninstall_hook_and_mcp(settings_path, "BeforeTool", GEMINI_HOOK_COMMAND)
 }
 
 // ============================================================================
@@ -301,9 +323,37 @@ pub fn is_qwen_mcp_registered(settings_path: &Path) -> bool {
     has_ecotokens_mcp_server(&read_settings(settings_path))
 }
 
-/// Remove the ecotokens hook and MCP server from ~/.qwen/settings.json.
+/// Install the PostToolUse post-hook for read_file/search_files/list_dir (idempotent).
+pub fn install_qwen_post_hook(settings_path: &Path) -> InstallResult {
+    let mut v = read_settings(settings_path);
+    let _ = install_hook_generic(
+        &mut v,
+        "PostToolUse",
+        QWEN_POST_HOOK_MATCHER,
+        QWEN_POST_HOOK_COMMAND,
+    );
+    write_settings(settings_path, &v)
+}
+
+/// Check if the Qwen PostToolUse post-hook is installed.
+pub fn is_qwen_post_hook_installed(settings_path: &Path) -> bool {
+    has_hook_command(
+        &read_settings(settings_path),
+        "PostToolUse",
+        QWEN_POST_HOOK_COMMAND,
+    )
+}
+
+/// Remove the ecotokens hook, post-hook, and MCP server from ~/.qwen/settings.json.
 pub fn uninstall_qwen(settings_path: &Path) -> InstallResult {
-    uninstall_hook_and_mcp(settings_path, "PreToolUse", QWEN_HOOK_COMMAND)
+    if !settings_path.exists() {
+        return Ok(());
+    }
+    let mut v = read_settings(settings_path);
+    remove_hook_generic(&mut v, "PreToolUse", QWEN_HOOK_COMMAND);
+    remove_hook_generic(&mut v, "PostToolUse", QWEN_POST_HOOK_COMMAND);
+    remove_ecotokens_mcp_server(&mut v);
+    write_settings(settings_path, &v)
 }
 
 // ============================================================================
