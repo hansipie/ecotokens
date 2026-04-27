@@ -405,7 +405,7 @@ Output includes:
 hook_installed        : true
 debug                 : false
 exclusions            : []
-embed_provider        : ollama (http://localhost:11434)
+embed_provider        : ollama (http://localhost:11434) model=qwen3-embedding:latest
 ai_summary_enabled    : false
 ai_summary_model      : llama3.2:3b (default)
 ai_summary_url        : http://localhost:11434 (default)
