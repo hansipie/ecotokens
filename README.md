@@ -194,8 +194,8 @@ ecotokens uninstall --target all       # all targets
 
 | Command | Description |
 |---------|-------------|
-| `ecotokens install` | Install the PreToolUse + PostToolUse hooks in `~/.claude/settings.json` |
-| `ecotokens uninstall` | Remove the PreToolUse + PostToolUse hooks and MCP server entry |
+| `ecotokens install` | Install the PreToolUse + PostToolUse hooks and register the MCP server entry in `~/.claude/settings.json` |
+| `ecotokens uninstall` | Remove all hooks (PreToolUse, PostToolUse, SessionStart, SessionEnd) and the MCP server entry |
 | `ecotokens filter -- CMD [ARGS]` | Run a command, filter its output, record metrics |
 | `ecotokens filter --cwd DIR -- CMD [ARGS]` | Same, with an explicit working directory |
 | `ecotokens hook-post` | PostToolUse handler — intercept native tool results (Read, Grep, Glob) |
