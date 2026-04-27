@@ -107,6 +107,9 @@ enum Commands {
         /// URL of the embeddings provider (e.g. http://localhost:11434)
         #[arg(long)]
         embed_url: Option<String>,
+        /// Model name for the embeddings provider (e.g. mxbai-embed-large)
+        #[arg(long)]
+        embed_model: Option<String>,
     },
     /// Index a directory for BM25 + symbolic search
     Index {
@@ -140,6 +143,18 @@ enum Commands {
         top_k: usize,
         #[arg(long)]
         index_dir: Option<PathBuf>,
+        /// Lines of context to show around each match (default: 2)
+        #[arg(long, default_value = "2")]
+        context: usize,
+        /// Only return results from files matching this glob (repeatable)
+        #[arg(long = "include", value_name = "GLOB")]
+        include: Vec<String>,
+        /// Skip results from files matching this glob (repeatable)
+        #[arg(long = "exclude", value_name = "GLOB")]
+        exclude: Vec<String>,
+        /// Disable automatic trace augmentation for symbol queries
+        #[arg(long)]
+        no_trace: bool,
         #[arg(long)]
         json: bool,
     },
@@ -955,12 +970,19 @@ fn cmd_uninstall(target: String) {
     }
 }
 
-fn cmd_config(json: bool, embed_provider: Option<String>, embed_url: Option<String>) {
+fn cmd_config(
+    json: bool,
+    embed_provider: Option<String>,
+    embed_url: Option<String>,
+    embed_model: Option<String>,
+) {
     use config::settings::EmbedProvider;
 
     let mut settings = config::Settings::load();
     let settings_path = default_settings_path();
     let claude_json = default_claude_json_path();
+
+    let mut dirty = false;
 
     // Mutation via --embed-provider
     if let Some(ref provider_name) = embed_provider {
@@ -970,10 +992,17 @@ fn cmd_config(json: bool, embed_provider: Option<String>, embed_url: Option<Stri
             _ => "",
         };
         let url = embed_url.clone().unwrap_or_else(|| default_url.to_string());
+        let model = embed_model.clone();
 
         settings.embed_provider = match provider_name.as_str() {
-            "ollama" => EmbedProvider::Ollama { url },
-            "lmstudio" => EmbedProvider::LmStudio { url },
+            "ollama" => EmbedProvider::Ollama {
+                url,
+                model: model.unwrap_or_else(|| "nomic-embed-text".to_string()),
+            },
+            "lmstudio" => EmbedProvider::LmStudio {
+                url,
+                model: model.unwrap_or_else(|| "nomic-embed-text-v1.5".to_string()),
+            },
             "none" => EmbedProvider::None,
             other => {
                 eprintln!(
@@ -983,7 +1012,21 @@ fn cmd_config(json: bool, embed_provider: Option<String>, embed_url: Option<Stri
                 std::process::exit(1);
             }
         };
+        dirty = true;
+    } else if let Some(ref m) = embed_model {
+        // Changer uniquement le modèle sans toucher au provider
+        match &mut settings.embed_provider {
+            EmbedProvider::Ollama { model, .. } => *model = m.clone(),
+            EmbedProvider::LmStudio { model, .. } => *model = m.clone(),
+            EmbedProvider::None => {
+                eprintln!("no embed provider configured; set one first with --embed-provider");
+                std::process::exit(1);
+            }
+        }
+        dirty = true;
+    }
 
+    if dirty {
         match settings.save() {
             Ok(()) => eprintln!("embed_provider updated"),
             Err(e) => {
@@ -995,8 +1038,8 @@ fn cmd_config(json: bool, embed_provider: Option<String>, embed_url: Option<Stri
 
     let provider_str = match &settings.embed_provider {
         EmbedProvider::None => "none".to_string(),
-        EmbedProvider::Ollama { url } => format!("ollama ({})", url),
-        EmbedProvider::LmStudio { url } => format!("lmstudio ({})", url),
+        EmbedProvider::Ollama { url, model } => format!("ollama ({}) model={}", url, model),
+        EmbedProvider::LmStudio { url, model } => format!("lmstudio ({}) model={}", url, model),
     };
 
     let hook_installed = install::is_hook_installed(&settings_path);
@@ -1218,23 +1261,130 @@ fn cmd_symbol(id: String, index_dir: Option<PathBuf>) {
     }
 }
 
-fn cmd_search(query: String, top_k: usize, index_dir: Option<PathBuf>, json: bool) {
+fn glob_matches(pattern: &str, path: &str) -> bool {
+    if let Some(ext) = pattern.strip_prefix("*.") {
+        path.ends_with(&format!(".{ext}"))
+    } else {
+        path == pattern || path.ends_with(&format!("/{pattern}"))
+    }
+}
+
+fn git_root() -> Option<PathBuf> {
+    std::process::Command::new("git")
+        .args(["rev-parse", "--show-toplevel"])
+        .output()
+        .ok()
+        .filter(|o| o.status.success())
+        .and_then(|o| String::from_utf8(o.stdout).ok())
+        .map(|s| PathBuf::from(s.trim()))
+}
+
+struct SearchFlags {
+    context: usize,
+    include: Vec<String>,
+    exclude: Vec<String>,
+    no_trace: bool,
+    json: bool,
+}
+
+fn cmd_search(query: String, top_k: usize, index_dir: Option<PathBuf>, flags: SearchFlags) {
+    let using_global_index = index_dir.is_none();
     let idx_dir = index_dir.unwrap_or_else(default_index_dir);
     let embed_provider = config::Settings::load().embed_provider;
     let opts = search::query::SearchOptions {
-        query,
+        query: query.clone(),
         top_k,
-        index_dir: idx_dir,
+        index_dir: idx_dir.clone(),
         embed_provider,
     };
     match search::query::search_index(opts) {
-        Ok(results) => {
-            if json {
-                println!("{}", serde_json::to_string_pretty(&results).unwrap());
+        Ok(mut results) => {
+            // Restrict to current git project when using the global index
+            if using_global_index {
+                if let Some(root) = git_root() {
+                    results.retain(|r| root.join(&r.file_path).exists());
+                }
+            }
+
+            // #63 — glob filtering
+            if !flags.include.is_empty() || !flags.exclude.is_empty() {
+                results.retain(|r| {
+                    (flags.include.is_empty()
+                        || flags.include.iter().any(|p| glob_matches(p, &r.file_path)))
+                        && !flags.exclude.iter().any(|p| glob_matches(p, &r.file_path))
+                });
+            }
+
+            // #62 — deduplication: skip same file+chunk with score within 0.5 of a kept result
+            let mut kept: Vec<&search::query::SearchResult> = Vec::new();
+            for r in &results {
+                let chunk = r.line_start / 50;
+                let duplicate = kept.iter().any(|k| {
+                    k.file_path == r.file_path
+                        && k.line_start / 50 == chunk
+                        && (k.score - r.score).abs() < 0.5
+                });
+                if !duplicate {
+                    kept.push(r);
+                }
+            }
+
+            if flags.json {
+                // #64 — augment JSON output with callers if applicable
+                #[derive(serde::Serialize)]
+                struct SearchOutput<'a> {
+                    results: Vec<&'a search::query::SearchResult>,
+                    callers: Vec<trace::CallEdge>,
+                }
+                let callers = if flags.no_trace {
+                    vec![]
+                } else {
+                    trace::callers::find_callers(&query, &idx_dir).unwrap_or_default()
+                };
+                let out = SearchOutput {
+                    results: kept,
+                    callers,
+                };
+                println!("{}", serde_json::to_string_pretty(&out).unwrap());
             } else {
-                for r in &results {
-                    println!("{} (score: {:.3})", r.file_path, r.score);
-                    println!("  {}", r.snippet.lines().next().unwrap_or(""));
+                // #62 — line numbers + context around the matching line
+                let terms: Vec<String> =
+                    query.split_whitespace().map(|t| t.to_lowercase()).collect();
+                for r in &kept {
+                    let lines: Vec<&str> = r.snippet.lines().collect();
+                    // Find the first line that contains a query term (case-insensitive)
+                    let match_offset = lines
+                        .iter()
+                        .position(|l| {
+                            let lower = l.to_lowercase();
+                            terms.iter().any(|t| lower.contains(t.as_str()))
+                        })
+                        .unwrap_or(0);
+                    let start = match_offset.saturating_sub(flags.context);
+                    let end = (match_offset + flags.context + 1).min(lines.len());
+                    let abs_line = r.line_start + 1;
+                    println!(
+                        "{}:{} (score: {:.3})",
+                        r.file_path,
+                        abs_line + match_offset as u64,
+                        r.score
+                    );
+                    for (i, line) in lines[start..end].iter().enumerate() {
+                        println!("  {}:  {}", abs_line + (start + i) as u64, line);
+                    }
+                    println!();
+                }
+
+                // #64 — trace augmentation
+                if !flags.no_trace {
+                    let callers =
+                        trace::callers::find_callers(&query, &idx_dir).unwrap_or_default();
+                    if !callers.is_empty() {
+                        println!("# Symbol match — call sites via trace");
+                        for c in &callers {
+                            println!("  {}:{} [caller]  {}", c.file_path, c.line + 1, c.name);
+                        }
+                    }
                 }
             }
         }
@@ -2087,7 +2237,8 @@ fn main() {
             json,
             embed_provider,
             embed_url,
-        } => cmd_config(json, embed_provider, embed_url),
+            embed_model,
+        } => cmd_config(json, embed_provider, embed_url, embed_model),
         Commands::Index {
             path,
             index_dir,
@@ -2104,8 +2255,23 @@ fn main() {
             query,
             top_k,
             index_dir,
+            context,
+            include,
+            exclude,
+            no_trace,
             json,
-        } => cmd_search(query, top_k, index_dir, json),
+        } => cmd_search(
+            query,
+            top_k,
+            index_dir,
+            SearchFlags {
+                context,
+                include,
+                exclude,
+                no_trace,
+                json,
+            },
+        ),
         Commands::Trace { action } => match action {
             TraceAction::Callers {
                 symbol,
