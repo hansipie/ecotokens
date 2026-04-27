@@ -199,20 +199,25 @@ pub fn is_mcp_registered(claude_json_path: &Path) -> bool {
     has_ecotokens_mcp_server(&read_settings(claude_json_path))
 }
 
-/// Remove the ecotokens PreToolUse hook from ~/.claude/settings.json and
-/// the MCP server entry from ~/.claude.json (both idempotent).
+/// Remove all ecotokens hooks and MCP server entry from ~/.claude/settings.json.
+/// Also cleans up ~/.claude.json for backward compatibility with older installs.
 pub fn uninstall_hook(settings_path: &Path, claude_json_path: &Path) -> InstallResult {
     if settings_path.exists() {
         let mut v = read_settings(settings_path);
         remove_hook_generic(&mut v, "PreToolUse", HOOK_COMMAND);
         remove_hook_generic(&mut v, "PostToolUse", POST_HOOK_COMMAND);
+        remove_hook_generic(&mut v, "SessionStart", SESSION_START_COMMAND);
+        remove_hook_generic(&mut v, "SessionEnd", SESSION_END_COMMAND);
+        remove_ecotokens_mcp_server(&mut v);
         write_settings(settings_path, &v)?;
     }
 
+    // Rétrocompatibilité : anciennes installs où le MCP était dans ~/.claude.json
     if claude_json_path.exists() {
         let mut cv = read_settings(claude_json_path);
-        remove_ecotokens_mcp_server(&mut cv);
-        write_settings(claude_json_path, &cv)?;
+        if remove_ecotokens_mcp_server(&mut cv) {
+            write_settings(claude_json_path, &cv)?;
+        }
     }
 
     Ok(())

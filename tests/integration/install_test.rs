@@ -3,10 +3,10 @@ mod helpers;
 use helpers::ecotokens_bin;
 
 use ecotokens::install::{
-    install_gemini_hook, install_hook, install_post_hook, install_qwen_hook,
-    is_gemini_hook_installed, is_gemini_mcp_registered, is_post_hook_installed,
-    is_qwen_hook_installed, is_qwen_mcp_registered, uninstall_gemini, uninstall_hook,
-    uninstall_qwen,
+    are_session_hooks_installed, install_gemini_hook, install_hook, install_mcp_server,
+    install_post_hook, install_qwen_hook, install_session_hooks, is_gemini_hook_installed,
+    is_gemini_mcp_registered, is_mcp_registered, is_post_hook_installed, is_qwen_hook_installed,
+    is_qwen_mcp_registered, uninstall_gemini, uninstall_hook, uninstall_qwen,
 };
 use std::process::Command;
 use tempfile::TempDir;
@@ -660,5 +660,55 @@ fn uninstall_removes_post_hook() {
     assert!(
         post_hooks.is_null() || post_hooks.as_array().map(|a| a.is_empty()).unwrap_or(false),
         "PostToolUse array should be empty or absent"
+    );
+}
+
+#[test]
+fn uninstall_removes_mcp_from_settings_json() {
+    let dir = TempDir::new().unwrap();
+    let settings_path = temp_claude_settings(&dir);
+    let claude_json = temp_claude_json(&dir);
+
+    install_mcp_server(&settings_path).unwrap();
+    assert!(
+        is_mcp_registered(&settings_path),
+        "MCP should be present after install"
+    );
+
+    uninstall_hook(&settings_path, &claude_json).unwrap();
+    assert!(
+        !is_mcp_registered(&settings_path),
+        "MCP should be removed from settings.json after uninstall"
+    );
+}
+
+#[test]
+fn uninstall_removes_session_hooks() {
+    let dir = TempDir::new().unwrap();
+    let settings_path = temp_claude_settings(&dir);
+    let claude_json = temp_claude_json(&dir);
+
+    install_session_hooks(&settings_path).unwrap();
+    assert!(are_session_hooks_installed(&settings_path));
+
+    uninstall_hook(&settings_path, &claude_json).unwrap();
+    assert!(
+        !are_session_hooks_installed(&settings_path),
+        "SessionStart/SessionEnd hooks should be removed after uninstall"
+    );
+}
+
+#[test]
+fn uninstall_session_hooks_absent_is_ok() {
+    let dir = TempDir::new().unwrap();
+    let settings_path = temp_claude_settings(&dir);
+    let claude_json = temp_claude_json(&dir);
+
+    install_hook(&settings_path, &claude_json).unwrap();
+    // Pas de session hooks — uninstall ne doit pas paniquer
+    let result = uninstall_hook(&settings_path, &claude_json);
+    assert!(
+        result.is_ok(),
+        "uninstall without session hooks should be Ok"
     );
 }
