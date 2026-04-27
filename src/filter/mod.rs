@@ -148,7 +148,13 @@ pub fn run_filter_pipeline_with_cwd(
         let masked_tokens = crate::tokens::count_tokens(&masked) as u32;
         let filtered_tokens = crate::tokens::count_tokens(&f) as u32;
         if f == masked || (masked_tokens > 0 && filtered_tokens >= masked_tokens) {
-            f = ai_summary::ai_summary_or_fallback(&masked, &settings);
+            let candidate = ai_summary::ai_summary_or_fallback(&masked, &settings);
+            let candidate_tokens = crate::tokens::count_tokens(&candidate) as u32;
+            if masked_tokens > 0 && candidate_tokens < masked_tokens {
+                f = candidate;
+            } else {
+                f = masked.clone();
+            }
         }
         f
     };

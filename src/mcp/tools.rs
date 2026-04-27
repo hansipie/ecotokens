@@ -3,66 +3,34 @@ use serde::Deserialize;
 
 /// Deserialize an optional integer that may arrive as a JSON string or number.
 /// Claude Code sometimes sends numeric parameters as strings (e.g. `"5"` instead of `5`).
-fn de_opt_usize<'de, D>(d: D) -> Result<Option<usize>, D::Error>
-where
-    D: serde::Deserializer<'de>,
-{
-    let v = Option::<serde_json::Value>::deserialize(d)?;
-    match v {
-        None => Ok(None),
-        Some(serde_json::Value::Number(n)) => n
-            .as_u64()
-            .map(|n| Some(n as usize))
-            .ok_or_else(|| serde::de::Error::custom("expected non-negative integer")),
-        Some(serde_json::Value::String(s)) => s
-            .parse::<usize>()
-            .map(Some)
-            .map_err(serde::de::Error::custom),
-        Some(other) => Err(serde::de::Error::custom(format!(
-            "expected number or string, got {other}"
-        ))),
-    }
+macro_rules! impl_de_opt_num {
+    ($name:ident, $type:ty, $as_method:ident, $err_msg:expr) => {
+        fn $name<'de, D>(d: D) -> Result<Option<$type>, D::Error>
+        where
+            D: serde::Deserializer<'de>,
+        {
+            let v = Option::<serde_json::Value>::deserialize(d)?;
+            match v {
+                None => Ok(None),
+                Some(serde_json::Value::Number(n)) => n
+                    .$as_method()
+                    .map(|n| Some(n as $type))
+                    .ok_or_else(|| serde::de::Error::custom($err_msg)),
+                Some(serde_json::Value::String(s)) => s
+                    .parse::<$type>()
+                    .map(Some)
+                    .map_err(serde::de::Error::custom),
+                Some(other) => Err(serde::de::Error::custom(format!(
+                    "expected number or string, got {other}"
+                ))),
+            }
+        }
+    };
 }
 
-fn de_opt_u32<'de, D>(d: D) -> Result<Option<u32>, D::Error>
-where
-    D: serde::Deserializer<'de>,
-{
-    let v = Option::<serde_json::Value>::deserialize(d)?;
-    match v {
-        None => Ok(None),
-        Some(serde_json::Value::Number(n)) => n
-            .as_u64()
-            .map(|n| Some(n as u32))
-            .ok_or_else(|| serde::de::Error::custom("expected non-negative integer")),
-        Some(serde_json::Value::String(s)) => {
-            s.parse::<u32>().map(Some).map_err(serde::de::Error::custom)
-        }
-        Some(other) => Err(serde::de::Error::custom(format!(
-            "expected number or string, got {other}"
-        ))),
-    }
-}
-
-fn de_opt_f32<'de, D>(d: D) -> Result<Option<f32>, D::Error>
-where
-    D: serde::Deserializer<'de>,
-{
-    let v = Option::<serde_json::Value>::deserialize(d)?;
-    match v {
-        None => Ok(None),
-        Some(serde_json::Value::Number(n)) => n
-            .as_f64()
-            .map(|n| Some(n as f32))
-            .ok_or_else(|| serde::de::Error::custom("expected number")),
-        Some(serde_json::Value::String(s)) => {
-            s.parse::<f32>().map(Some).map_err(serde::de::Error::custom)
-        }
-        Some(other) => Err(serde::de::Error::custom(format!(
-            "expected number or string, got {other}"
-        ))),
-    }
-}
+impl_de_opt_num!(de_opt_usize, usize, as_u64, "expected non-negative integer");
+impl_de_opt_num!(de_opt_u32, u32, as_u64, "expected non-negative integer");
+impl_de_opt_num!(de_opt_f32, f32, as_f64, "expected number");
 
 #[derive(Debug, Deserialize, schemars::JsonSchema)]
 pub struct SearchParams {

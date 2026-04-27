@@ -192,7 +192,16 @@ impl Settings {
         let Ok(data) = std::fs::read_to_string(path) else {
             return LegacySettingsFile::default();
         };
-        serde_json::from_str(&data).unwrap_or_default()
+        match serde_json::from_str(&data) {
+            Ok(parsed) => parsed,
+            Err(e) => {
+                eprintln!(
+                    "ecotokens: warning: failed to parse {} ({e}); using default settings",
+                    path.display()
+                );
+                LegacySettingsFile::default()
+            }
+        }
     }
 
     fn load_abbreviations(path: &Path) -> Option<HashMap<String, String>> {
