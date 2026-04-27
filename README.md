@@ -29,6 +29,7 @@ Token-saving companion for [Claude Code](https://claude.ai/code), [Gemini CLI](h
 | **Multi-agent support** | Works with Claude Code, Gemini CLI, Qwen Code, and Pi out of the box |
 | **Precision guarantees** | Errors, failures, and stack traces are never removed; secrets are redacted before filtering |
 | **Code intelligence** | BM25 + semantic search, symbol lookup, call graph tracing, near-duplicate detection |
+| **MCP server** *(Claude Code, Gemini CLI, Qwen Code)* | Exposes code-intelligence tools over stdio (`ecotokens mcp-server`) and auto-registers in agent settings on install |
 | **AI summarization** *(optional)* | Large outputs compressed by a local Ollama model instead of being truncated |
 | **Word abbreviations** *(optional)* | Replace common words with shorter forms (`function`→`fn`, `configuration`→`config`, …) in narrative text, and nudge the model to do the same via a SessionStart instruction |
 | **Zero config** | One `ecotokens install` command — works automatically from there |
@@ -100,6 +101,19 @@ cargo install --path .
 ecotokens install
 ```
 
+In addition to hook installation, this also registers an MCP server entry in `~/.claude/settings.json`:
+
+```json
+{
+  "mcpServers": {
+    "ecotokens": {
+      "command": "ecotokens",
+      "args": ["mcp-server"]
+    }
+  }
+}
+```
+
 ### Gemini CLI
 
 Requires [Gemini CLI](https://github.com/google-gemini/gemini-cli) ≥ 0.1.0.
@@ -111,6 +125,8 @@ ecotokens install --target gemini
 
 This writes `BeforeTool` and `AfterTool` hook entries into `~/.gemini/settings.json`. The `AfterTool` hook intercepts `read_file`, `search_file_content`, and `list_directory` results.
 
+It also registers the ecotokens MCP server in `~/.gemini/settings.json`.
+
 ### Qwen Code
 
 Requires [Qwen Code](https://github.com/QwenLM/qwen-code).
@@ -121,6 +137,8 @@ ecotokens install --target qwen
 ```
 
 This writes `PreToolUse` and `PostToolUse` hook entries into `~/.qwen/settings.json`. The `PostToolUse` hook intercepts `read_file`, `search_files`, and `list_dir` results.
+
+It also registers the ecotokens MCP server in `~/.qwen/settings.json`.
 
 ### Pi
 
@@ -193,6 +211,7 @@ ecotokens uninstall --target all       # all targets
 | `ecotokens trace callers SYMBOL` | Find callers of a symbol |
 | `ecotokens trace callees SYMBOL` | Find callees of a symbol |
 | `ecotokens watch [--path DIR]` | Watch a directory and keep the index up to date |
+| `ecotokens mcp-server [--index-dir DIR]` | Start the stdio MCP server exposing search/outline/symbol/trace/duplicates tools |
 | `ecotokens auto-watch enable` | Start watch automatically on each Claude Code session |
 | `ecotokens auto-watch disable` | Disable automatic watch |
 | `ecotokens abbreviations enable` | Replace common words with abbreviations in filtered outputs + inject a matching instruction at SessionStart |
@@ -344,6 +363,26 @@ Keep the feature flag in `~/.config/ecotokens/config.json`
 ## Bonus Tools
 
 _Less code is less tokens_
+
+### MCP server (Claude Code)
+
+`ecotokens mcp-server` starts a stdio MCP server backed by the ecotokens index and trace engines.
+
+```bash
+ecotokens mcp-server
+ecotokens mcp-server --index-dir ~/.config/ecotokens/index
+```
+
+Exposed tools:
+
+- `ecotokens_search` — BM25 + semantic search
+- `ecotokens_outline` — symbol outline for file/directory
+- `ecotokens_symbol` — fetch full symbol source by stable ID
+- `ecotokens_trace_callers` — find callers of a symbol
+- `ecotokens_trace_callees` — find callees (with depth)
+- `ecotokens_duplicates` — detect near-duplicate code blocks
+
+For Claude Code, Gemini CLI, and Qwen Code, `ecotokens install` registers this server automatically in each target's settings file.
 
 ### Search command
 

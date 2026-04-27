@@ -18,6 +18,7 @@ mod filter;
 mod hook;
 mod install;
 mod masking;
+mod mcp;
 mod metrics;
 mod search;
 mod tokens;
@@ -233,6 +234,11 @@ enum Commands {
         /// Only check for updates, do not install
         #[arg(long)]
         check: bool,
+    },
+    /// Start the MCP server (stdio transport — for Claude Code mcpServers registration)
+    McpServer {
+        #[arg(long)]
+        index_dir: Option<PathBuf>,
     },
 }
 
@@ -705,6 +711,18 @@ fn cmd_install(target: String, ai_summary: bool, ai_summary_model: Option<String
                 std::process::exit(1);
             }
         }
+        match install::install_mcp_server(&claude_path) {
+            Ok(()) => {
+                println!(
+                    "ecotokens MCP server registered → {}",
+                    claude_path.display()
+                );
+            }
+            Err(e) => {
+                eprintln!("install error (mcp server): {e}");
+                std::process::exit(1);
+            }
+        }
     }
 
     if install_gemini {
@@ -723,6 +741,15 @@ fn cmd_install(target: String, ai_summary: bool, ai_summary_model: Option<String
                     }
                     Err(e) => {
                         eprintln!("install error (gemini post-hook): {e}");
+                        std::process::exit(1);
+                    }
+                }
+                match install::install_mcp_server(p) {
+                    Ok(()) => {
+                        println!("ecotokens MCP server registered (Gemini) → {}", p.display())
+                    }
+                    Err(e) => {
+                        eprintln!("install error (gemini mcp server): {e}");
                         std::process::exit(1);
                     }
                 }
@@ -753,6 +780,18 @@ fn cmd_install(target: String, ai_summary: bool, ai_summary_model: Option<String
                     }
                     Err(e) => {
                         eprintln!("install error (qwen post-hook): {e}");
+                        std::process::exit(1);
+                    }
+                }
+                match install::install_mcp_server(p) {
+                    Ok(()) => {
+                        println!(
+                            "ecotokens MCP server registered (Qwen Code) → {}",
+                            p.display()
+                        )
+                    }
+                    Err(e) => {
+                        eprintln!("install error (qwen mcp server): {e}");
                         std::process::exit(1);
                     }
                 }
@@ -2319,5 +2358,14 @@ fn main() {
             AbbreviationsAction::Disable => cmd_abbreviations_disable(),
             AbbreviationsAction::List => cmd_abbreviations_list(),
         },
+        Commands::McpServer { index_dir } => {
+            let idx_dir = index_dir.unwrap_or_else(default_index_dir);
+            let rt = tokio::runtime::Builder::new_current_thread()
+                .enable_all()
+                .build()
+                .expect("tokio runtime");
+            rt.block_on(mcp::server::run_server(idx_dir))
+                .expect("mcp server error");
+        }
     }
 }

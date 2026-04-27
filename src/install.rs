@@ -149,6 +149,22 @@ fn remove_ecotokens_mcp_server(v: &mut serde_json::Value) -> bool {
 // Claude Code - PreToolUse hook
 // ============================================================================
 
+/// Install the ecotokens MCP server entry into a settings JSON file (idempotent).
+pub fn install_mcp_server(settings_path: &Path) -> InstallResult {
+    let binary = std::env::current_exe()
+        .unwrap_or_else(|_| std::path::PathBuf::from("ecotokens"))
+        .to_string_lossy()
+        .into_owned();
+    let mut v = read_settings(settings_path);
+    if !has_ecotokens_mcp_server(&v) {
+        v["mcpServers"]["ecotokens"] = serde_json::json!({
+            "command": binary,
+            "args": ["mcp-server"]
+        });
+    }
+    write_settings(settings_path, &v)
+}
+
 /// Install the PreToolUse hook into ~/.claude/settings.json (idempotent).
 pub fn install_hook(settings_path: &Path, claude_json_path: &Path) -> InstallResult {
     let _ = claude_json_path; // kept for signature compatibility with uninstall callers
