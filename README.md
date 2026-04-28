@@ -203,7 +203,7 @@ ecotokens uninstall --target all       # all targets
 | `ecotokens gain --period PERIOD` | Filter TUI to a time window (`all`, `today`, `week`, `month`) |
 | `ecotokens gain --history` | Print a savings summary table for 24h / 7 days / 30 days |
 | `ecotokens gain --json` | JSON report |
-| `ecotokens config` | Show current configuration |
+| `ecotokens config [--debug true\|false]` | Show or update global configuration (including debug mode) |
 | `ecotokens index [--path DIR]` | Index a codebase for BM25 + symbolic search |
 | `ecotokens search QUERY [--context N] [--include GLOB] [--exclude GLOB] [--no-trace]` | Search the indexed codebase with line numbers, context, and optional trace augmentation |
 | `ecotokens outline PATH` | List symbols in a file or directory |
@@ -268,11 +268,13 @@ The output is compressed by the same family-specific filters used by the hook, a
 ```bash
 ecotokens watch                    # foreground, TUI progress
 ecotokens watch --path ./src       # watch a specific directory
-ecotokens watch --background       # fork to background, log to stdout
+ecotokens watch --background       # fork to background
 ecotokens watch --status           # show status of background process
 ecotokens watch --status --json    # JSON status output
 ecotokens watch --stop             # stop the background process
 ```
+
+> **Note:** Background logs are only written if global `debug` is enabled (`ecotokens config --debug true`).
 
 ### Auto-watch *(Claude Code <del>& Qwen Code</del>)*
 
@@ -437,6 +439,17 @@ Each group shows the file paths, line ranges, similarity score, and a refactorin
 ecotokens config           # show all settings (text)
 ecotokens config --json    # show all settings (JSON)
 ```
+
+### Debug mode
+
+Enable the global debug mode to see detailed interception logs and enable background logging for the `watch` command:
+
+```bash
+ecotokens config --debug true
+ecotokens config --debug false
+```
+
+This updates the `debug` field in `~/.config/ecotokens/config.json`.
 
 Output includes:
 

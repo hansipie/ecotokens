@@ -102,6 +102,9 @@ enum Commands {
     Config {
         #[arg(long)]
         json: bool,
+        /// Set global debug mode
+        #[arg(long, value_name = "true|false")]
+        debug: Option<bool>,
         /// Set embed provider: ollama, lmstudio, none
         #[arg(long)]
         embed_provider: Option<String>,
@@ -359,7 +362,8 @@ fn cmd_filter(args: Vec<String>, debug: bool, cwd: Option<PathBuf>) {
     let (filtered, tokens_before, tokens_after) =
         filter::run_filter_pipeline_with_cwd(&command, &raw, duration_ms, cwd.as_deref());
 
-    if debug {
+    let settings = config::Settings::load();
+    if debug || settings.debug {
         eprintln!("[ecotokens debug] command={command} tokens_before={tokens_before} tokens_after={tokens_after}");
     }
 
@@ -1022,6 +1026,7 @@ fn cmd_uninstall(target: String) {
 
 fn cmd_config(
     json: bool,
+    debug: Option<bool>,
     embed_provider: Option<String>,
     embed_url: Option<String>,
     embed_model: Option<String>,
@@ -1032,6 +1037,11 @@ fn cmd_config(
     let settings_path = default_settings_path();
 
     let mut dirty = false;
+
+    if let Some(d) = debug {
+        settings.debug = d;
+        dirty = true;
+    }
 
     // Mutation via --embed-provider
     if let Some(ref provider_name) = embed_provider {
@@ -1077,7 +1087,7 @@ fn cmd_config(
 
     if dirty {
         match settings.save() {
-            Ok(()) => eprintln!("embed_provider updated"),
+            Ok(()) => eprintln!("settings updated"),
             Err(e) => {
                 eprintln!("save error: {e}");
                 std::process::exit(1);
@@ -1759,16 +1769,15 @@ fn cmd_watch(
             daemon::watcher::watch_directory(&watch_path_clone, &idx_dir_clone, event_tx, stop_rx)
         });
 
-        // Background mode: log events to watch.log
-        let log_file = config::SessionStore::load()
-            .log_file_for(&watch_path_str)
-            .map(std::path::PathBuf::from);
-
-        if log_file.is_none() {
-            eprintln!(
-                "ecotokens watch: warning: no log file configured, events will not be recorded"
-            );
-        }
+        // Background mode: log events to watch.log (only if debug is enabled)
+        let settings = config::Settings::load();
+        let log_file = if settings.debug {
+            config::SessionStore::load()
+                .log_file_for(&watch_path_str)
+                .map(std::path::PathBuf::from)
+        } else {
+            None
+        };
 
         while let Ok(e) = event_rx.recv() {
             if let Some(ref path) = log_file {
@@ -2058,10 +2067,12 @@ fn cmd_session_start() {
         let _ = store.save();
 
         if decision.reused_existing_watcher {
-            eprintln!(
-                "ecotokens auto-watch: CWD is covered by existing watch on {}, skipping.",
-                decision.watch_path
-            );
+            if settings.debug {
+                eprintln!(
+                    "ecotokens auto-watch: CWD is covered by existing watch on {}, skipping.",
+                    decision.watch_path
+                );
+            }
         } else if decision.needs_watcher {
             let _ = std::process::Command::new("ecotokens")
                 .args(["watch", "--background", "--path", &decision.watch_path])
@@ -2284,10 +2295,11 @@ fn main() {
         Commands::Uninstall { target } => cmd_uninstall(target),
         Commands::Config {
             json,
+            debug,
             embed_provider,
             embed_url,
             embed_model,
-        } => cmd_config(json, embed_provider, embed_url, embed_model),
+        } => cmd_config(json, debug, embed_provider, embed_url, embed_model),
         Commands::Index {
             path,
             index_dir,

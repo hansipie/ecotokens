@@ -268,5 +268,9 @@ name = "duplicates_integration_test"
 path = "tests/duplicates/integration_test.rs"
 
 [[test]]
+name = "config_integration_test"
+path = "tests/integration/config_test.rs"
+
+[[test]]
 name = "abbreviations_test"
 path = "tests/abbreviations/abbreviate_test.rs"
