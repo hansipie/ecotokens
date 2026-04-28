@@ -49,6 +49,8 @@ pub const DEFAULT_PAIRS: &[(&str, &str)] = &[
 
 /// Merge the default dictionary with user-provided overrides.
 /// User entries win over defaults when both define the same lowercase key.
+/// Custom keys are normalized to lowercase, so mixed-case variants map to the
+/// same entry and the last inserted value wins.
 pub fn merged_pairs(custom: &HashMap<String, String>) -> Vec<(String, String)> {
     let mut map: HashMap<String, String> = DEFAULT_PAIRS
         .iter()

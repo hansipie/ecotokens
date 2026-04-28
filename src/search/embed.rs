@@ -2,7 +2,7 @@ use crate::config::settings::EmbedProvider;
 
 /// Configuration for an embedding provider API.
 struct EmbedConfig<'a> {
-    url_pattern: &'a str, // e.g., "{}/api/embeddings" or "{}/v1/embeddings"
+    url_path: &'a str, // e.g., "/api/embeddings" or "/v1/embeddings"
     model: &'a str,
     input_field: &'a str,    // e.g., "prompt" or "input"
     embedding_path: &'a str, // e.g., "embedding" or "data[0].embedding"
@@ -15,11 +15,7 @@ fn fetch_embedding(text: &str, base_url: &str, config: &EmbedConfig) -> Result<V
         .build()
         .map_err(|e| format!("client error: {e}"))?;
 
-    let url = format!(
-        "{}{}",
-        base_url.trim_end_matches('/'),
-        config.url_pattern.replace("{}", "")
-    );
+    let url = format!("{}{}", base_url.trim_end_matches('/'), config.url_path);
     let body = serde_json::json!({
         "model": config.model,
         config.input_field: text
@@ -57,7 +53,7 @@ pub fn embed_text(text: &str, provider: &EmbedProvider) -> Option<Vec<f32>> {
         EmbedProvider::None => None,
         EmbedProvider::Ollama { url, model } => {
             let config = EmbedConfig {
-                url_pattern: "{}/api/embeddings",
+                url_path: "/api/embeddings",
                 model,
                 input_field: "prompt",
                 embedding_path: "embedding",
@@ -66,7 +62,7 @@ pub fn embed_text(text: &str, provider: &EmbedProvider) -> Option<Vec<f32>> {
         }
         EmbedProvider::LmStudio { url, model } => {
             let config = EmbedConfig {
-                url_pattern: "{}/v1/embeddings",
+                url_path: "/v1/embeddings",
                 model,
                 input_field: "input",
                 embedding_path: "data[0].embedding",
@@ -74,30 +70,6 @@ pub fn embed_text(text: &str, provider: &EmbedProvider) -> Option<Vec<f32>> {
             fetch_embedding(text, url, &config).ok()
         }
     }
-}
-
-/// Appel HTTP vers l'API Ollama pour obtenir l'embedding d'un texte.
-#[allow(dead_code)]
-pub fn get_ollama_embedding(text: &str, base_url: &str) -> Result<Vec<f32>, String> {
-    let config = EmbedConfig {
-        url_pattern: "{}/api/embeddings",
-        model: "nomic-embed-text",
-        input_field: "prompt",
-        embedding_path: "embedding",
-    };
-    fetch_embedding(text, base_url, &config)
-}
-
-/// Appel HTTP vers l'API LM Studio (format OpenAI-compatible) pour obtenir l'embedding.
-#[allow(dead_code)]
-pub fn get_lmstudio_embedding(text: &str, base_url: &str) -> Result<Vec<f32>, String> {
-    let config = EmbedConfig {
-        url_pattern: "{}/v1/embeddings",
-        model: "nomic-embed-text-v1.5",
-        input_field: "input",
-        embedding_path: "data[0].embedding",
-    };
-    fetch_embedding(text, base_url, &config)
 }
 
 /// Similarité cosinus entre deux vecteurs de même dimension.

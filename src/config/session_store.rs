@@ -188,7 +188,8 @@ impl SessionStore {
 pub fn is_pid_running(pid: u32) -> bool {
     #[cfg(target_os = "linux")]
     {
-        std::path::Path::new(&format!("/proc/{pid}")).exists()
+        let proc_entry = std::path::Path::new("/proc").join(pid.to_string());
+        proc_entry.exists()
     }
     #[cfg(all(unix, not(target_os = "linux")))]
     {

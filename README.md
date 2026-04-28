@@ -29,6 +29,7 @@ Token-saving companion for [Claude Code](https://claude.ai/code), [Gemini CLI](h
 | **Multi-agent support** | Works with Claude Code, Gemini CLI, Qwen Code, and Pi out of the box |
 | **Precision guarantees** | Errors, failures, and stack traces are never removed; secrets are redacted before filtering |
 | **Code intelligence** | BM25 + semantic search, symbol lookup, call graph tracing, near-duplicate detection |
+| **MCP server** *(Claude Code, Gemini CLI, Qwen Code)* | Exposes code-intelligence tools over stdio (`ecotokens mcp-server`) and auto-registers in agent settings on install |
 | **AI summarization** *(optional)* | Large outputs compressed by a local Ollama model instead of being truncated |
 | **Word abbreviations** *(optional)* | Replace common words with shorter forms (`function`→`fn`, `configuration`→`config`, …) in narrative text, and nudge the model to do the same via a SessionStart instruction |
 | **Zero config** | One `ecotokens install` command — works automatically from there |
@@ -100,6 +101,19 @@ cargo install --path .
 ecotokens install
 ```
 
+In addition to hook installation, this also registers an MCP server entry in `~/.claude/settings.json`:
+
+```json
+{
+  "mcpServers": {
+    "ecotokens": {
+      "command": "ecotokens",
+      "args": ["mcp-server"]
+    }
+  }
+}
+```
+
 ### Gemini CLI
 
 Requires [Gemini CLI](https://github.com/google-gemini/gemini-cli) ≥ 0.1.0.
@@ -111,6 +125,8 @@ ecotokens install --target gemini
 
 This writes `BeforeTool` and `AfterTool` hook entries into `~/.gemini/settings.json`. The `AfterTool` hook intercepts `read_file`, `search_file_content`, and `list_directory` results.
 
+It also registers the ecotokens MCP server in `~/.gemini/settings.json`.
+
 ### Qwen Code
 
 Requires [Qwen Code](https://github.com/QwenLM/qwen-code).
@@ -121,6 +137,8 @@ ecotokens install --target qwen
 ```
 
 This writes `PreToolUse` and `PostToolUse` hook entries into `~/.qwen/settings.json`. The `PostToolUse` hook intercepts `read_file`, `search_files`, and `list_dir` results.
+
+It also registers the ecotokens MCP server in `~/.qwen/settings.json`.
 
 ### Pi
 
@@ -176,8 +194,8 @@ ecotokens uninstall --target all       # all targets
 
 | Command | Description |
 |---------|-------------|
-| `ecotokens install` | Install the PreToolUse + PostToolUse hooks in `~/.claude/settings.json` |
-| `ecotokens uninstall` | Remove the hooks |
+| `ecotokens install` | Install the PreToolUse + PostToolUse hooks and register the MCP server entry in `~/.claude/settings.json` |
+| `ecotokens uninstall` | Remove all hooks (PreToolUse, PostToolUse, SessionStart, SessionEnd) and the MCP server entry |
 | `ecotokens filter -- CMD [ARGS]` | Run a command, filter its output, record metrics |
 | `ecotokens filter --cwd DIR -- CMD [ARGS]` | Same, with an explicit working directory |
 | `ecotokens hook-post` | PostToolUse handler — intercept native tool results (Read, Grep, Glob) |
@@ -185,7 +203,7 @@ ecotokens uninstall --target all       # all targets
 | `ecotokens gain --period PERIOD` | Filter TUI to a time window (`all`, `today`, `week`, `month`) |
 | `ecotokens gain --history` | Print a savings summary table for 24h / 7 days / 30 days |
 | `ecotokens gain --json` | JSON report |
-| `ecotokens config` | Show current configuration |
+| `ecotokens config [--debug true\|false]` | Show or update global configuration (including debug mode) |
 | `ecotokens index [--path DIR]` | Index a codebase for BM25 + symbolic search |
 | `ecotokens search QUERY [--context N] [--include GLOB] [--exclude GLOB] [--no-trace]` | Search the indexed codebase with line numbers, context, and optional trace augmentation |
 | `ecotokens outline PATH` | List symbols in a file or directory |
@@ -193,6 +211,7 @@ ecotokens uninstall --target all       # all targets
 | `ecotokens trace callers SYMBOL` | Find callers of a symbol |
 | `ecotokens trace callees SYMBOL` | Find callees of a symbol |
 | `ecotokens watch [--path DIR]` | Watch a directory and keep the index up to date |
+| `ecotokens mcp-server [--index-dir DIR]` | Start the stdio MCP server exposing search/outline/symbol/trace/duplicates tools |
 | `ecotokens auto-watch enable` | Start watch automatically on each Claude Code session |
 | `ecotokens auto-watch disable` | Disable automatic watch |
 | `ecotokens abbreviations enable` | Replace common words with abbreviations in filtered outputs + inject a matching instruction at SessionStart |
@@ -249,11 +268,13 @@ The output is compressed by the same family-specific filters used by the hook, a
 ```bash
 ecotokens watch                    # foreground, TUI progress
 ecotokens watch --path ./src       # watch a specific directory
-ecotokens watch --background       # fork to background, log to stdout
+ecotokens watch --background       # fork to background
 ecotokens watch --status           # show status of background process
 ecotokens watch --status --json    # JSON status output
 ecotokens watch --stop             # stop the background process
 ```
+
+> **Note:** Background logs are only written if global `debug` is enabled (`ecotokens config --debug true`).
 
 ### Auto-watch *(Claude Code <del>& Qwen Code</del>)*
 
@@ -343,7 +364,25 @@ Keep the feature flag in `~/.config/ecotokens/config.json`
 
 ## Bonus Tools
 
-_Less code is less tokens_
+### MCP server (Claude Code, Gemini CLI, Qwen Code)
+
+`ecotokens mcp-server` starts a stdio MCP server backed by the ecotokens index and trace engines.
+
+```bash
+ecotokens mcp-server
+ecotokens mcp-server --index-dir ~/.config/ecotokens/index
+```
+
+Exposed tools:
+
+- `ecotokens_search` — BM25 + semantic search
+- `ecotokens_outline` — symbol outline for file/directory
+- `ecotokens_symbol` — fetch full symbol source by stable ID
+- `ecotokens_trace_callers` — find callers of a symbol
+- `ecotokens_trace_callees` — find callees (with depth)
+- `ecotokens_duplicates` — detect near-duplicate code blocks
+
+For Claude Code, Gemini CLI, and Qwen Code, `ecotokens install` registers this server automatically in each target's settings file.
 
 ### Search command
 
@@ -381,6 +420,8 @@ Results are automatically scoped to the current git project when using the globa
 
 ### Duplicates command
 
+_Less code is less tokens_
+
 `ecotokens duplicates` scans the indexed codebase for near-identical code blocks and reports them grouped by similarity.
 
 ```bash
@@ -398,6 +439,17 @@ Each group shows the file paths, line ranges, similarity score, and a refactorin
 ecotokens config           # show all settings (text)
 ecotokens config --json    # show all settings (JSON)
 ```
+
+### Debug mode
+
+Enable the global debug mode to see detailed interception logs and enable background logging for the `watch` command:
+
+```bash
+ecotokens config --debug true
+ecotokens config --debug false
+```
+
+This updates the `debug` field in `~/.config/ecotokens/config.json`.
 
 Output includes:
 

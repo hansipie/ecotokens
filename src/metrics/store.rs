@@ -6,11 +6,9 @@ use std::path::{Path, PathBuf};
 use std::sync::{Mutex, OnceLock};
 use uuid::Uuid;
 
-// Sérialise les ouvertures de connexion pour éviter la race condition sur
-// PRAGMA journal_mode = WAL : rusqlite's busy handler est instable (#ignore),
-// et deux threads qui initialisent le même fichier DB simultanément peuvent
-// obtenir SQLITE_BUSY immédiatement même avec busy_timeout.
-static CONN_INIT_LOCK: OnceLock<Mutex<()>> = OnceLock::new();
+// Serialize connection initialization to avoid races while enabling WAL.
+// Two threads opening the same DB concurrently can still hit SQLITE_BUSY.
+static DB_INIT_LOCK: OnceLock<Mutex<()>> = OnceLock::new();
 
 const CONTENT_MAX_CHARS: usize = 4096;
 
@@ -127,11 +125,23 @@ impl Interception {
 
 // ── Enum ↔ TEXT helpers ───────────────────────────────────────────────────────
 
-fn enum_to_str<T: Serialize>(val: &T) -> String {
+fn serialize_enum_to_str<T: Serialize>(val: &T) -> String {
     serde_json::to_string(val)
         .unwrap_or_default()
         .trim_matches('"')
         .to_string()
+}
+
+fn command_family_to_str(val: &CommandFamily) -> String {
+    serialize_enum_to_str(val)
+}
+
+fn filter_mode_to_str(val: &FilterMode) -> String {
+    serialize_enum_to_str(val)
+}
+
+fn hook_type_to_str(val: &HookType) -> String {
+    serialize_enum_to_str(val)
 }
 
 fn str_to_enum<T: DeserializeOwned>(s: &str) -> io::Result<T> {
@@ -172,10 +182,10 @@ fn open_conn(path: &Path) -> io::Result<Connection> {
     if let Some(parent) = path.parent() {
         std::fs::create_dir_all(parent)?;
     }
-    let _guard = CONN_INIT_LOCK
+    let _guard = DB_INIT_LOCK
         .get_or_init(|| Mutex::new(()))
         .lock()
-        .unwrap();
+        .unwrap_or_else(|e| e.into_inner());
     let conn = Connection::open(path).map_err(io::Error::other)?;
     conn.execute_batch(
         "PRAGMA journal_mode = WAL;
@@ -286,17 +296,17 @@ fn insert_one(conn: &Connection, i: &Interception) -> io::Result<()> {
             i.id,
             i.timestamp,
             i.command,
-            enum_to_str(&i.command_family),
+            command_family_to_str(&i.command_family),
             i.git_root,
             i.tokens_before as i64,
             i.tokens_after as i64,
             i.savings_pct as f64,
-            enum_to_str(&i.mode),
+            filter_mode_to_str(&i.mode),
             i.redacted as i32,
             i.duration_ms as i64,
             i.content_before,
             i.content_after,
-            enum_to_str(&i.hook_type),
+            hook_type_to_str(&i.hook_type),
         ],
     )
     .map_err(io::Error::other)?;
@@ -329,7 +339,13 @@ pub fn read_from(path: &Path) -> io::Result<Vec<Interception>> {
     let items = stmt
         .query_map([], row_to_interception)
         .map_err(io::Error::other)?
-        .filter_map(|r| r.ok())
+        .filter_map(|r| match r {
+            Ok(v) => Some(v),
+            Err(e) => {
+                eprintln!("ecotokens: metrics deserialization error: {e}");
+                None
+            }
+        })
         .collect();
     Ok(items)
 }
@@ -356,8 +372,8 @@ pub fn read_all() -> io::Result<Vec<Interception>> {
 /// Implemented as a single transaction (DELETE all + INSERT batch) which is
 /// equivalent to the previous atomic rename approach.
 pub fn write_to(path: &Path, items: &[Interception]) -> io::Result<()> {
-    let conn = open_conn(path)?;
-    let tx = conn.unchecked_transaction().map_err(io::Error::other)?;
+    let mut conn = open_conn(path)?;
+    let tx = conn.transaction().map_err(io::Error::other)?;
     tx.execute("DELETE FROM interceptions", [])
         .map_err(io::Error::other)?;
     for item in items {

@@ -192,7 +192,16 @@ impl Settings {
         let Ok(data) = std::fs::read_to_string(path) else {
             return LegacySettingsFile::default();
         };
-        serde_json::from_str(&data).unwrap_or_default()
+        match serde_json::from_str(&data) {
+            Ok(parsed) => parsed,
+            Err(e) => {
+                eprintln!(
+                    "ecotokens: warning: failed to parse {} ({e}); using default settings",
+                    path.display()
+                );
+                LegacySettingsFile::default()
+            }
+        }
     }
 
     fn load_abbreviations(path: &Path) -> Option<HashMap<String, String>> {
@@ -246,7 +255,6 @@ impl Settings {
         Self::save_abbreviations(abbreviations_path, &self.abbreviations_custom)
     }
 
-    #[allow(dead_code)]
     pub fn save(&self) -> std::io::Result<()> {
         let config_path = Self::config_path().ok_or_else(|| {
             std::io::Error::new(std::io::ErrorKind::NotFound, "cannot resolve config dir")
@@ -255,6 +263,8 @@ impl Settings {
         self.save_to_paths(&config_path, &abbreviations_path)
     }
 
+    // Exposed for callers that want to validate settings explicitly
+    // (tests, tooling, or future CLI checks) without enforcing it on load.
     #[allow(dead_code)]
     pub fn validate(&self) -> Result<(), String> {
         if !(10..=10000).contains(&self.summary_threshold_lines) {

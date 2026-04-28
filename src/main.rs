@@ -18,6 +18,7 @@ mod filter;
 mod hook;
 mod install;
 mod masking;
+mod mcp;
 mod metrics;
 mod search;
 mod tokens;
@@ -101,6 +102,9 @@ enum Commands {
     Config {
         #[arg(long)]
         json: bool,
+        /// Set global debug mode
+        #[arg(long, value_name = "true|false")]
+        debug: Option<bool>,
         /// Set embed provider: ollama, lmstudio, none
         #[arg(long)]
         embed_provider: Option<String>,
@@ -234,6 +238,11 @@ enum Commands {
         #[arg(long)]
         check: bool,
     },
+    /// Start the MCP server (stdio transport — for Claude Code mcpServers registration)
+    McpServer {
+        #[arg(long)]
+        index_dir: Option<PathBuf>,
+    },
 }
 
 #[derive(Subcommand)]
@@ -353,7 +362,8 @@ fn cmd_filter(args: Vec<String>, debug: bool, cwd: Option<PathBuf>) {
     let (filtered, tokens_before, tokens_after) =
         filter::run_filter_pipeline_with_cwd(&command, &raw, duration_ms, cwd.as_deref());
 
-    if debug {
+    let settings = config::Settings::load();
+    if debug || settings.debug {
         eprintln!("[ecotokens debug] command={command} tokens_before={tokens_before} tokens_after={tokens_after}");
     }
 
@@ -705,6 +715,18 @@ fn cmd_install(target: String, ai_summary: bool, ai_summary_model: Option<String
                 std::process::exit(1);
             }
         }
+        match install::install_mcp_server(&claude_path) {
+            Ok(()) => {
+                println!(
+                    "ecotokens MCP server registered → {}",
+                    claude_path.display()
+                );
+            }
+            Err(e) => {
+                eprintln!("install error (mcp server): {e}");
+                std::process::exit(1);
+            }
+        }
     }
 
     if install_gemini {
@@ -723,6 +745,15 @@ fn cmd_install(target: String, ai_summary: bool, ai_summary_model: Option<String
                     }
                     Err(e) => {
                         eprintln!("install error (gemini post-hook): {e}");
+                        std::process::exit(1);
+                    }
+                }
+                match install::install_mcp_server(p) {
+                    Ok(()) => {
+                        println!("ecotokens MCP server registered (Gemini) → {}", p.display())
+                    }
+                    Err(e) => {
+                        eprintln!("install error (gemini mcp server): {e}");
                         std::process::exit(1);
                     }
                 }
@@ -753,6 +784,18 @@ fn cmd_install(target: String, ai_summary: bool, ai_summary_model: Option<String
                     }
                     Err(e) => {
                         eprintln!("install error (qwen post-hook): {e}");
+                        std::process::exit(1);
+                    }
+                }
+                match install::install_mcp_server(p) {
+                    Ok(()) => {
+                        println!(
+                            "ecotokens MCP server registered (Qwen Code) → {}",
+                            p.display()
+                        )
+                    }
+                    Err(e) => {
+                        eprintln!("install error (qwen mcp server): {e}");
                         std::process::exit(1);
                     }
                 }
@@ -832,19 +875,30 @@ fn cmd_uninstall(target: String) {
 
     if uninstall_claude {
         let had_hook = install::is_hook_installed(&claude_path);
-        let had_mcp = install::is_mcp_registered(&claude_json);
+        let had_post_hook = install::is_post_hook_installed(&claude_path);
+        let had_mcp = install::is_mcp_registered(&claude_path);
+        let had_session = install::are_session_hooks_installed(&claude_path);
         match install::uninstall_hook(&claude_path, &claude_json) {
             Ok(()) => {
                 if had_hook {
                     println!("ecotokens hook removed ← {}", claude_path.display());
                 }
+                if had_post_hook {
+                    println!("ecotokens post-hook removed ← {}", claude_path.display());
+                }
                 if had_mcp {
                     println!(
                         "ecotokens MCP server unregistered ← {}",
-                        claude_json.display()
+                        claude_path.display()
                     );
                 }
-                if !had_hook && !had_mcp {
+                if had_session {
+                    println!(
+                        "ecotokens session hooks removed ← {}",
+                        claude_path.display()
+                    );
+                }
+                if !had_hook && !had_post_hook && !had_mcp && !had_session {
                     println!("ecotokens: nothing to uninstall (claude)");
                 }
             }
@@ -972,6 +1026,7 @@ fn cmd_uninstall(target: String) {
 
 fn cmd_config(
     json: bool,
+    debug: Option<bool>,
     embed_provider: Option<String>,
     embed_url: Option<String>,
     embed_model: Option<String>,
@@ -980,9 +1035,13 @@ fn cmd_config(
 
     let mut settings = config::Settings::load();
     let settings_path = default_settings_path();
-    let claude_json = default_claude_json_path();
 
     let mut dirty = false;
+
+    if let Some(d) = debug {
+        settings.debug = d;
+        dirty = true;
+    }
 
     // Mutation via --embed-provider
     if let Some(ref provider_name) = embed_provider {
@@ -1028,7 +1087,7 @@ fn cmd_config(
 
     if dirty {
         match settings.save() {
-            Ok(()) => eprintln!("embed_provider updated"),
+            Ok(()) => eprintln!("settings updated"),
             Err(e) => {
                 eprintln!("save error: {e}");
                 std::process::exit(1);
@@ -1043,7 +1102,6 @@ fn cmd_config(
     };
 
     let hook_installed = install::is_hook_installed(&settings_path);
-    let _ = claude_json;
 
     if json {
         let mut v = serde_json::to_value(&settings).unwrap();
@@ -1262,21 +1320,10 @@ fn cmd_symbol(id: String, index_dir: Option<PathBuf>) {
 }
 
 fn glob_matches(pattern: &str, path: &str) -> bool {
-    if let Some(ext) = pattern.strip_prefix("*.") {
-        path.ends_with(&format!(".{ext}"))
-    } else {
-        path == pattern || path.ends_with(&format!("/{pattern}"))
-    }
-}
-
-fn git_root() -> Option<PathBuf> {
-    std::process::Command::new("git")
-        .args(["rev-parse", "--show-toplevel"])
-        .output()
+    globset::Glob::new(pattern)
         .ok()
-        .filter(|o| o.status.success())
-        .and_then(|o| String::from_utf8(o.stdout).ok())
-        .map(|s| PathBuf::from(s.trim()))
+        .map(|g| g.compile_matcher().is_match(path))
+        .unwrap_or(false)
 }
 
 struct SearchFlags {
@@ -1301,7 +1348,7 @@ fn cmd_search(query: String, top_k: usize, index_dir: Option<PathBuf>, flags: Se
         Ok(mut results) => {
             // Restrict to current git project when using the global index
             if using_global_index {
-                if let Some(root) = git_root() {
+                if let Some(root) = crate::config::git_root() {
                     results.retain(|r| root.join(&r.file_path).exists());
                 }
             }
@@ -1722,16 +1769,15 @@ fn cmd_watch(
             daemon::watcher::watch_directory(&watch_path_clone, &idx_dir_clone, event_tx, stop_rx)
         });
 
-        // Background mode: log events to watch.log
-        let log_file = config::SessionStore::load()
-            .log_file_for(&watch_path_str)
-            .map(std::path::PathBuf::from);
-
-        if log_file.is_none() {
-            eprintln!(
-                "ecotokens watch: warning: no log file configured, events will not be recorded"
-            );
-        }
+        // Background mode: log events to watch.log (only if debug is enabled)
+        let settings = config::Settings::load();
+        let log_file = if settings.debug {
+            config::SessionStore::load()
+                .log_file_for(&watch_path_str)
+                .map(std::path::PathBuf::from)
+        } else {
+            None
+        };
 
         while let Ok(e) = event_rx.recv() {
             if let Some(ref path) = log_file {
@@ -1976,6 +2022,15 @@ fn cmd_clear(
     println!("Deleted {delete_count} interception(s).");
 }
 
+fn stable_hash(s: &str) -> u64 {
+    let mut h: u64 = 14695981039346656037;
+    for b in s.bytes() {
+        h ^= b as u64;
+        h = h.wrapping_mul(1099511628211);
+    }
+    h
+}
+
 /// Derive a per-path log filename from the watched directory.
 /// `/home/user/my-project` → `~/.config/ecotokens/watch_home_user_my-project.log`
 fn watch_log_path(watch_path: &std::path::Path) -> PathBuf {
@@ -1990,10 +2045,13 @@ fn watch_log_path(watch_path: &std::path::Path) -> PathBuf {
             }
         })
         .collect();
+
+    let fingerprint = format!("{:016x}", stable_hash(&watch_path.to_string_lossy()));
+
     dirs::config_dir()
         .unwrap_or_else(|| PathBuf::from("."))
         .join("ecotokens")
-        .join(format!("watch{sanitized}.log"))
+        .join(format!("watch{sanitized}_{fingerprint}.log"))
 }
 
 fn cmd_session_start() {
@@ -2009,10 +2067,12 @@ fn cmd_session_start() {
         let _ = store.save();
 
         if decision.reused_existing_watcher {
-            eprintln!(
-                "ecotokens auto-watch: CWD is covered by existing watch on {}, skipping.",
-                decision.watch_path
-            );
+            if settings.debug {
+                eprintln!(
+                    "ecotokens auto-watch: CWD is covered by existing watch on {}, skipping.",
+                    decision.watch_path
+                );
+            }
         } else if decision.needs_watcher {
             let _ = std::process::Command::new("ecotokens")
                 .args(["watch", "--background", "--path", &decision.watch_path])
@@ -2235,10 +2295,11 @@ fn main() {
         Commands::Uninstall { target } => cmd_uninstall(target),
         Commands::Config {
             json,
+            debug,
             embed_provider,
             embed_url,
             embed_model,
-        } => cmd_config(json, embed_provider, embed_url, embed_model),
+        } => cmd_config(json, debug, embed_provider, embed_url, embed_model),
         Commands::Index {
             path,
             index_dir,
@@ -2319,5 +2380,14 @@ fn main() {
             AbbreviationsAction::Disable => cmd_abbreviations_disable(),
             AbbreviationsAction::List => cmd_abbreviations_list(),
         },
+        Commands::McpServer { index_dir } => {
+            let idx_dir = index_dir.unwrap_or_else(default_index_dir);
+            let rt = tokio::runtime::Builder::new_current_thread()
+                .enable_all()
+                .build()
+                .expect("tokio runtime");
+            rt.block_on(mcp::server::run_server(idx_dir))
+                .expect("mcp server error");
+        }
     }
 }

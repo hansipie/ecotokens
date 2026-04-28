@@ -9,6 +9,8 @@ use tantivy::{Index, ReloadPolicy, TantivyDocument, Term};
 use super::{CallEdge, TraceError};
 use crate::search::index::build_schema;
 
+const MAX_SYMBOL_DOCS: usize = 10_000;
+
 /// Find all callees (functions called by) the given symbol name.
 /// `depth` controls recursive traversal (1 = direct callees only).
 pub fn find_callees(
@@ -32,7 +34,12 @@ pub fn find_callees(
     // Collect all known symbol names for matching
     let kind_term = Term::from_field_text(kind_field, "symbol");
     let kind_query = TermQuery::new(kind_term, IndexRecordOption::Basic);
-    let all_symbols = searcher.search(&kind_query, &TopDocs::with_limit(10_000))?;
+    let all_symbols = searcher.search(&kind_query, &TopDocs::with_limit(MAX_SYMBOL_DOCS))?;
+    if all_symbols.len() >= MAX_SYMBOL_DOCS {
+        eprintln!(
+            "ecotokens: warning: symbol limit ({MAX_SYMBOL_DOCS}) reached; some callees may be missing"
+        );
+    }
 
     let mut symbol_names: HashSet<String> = HashSet::new();
     let mut symbol_docs: Vec<(String, String, String, String)> = Vec::new(); // (sid, name, file, source)
@@ -104,15 +111,28 @@ fn find_callees_recursive(
         return;
     }
 
+    // Filter out comment lines to reduce false positives
+    let non_comment_source: String = source
+        .lines()
+        .filter(|l| {
+            let t = l.trim();
+            !t.starts_with("//")
+                && !t.starts_with('#')
+                && !t.starts_with("--")
+                && !t.starts_with('*')
+        })
+        .collect::<Vec<_>>()
+        .join("\n");
+
     // Find all calls to known symbols within this source
     for known in known_symbols {
         if known == symbol_name {
             continue; // skip self-recursion as callee
         }
         let call_pattern = format!("{known}(");
-        if source.contains(&call_pattern) {
+        if non_comment_source.contains(&call_pattern) {
             // Find the line
-            let call_line = source
+            let call_line = non_comment_source
                 .lines()
                 .enumerate()
                 .find(|(_, l)| l.contains(&call_pattern))
@@ -126,7 +146,7 @@ fn find_callees_recursive(
                 .cloned()
                 .unwrap_or_default();
 
-            if !result.iter().any(|e| e.name == *known) {
+            if !result.iter().any(|e| e.symbol_id == sid) {
                 result.push(CallEdge {
                     symbol_id: sid,
                     name: known.clone(),

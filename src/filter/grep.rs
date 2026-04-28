@@ -13,6 +13,7 @@ pub fn filter_grep(output: &str) -> String {
     }
 
     let mut file_matches: HashMap<String, Vec<(Option<usize>, String)>> = HashMap::new();
+    let mut extra_per_file: HashMap<String, usize> = HashMap::new();
     let mut order: Vec<String> = Vec::new();
 
     for line in &lines {
@@ -20,7 +21,12 @@ pub fn filter_grep(output: &str) -> String {
             if !file_matches.contains_key(&file) {
                 order.push(file.clone());
             }
-            file_matches.entry(file).or_default().push(entry);
+            let entries = file_matches.entry(file.clone()).or_default();
+            if entries.len() < MAX_MATCHES_PER_FILE {
+                entries.push(entry);
+            } else {
+                *extra_per_file.entry(file).or_insert(0) += 1;
+            }
         }
     }
 
@@ -28,20 +34,20 @@ pub fn filter_grep(output: &str) -> String {
         return filter_generic(output, 100, 51200);
     }
 
-    let total_matches: usize = file_matches.values().map(|v| v.len()).sum();
+    let total_matches: usize = file_matches.values().map(|v| v.len()).sum::<usize>()
+        + extra_per_file.values().sum::<usize>();
     let file_count = file_matches.len();
 
     let mut result = vec![format!(
-        "🔍 {} matches in {} files:",
+        "🔍 [ecotokens] {} matches in {} files:",
         total_matches, file_count
     )];
 
     for file in &order {
         let matches = &file_matches[file];
-        let shown = matches.len().min(MAX_MATCHES_PER_FILE);
-        let extra = matches.len().saturating_sub(MAX_MATCHES_PER_FILE);
+        let extra = *extra_per_file.get(file).unwrap_or(&0);
         result.push(format!("{}:", file));
-        for (lineno, content) in &matches[..shown] {
+        for (lineno, content) in matches {
             let content = truncate_line(content);
             if let Some(n) = lineno {
                 result.push(format!("  {}:{}", n, content));

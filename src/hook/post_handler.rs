@@ -155,7 +155,7 @@ pub fn handle_post_input(input: &PostHookInput, depth: u32) -> (PostFilterResult
             (result, CommandFamily::Grep)
         }
         "Glob" => {
-            let filenames = extract_glob_filenames(&input.tool_response);
+            let filenames = format_glob_output(&input.tool_response);
             let result = handle_glob(&filenames);
             (result, CommandFamily::Fs)
         }
@@ -164,7 +164,7 @@ pub fn handle_post_input(input: &PostHookInput, depth: u32) -> (PostFilterResult
 }
 
 /// Extract filenames from a Glob tool_response (handles both array and newline-separated string).
-fn extract_glob_filenames(tool_response: &serde_json::Value) -> String {
+fn format_glob_output(tool_response: &serde_json::Value) -> String {
     // Try array form: { "filenames": ["a", "b", ...] }
     if let Some(arr) = tool_response.get("filenames").and_then(|v| v.as_array()) {
         return arr
@@ -251,6 +251,44 @@ fn record_post_metrics(
     }
 }
 
+fn process_filter_result(
+    result: PostFilterResult,
+    input: &PostHookInput,
+    family: CommandFamily,
+    settings: &Settings,
+) -> Option<String> {
+    match result {
+        PostFilterResult::Filtered {
+            output,
+            tokens_before,
+            tokens_after,
+            content_before,
+        } => {
+            let (final_output, final_tokens_after) = if settings.abbreviations_enabled {
+                let abbreviated = crate::abbreviations::abbreviate(&output, settings).0;
+                let recomputed = crate::tokens::count_tokens(&abbreviated) as u32;
+                if recomputed < tokens_after {
+                    (abbreviated, recomputed)
+                } else {
+                    (output, tokens_after)
+                }
+            } else {
+                (output, tokens_after)
+            };
+            record_post_metrics(
+                input,
+                family,
+                tokens_before,
+                final_tokens_after,
+                &content_before,
+                &final_output,
+            );
+            Some(final_output)
+        }
+        PostFilterResult::Passthrough => None,
+    }
+}
+
 /// AfterTool handler for Gemini CLI — replaces tool results with compressed output.
 /// Gemini uses `decision: "deny"` + `reason` to substitute the tool result.
 pub fn handle_post_gemini() {
@@ -271,33 +309,12 @@ pub fn handle_post_gemini() {
     };
 
     let (result, family) = handle_post_input(&input, depth);
-
-    let output = match &result {
-        PostFilterResult::Filtered {
-            output,
-            tokens_before,
-            tokens_after,
-            content_before,
-        } => {
-            let (final_output, final_tokens_after) = if settings.abbreviations_enabled {
-                let abbreviated = crate::abbreviations::abbreviate(output, &settings).0;
-                let recomputed = crate::tokens::count_tokens(&abbreviated) as u32;
-                (abbreviated, recomputed.min(*tokens_after))
-            } else {
-                (output.clone(), *tokens_after)
-            };
-            record_post_metrics(
-                &input,
-                family,
-                *tokens_before,
-                final_tokens_after,
-                content_before,
-                &final_output,
-            );
+    let output =
+        if let Some(final_output) = process_filter_result(result, &input, family, &settings) {
             GeminiAfterToolOutput::deny(final_output)
-        }
-        PostFilterResult::Passthrough => GeminiAfterToolOutput::allow(),
-    };
+        } else {
+            GeminiAfterToolOutput::allow()
+        };
 
     match serde_json::to_string(&output) {
         Ok(json) => print!("{json}"),
@@ -327,33 +344,12 @@ pub fn handle_post_qwen() {
     };
 
     let (result, family) = handle_post_input(&input, depth);
-
-    let output = match &result {
-        PostFilterResult::Filtered {
-            output,
-            tokens_before,
-            tokens_after,
-            content_before,
-        } => {
-            let (final_output, final_tokens_after) = if settings.abbreviations_enabled {
-                let abbreviated = crate::abbreviations::abbreviate(output, &settings).0;
-                let recomputed = crate::tokens::count_tokens(&abbreviated) as u32;
-                (abbreviated, recomputed.min(*tokens_after))
-            } else {
-                (output.clone(), *tokens_after)
-            };
-            record_post_metrics(
-                &input,
-                family,
-                *tokens_before,
-                final_tokens_after,
-                content_before,
-                &final_output,
-            );
+    let output =
+        if let Some(final_output) = process_filter_result(result, &input, family, &settings) {
             PostHookOutput::with_context(final_output)
-        }
-        PostFilterResult::Passthrough => PostHookOutput::passthrough(),
-    };
+        } else {
+            PostHookOutput::passthrough()
+        };
 
     match serde_json::to_string(&output) {
         Ok(json) => print!("{json}"),
@@ -374,33 +370,12 @@ pub fn handle_post() {
     };
 
     let (result, family) = handle_post_input(&input, depth);
-
-    let output = match &result {
-        PostFilterResult::Filtered {
-            output,
-            tokens_before,
-            tokens_after,
-            content_before,
-        } => {
-            let (final_output, final_tokens_after) = if settings.abbreviations_enabled {
-                let abbreviated = crate::abbreviations::abbreviate(output, &settings).0;
-                let recomputed = crate::tokens::count_tokens(&abbreviated) as u32;
-                (abbreviated, recomputed.min(*tokens_after))
-            } else {
-                (output.clone(), *tokens_after)
-            };
-            record_post_metrics(
-                &input,
-                family,
-                *tokens_before,
-                final_tokens_after,
-                content_before,
-                &final_output,
-            );
+    let output =
+        if let Some(final_output) = process_filter_result(result, &input, family, &settings) {
             PostHookOutput::with_context(final_output)
-        }
-        PostFilterResult::Passthrough => PostHookOutput::passthrough(),
-    };
+        } else {
+            PostHookOutput::passthrough()
+        };
 
     match serde_json::to_string(&output) {
         Ok(json) => print!("{json}"),
