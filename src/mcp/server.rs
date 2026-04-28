@@ -5,12 +5,14 @@ use rmcp::{
     model::{Implementation, ServerCapabilities, ServerInfo},
     tool, tool_handler, tool_router, ServerHandler,
 };
+use serde_json::json;
 
 use super::tools::*;
 
 #[derive(Debug, Clone)]
 pub struct EcotokensServer {
     index_dir: PathBuf,
+    // Accessed by the rmcp-generated tool handler; not referenced directly here.
     #[allow(dead_code)]
     tool_router: ToolRouter<Self>,
 }
@@ -42,12 +44,12 @@ impl EcotokensServer {
         match crate::search::query::search_index(opts) {
             Ok(mut results) => {
                 // Scope to current git project (same logic as cmd_search)
-                if let Some(root) = git_root() {
+                if let Some(root) = crate::config::git_root() {
                     results.retain(|r| root.join(&r.file_path).exists());
                 }
                 serde_json::to_string_pretty(&results).unwrap_or_default()
             }
-            Err(e) => format!("{{\"error\": \"{e}\"}}"),
+            Err(e) => json!({"error": e.to_string()}).to_string(),
         }
     }
 
@@ -65,7 +67,7 @@ impl EcotokensServer {
         };
         match crate::search::outline::outline_path(opts) {
             Ok(symbols) => serde_json::to_string_pretty(&symbols).unwrap_or_default(),
-            Err(e) => format!("{{\"error\": \"{e}\"}}"),
+            Err(e) => json!({"error": e.to_string()}).to_string(),
         }
     }
 
@@ -77,8 +79,8 @@ impl EcotokensServer {
     fn ecotokens_symbol(&self, Parameters(params): Parameters<SymbolParams>) -> String {
         match crate::search::symbols::lookup_symbol(&params.id, &self.index_dir) {
             Ok(Some(snippet)) => snippet,
-            Ok(None) => format!("{{\"error\": \"symbol not found: {}\"}}", params.id),
-            Err(e) => format!("{{\"error\": \"{e}\"}}"),
+            Ok(None) => json!({"error": format!("symbol not found: {}", params.id)}).to_string(),
+            Err(e) => json!({"error": e.to_string()}).to_string(),
         }
     }
 
@@ -88,7 +90,7 @@ impl EcotokensServer {
     fn ecotokens_trace_callers(&self, Parameters(params): Parameters<TraceParams>) -> String {
         match crate::trace::callers::find_callers(&params.symbol, &self.index_dir) {
             Ok(edges) => serde_json::to_string_pretty(&edges).unwrap_or_default(),
-            Err(e) => format!("{{\"error\": \"{e}\"}}"),
+            Err(e) => json!({"error": e.to_string()}).to_string(),
         }
     }
 
@@ -107,7 +109,7 @@ impl EcotokensServer {
             params.depth.unwrap_or(1),
         ) {
             Ok(edges) => serde_json::to_string_pretty(&edges).unwrap_or_default(),
-            Err(e) => format!("{{\"error\": \"{e}\"}}"),
+            Err(e) => json!({"error": e.to_string()}).to_string(),
         }
     }
 
@@ -131,7 +133,7 @@ impl EcotokensServer {
                     opts.min_lines,
                 )
             }
-            Err(e) => format!("Error: {e}"),
+            Err(e) => json!({"error": e.to_string()}).to_string(),
         }
     }
 }
@@ -151,16 +153,6 @@ impl ServerHandler for EcotokensServer {
                 Use ecotokens_duplicates to detect near-duplicate code.",
             )
     }
-}
-
-fn git_root() -> Option<PathBuf> {
-    std::process::Command::new("git")
-        .args(["rev-parse", "--show-toplevel"])
-        .output()
-        .ok()
-        .filter(|o| o.status.success())
-        .and_then(|o| String::from_utf8(o.stdout).ok())
-        .map(|s| PathBuf::from(s.trim()))
 }
 
 /// Start the MCP server on stdio.

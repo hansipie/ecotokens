@@ -4,7 +4,7 @@ use std::collections::HashMap;
 
 /// Filter Python command output (pytest, pip, ruff, mypy, etc.).
 pub fn filter_python(command: &str, output: &str) -> String {
-    let cmd = command.trim().to_lowercase();
+    let cmd = command.trim().to_ascii_lowercase();
 
     if cmd.starts_with("pytest") || cmd.contains("pytest") {
         filter_pytest(output)

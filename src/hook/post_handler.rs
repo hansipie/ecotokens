@@ -155,7 +155,7 @@ pub fn handle_post_input(input: &PostHookInput, depth: u32) -> (PostFilterResult
             (result, CommandFamily::Grep)
         }
         "Glob" => {
-            let filenames = extract_glob_filenames(&input.tool_response);
+            let filenames = format_glob_output(&input.tool_response);
             let result = handle_glob(&filenames);
             (result, CommandFamily::Fs)
         }
@@ -164,7 +164,7 @@ pub fn handle_post_input(input: &PostHookInput, depth: u32) -> (PostFilterResult
 }
 
 /// Extract filenames from a Glob tool_response (handles both array and newline-separated string).
-fn extract_glob_filenames(tool_response: &serde_json::Value) -> String {
+fn format_glob_output(tool_response: &serde_json::Value) -> String {
     // Try array form: { "filenames": ["a", "b", ...] }
     if let Some(arr) = tool_response.get("filenames").and_then(|v| v.as_array()) {
         return arr

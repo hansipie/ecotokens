@@ -1030,7 +1030,6 @@ fn cmd_config(
 
     let mut settings = config::Settings::load();
     let settings_path = default_settings_path();
-    let claude_json = default_claude_json_path();
 
     let mut dirty = false;
 
@@ -1093,7 +1092,6 @@ fn cmd_config(
     };
 
     let hook_installed = install::is_hook_installed(&settings_path);
-    let _ = claude_json;
 
     if json {
         let mut v = serde_json::to_value(&settings).unwrap();
@@ -1312,21 +1310,10 @@ fn cmd_symbol(id: String, index_dir: Option<PathBuf>) {
 }
 
 fn glob_matches(pattern: &str, path: &str) -> bool {
-    if let Some(ext) = pattern.strip_prefix("*.") {
-        path.ends_with(&format!(".{ext}"))
-    } else {
-        path == pattern || path.ends_with(&format!("/{pattern}"))
-    }
-}
-
-fn git_root() -> Option<PathBuf> {
-    std::process::Command::new("git")
-        .args(["rev-parse", "--show-toplevel"])
-        .output()
+    globset::Glob::new(pattern)
         .ok()
-        .filter(|o| o.status.success())
-        .and_then(|o| String::from_utf8(o.stdout).ok())
-        .map(|s| PathBuf::from(s.trim()))
+        .map(|g| g.compile_matcher().is_match(path))
+        .unwrap_or(false)
 }
 
 struct SearchFlags {
@@ -1351,7 +1338,7 @@ fn cmd_search(query: String, top_k: usize, index_dir: Option<PathBuf>, flags: Se
         Ok(mut results) => {
             // Restrict to current git project when using the global index
             if using_global_index {
-                if let Some(root) = git_root() {
+                if let Some(root) = crate::config::git_root() {
                     results.retain(|r| root.join(&r.file_path).exists());
                 }
             }
@@ -2026,6 +2013,15 @@ fn cmd_clear(
     println!("Deleted {delete_count} interception(s).");
 }
 
+fn stable_hash(s: &str) -> u64 {
+    let mut h: u64 = 14695981039346656037;
+    for b in s.bytes() {
+        h ^= b as u64;
+        h = h.wrapping_mul(1099511628211);
+    }
+    h
+}
+
 /// Derive a per-path log filename from the watched directory.
 /// `/home/user/my-project` → `~/.config/ecotokens/watch_home_user_my-project.log`
 fn watch_log_path(watch_path: &std::path::Path) -> PathBuf {
@@ -2040,10 +2036,13 @@ fn watch_log_path(watch_path: &std::path::Path) -> PathBuf {
             }
         })
         .collect();
+
+    let fingerprint = format!("{:016x}", stable_hash(&watch_path.to_string_lossy()));
+
     dirs::config_dir()
         .unwrap_or_else(|| PathBuf::from("."))
         .join("ecotokens")
-        .join(format!("watch{sanitized}.log"))
+        .join(format!("watch{sanitized}_{fingerprint}.log"))
 }
 
 fn cmd_session_start() {

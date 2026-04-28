@@ -75,22 +75,26 @@ pub fn abbreviate(text: &str, settings: &Settings) -> (String, u32) {
         let pairs = dictionary::merged_pairs(&settings.abbreviations_custom);
         Some(compile_rules(&pairs))
     };
-    let rules: &Vec<CompiledRule> = custom_rules.as_ref().unwrap_or_else(|| default_rules());
+    let rules: &Vec<CompiledRule> = custom_rules.as_ref().unwrap_or(default_rules());
 
     let mut out = String::with_capacity(text.len());
     let mut count: u32 = 0;
     let mut in_code = false;
-    for (idx, segment) in text.split("```").enumerate() {
-        if idx > 0 {
-            out.push_str("```");
+    let line_count = text.lines().count();
+    for (i, line) in text.lines().enumerate() {
+        let trimmed = line.trim();
+        if trimmed.starts_with("```") {
+            out.push_str(line);
             in_code = !in_code;
-        }
-        if in_code {
-            out.push_str(segment);
+        } else if in_code {
+            out.push_str(line);
         } else {
-            let (transformed, c) = transform_segment(segment, rules);
+            let (transformed, c) = transform_segment(line, rules);
             count += c;
             out.push_str(&transformed);
+        }
+        if i < line_count - 1 || text.ends_with('\n') {
+            out.push('\n');
         }
     }
     (out, count)

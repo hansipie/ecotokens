@@ -9,6 +9,8 @@ use super::{CodeSegment, DetectionOptions, DuplicateGroup, SimilarityScore};
 use crate::duplicates::proposals::generate_proposals;
 use crate::search::index::build_schema;
 
+const MAX_SYMBOL_DOCS: usize = 10_000;
+
 #[derive(Debug)]
 pub enum DetectError {
     IndexNotFound,
@@ -48,7 +50,12 @@ pub fn detect_duplicates(opts: &DetectionOptions) -> Result<Vec<DuplicateGroup>,
     // 2. Query all kind=="symbol" docs
     let kind_term = Term::from_field_text(kind_field, "symbol");
     let kind_query = TermQuery::new(kind_term, IndexRecordOption::Basic);
-    let top_docs = searcher.search(&kind_query, &TopDocs::with_limit(10_000))?;
+    let top_docs = searcher.search(&kind_query, &TopDocs::with_limit(MAX_SYMBOL_DOCS))?;
+    if top_docs.len() >= MAX_SYMBOL_DOCS {
+        eprintln!(
+            "ecotokens: warning: symbol limit ({MAX_SYMBOL_DOCS}) reached; duplicate detection may be incomplete"
+        );
+    }
 
     // 3. Build Vec<CodeSegment>, filter by min_lines
     let mut segments: Vec<CodeSegment> = Vec::new();
@@ -97,6 +104,12 @@ pub fn detect_duplicates(opts: &DetectionOptions) -> Result<Vec<DuplicateGroup>,
     }
 
     // 4. Pairwise similarity + Union-Find
+    if n > 500 {
+        eprintln!(
+            "ecotokens: warning: comparing {n} symbols (~{} pairs); this may take a while",
+            n * (n - 1) / 2
+        );
+    }
     let mut parent: Vec<usize> = (0..n).collect();
     let mut best_score: Vec<f32> = vec![0.0; n];
 

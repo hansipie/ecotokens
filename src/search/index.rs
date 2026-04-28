@@ -1,10 +1,10 @@
 use serde::{Deserialize, Serialize};
-use std::collections::HashMap;
+use std::collections::{HashMap, HashSet};
 use std::path::{Path, PathBuf};
 use std::sync::atomic::{AtomicUsize, Ordering};
 use std::sync::Arc;
 use tantivy::schema::*;
-use tantivy::{doc, Index, IndexWriter};
+use tantivy::{doc, Index, IndexWriter, Term};
 
 use super::embed::{embed_text, save_embeddings};
 use super::is_indexable_extension;
@@ -17,7 +17,7 @@ pub struct IndexOptions {
     pub path: PathBuf,
     pub index_dir: PathBuf,
     pub progress: Option<Arc<AtomicUsize>>,
-    /// Provider d'embeddings (None = BM25 seul)
+    /// Embedding provider (None = BM25 only)
     pub embed_provider: crate::config::settings::EmbedProvider,
 }
 
@@ -58,8 +58,31 @@ pub fn open_or_create_index(index_dir: &Path, reset: bool) -> tantivy::Result<In
 }
 
 /// Index all text files in `path` using BM25 (tantivy).
-/// Si `opts.embed_provider` est configuré, calcule et stocke les embeddings
-/// de chaque chunk dans `{index_dir}/embeddings.json`.
+/// If `opts.embed_provider` is configured, compute and store chunk embeddings
+/// into `{index_dir}/embeddings.json`.
+fn load_timestamps(dir: &Path) -> HashMap<String, u64> {
+    let p = dir.join("file_timestamps.json");
+    std::fs::read_to_string(&p)
+        .ok()
+        .and_then(|s| serde_json::from_str(&s).ok())
+        .unwrap_or_default()
+}
+
+fn save_timestamps(dir: &Path, ts: &HashMap<String, u64>) {
+    if let Ok(s) = serde_json::to_string(ts) {
+        let _ = std::fs::write(dir.join("file_timestamps.json"), s);
+    }
+}
+
+fn file_mtime(path: &Path) -> u64 {
+    std::fs::metadata(path)
+        .and_then(|m| m.modified())
+        .ok()
+        .and_then(|t| t.duration_since(std::time::UNIX_EPOCH).ok())
+        .map(|d| d.as_secs())
+        .unwrap_or(0)
+}
+
 pub fn index_directory(opts: IndexOptions) -> tantivy::Result<IndexStats> {
     let index = open_or_create_index(&opts.index_dir, opts.reset)?;
     let (_, file_path_field, content_field, kind_field, line_start_field, _symbol_id_field) =
@@ -67,10 +90,13 @@ pub fn index_directory(opts: IndexOptions) -> tantivy::Result<IndexStats> {
 
     let mut writer: IndexWriter = index.writer(50_000_000)?;
 
-    // Clear existing docs if incremental (simple strategy: delete all, re-add)
-    if !opts.reset && opts.index_dir.join("meta.json").exists() {
-        writer.delete_all_documents()?;
-    }
+    // Incremental mode: load per-file timestamps to skip unchanged files
+    let mut timestamps = if opts.reset {
+        HashMap::new()
+    } else {
+        load_timestamps(&opts.index_dir)
+    };
+    let mut seen_paths: HashSet<String> = HashSet::new();
 
     let mut file_count = 0u32;
     let mut chunk_count = 0u32;
@@ -102,18 +128,35 @@ pub fn index_directory(opts: IndexOptions) -> tantivy::Result<IndexStats> {
         // Skip files larger than 50 MB to avoid memory exhaustion
         let file_size = std::fs::metadata(path).map(|m| m.len()).unwrap_or(0);
         if file_size > 50 * 1024 * 1024 {
+            eprintln!(
+                "Skipping large file: {} ({} MB)",
+                path.display(),
+                file_size / 1024 / 1024
+            );
             continue;
         }
-
-        let content = match std::fs::read_to_string(path) {
-            Ok(c) => c,
-            Err(_) => continue,
-        };
 
         let rel_path = path
             .strip_prefix(&opts.path)
             .map(|p| p.to_string_lossy().into_owned())
             .unwrap_or_else(|_| path.to_string_lossy().into_owned());
+
+        seen_paths.insert(rel_path.clone());
+
+        // Skip unchanged files (incremental mode)
+        let mtime = file_mtime(path);
+        if !opts.reset && timestamps.get(&rel_path) == Some(&mtime) {
+            continue;
+        }
+
+        // Remove stale docs for this file before re-adding
+        let term = Term::from_field_text(file_path_field, &rel_path);
+        writer.delete_term(term);
+
+        let content = match std::fs::read_to_string(path) {
+            Ok(c) => c,
+            Err(_) => continue,
+        };
 
         // Split into chunks of 50 lines
         let lines: Vec<&str> = content.lines().collect();
@@ -128,15 +171,15 @@ pub fn index_directory(opts: IndexOptions) -> tantivy::Result<IndexStats> {
             ))?;
             chunk_count += 1;
 
-            // Embedding optionnel (best-effort, sans bloquer l'indexation BM25)
+            // Optional embedding (best-effort; never blocks BM25 indexing).
             if let Some(vec) = embed_text(&chunk_text, &opts.embed_provider) {
                 let key = format!("{}:{}", rel_path, chunk_idx);
                 embeddings.insert(key, vec);
             }
         }
         // Symbolic indexing (tree-sitter for code, regex for docs)
-        let ext = path.extension().and_then(|e| e.to_str()).unwrap_or("");
-        let mut symbols = match ext {
+        let symbol_ext = path.extension().and_then(|e| e.to_str()).unwrap_or("");
+        let mut symbols = match symbol_ext {
             "rs" | "py" | "js" | "ts" | "jsx" | "tsx" | "c" | "h" | "cpp" | "cc" | "cxx"
             | "hpp" | "hh" | "hxx" => parse_symbols(path).unwrap_or_default(),
             "md" | "markdown" | "toml" | "json" | "yaml" | "yml" => {
@@ -159,12 +202,29 @@ pub fn index_directory(opts: IndexOptions) -> tantivy::Result<IndexStats> {
             let _ = write_symbols(&symbols, &mut writer); // best-effort
         }
 
+        timestamps.insert(rel_path, mtime);
         file_count += 1;
+    }
+
+    // Remove docs for files that no longer exist
+    let deleted: Vec<String> = timestamps
+        .keys()
+        .filter(|p| !seen_paths.contains(*p))
+        .cloned()
+        .collect();
+    for p in &deleted {
+        let term = Term::from_field_text(file_path_field, p.as_str());
+        writer.delete_term(term);
+    }
+    for p in deleted {
+        timestamps.remove(&p);
     }
 
     writer.commit()?;
 
-    // Sauvegarder les embeddings s'il y en a
+    save_timestamps(&opts.index_dir, &timestamps);
+
+    // Save embeddings when available.
     if !embeddings.is_empty() {
         let _ = save_embeddings(&opts.index_dir, &embeddings);
     }

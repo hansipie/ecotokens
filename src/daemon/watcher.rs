@@ -1,5 +1,6 @@
 use crate::search::index::{build_schema, open_or_create_index};
 use crate::search::is_indexable_extension;
+use crate::search::symbols::{parse_symbols, write_symbols};
 use std::collections::HashMap;
 use std::path::{Path, PathBuf};
 use std::sync::mpsc;
@@ -114,7 +115,7 @@ fn reindex_single_file(path: &Path, watch_path: &Path, index_dir: &Path) -> Stri
 
     let (_, file_path_field, content_field, kind_field, line_start_field, _) = build_schema();
 
-    let mut writer = match index.writer(50_000_000) {
+    let mut writer = match index.writer(8_000_000) {
         Ok(w) => w,
         Err(e) => return format!("error: {e}"),
     };
@@ -134,6 +135,21 @@ fn reindex_single_file(path: &Path, watch_path: &Path, index_dir: &Path) -> Stri
             kind_field      => "bm25",
             line_start_field => line_start,
         ));
+    }
+
+    // Re-index symbol docs (tree-sitter AST)
+    let filename = path.file_name().and_then(|n| n.to_str()).unwrap_or("");
+    let mut symbols = parse_symbols(path).unwrap_or_default();
+    for sym in &mut symbols {
+        if sym.file_path == filename {
+            if let Some(suffix) = sym.id.strip_prefix(&format!("{filename}::")) {
+                sym.id = format!("{rel_path}::{suffix}");
+            }
+            sym.file_path = rel_path.clone();
+        }
+    }
+    if !symbols.is_empty() {
+        let _ = write_symbols(&symbols, &mut writer);
     }
 
     match writer.commit() {

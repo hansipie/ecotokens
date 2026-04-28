@@ -1,3 +1,4 @@
+use crate::config::settings::Settings;
 use crate::metrics::store::Interception;
 use chrono::{DateTime, Utc};
 use serde::{Deserialize, Serialize};
@@ -50,8 +51,7 @@ pub struct Report {
     pub by_project: HashMap<String, ProjectStats>,
 }
 
-fn pricing_usd_per_1m(model: &str) -> f64 {
-    let settings = crate::config::settings::Settings::load();
+fn pricing_usd_per_1m(model: &str, settings: &Settings) -> f64 {
     if let Some(p) = settings.model_pricing.get(model) {
         return p.input_usd_per_1m;
     }
@@ -69,10 +69,19 @@ fn period_start(period: &Period) -> Option<DateTime<Utc>> {
         Period::All => None,
         Period::Today => {
             let today = now.date_naive();
-            Some(today.and_hms_opt(0, 0, 0).unwrap().and_utc())
+            today.and_hms_opt(0, 0, 0).map(|dt| dt.and_utc())
         }
         Period::Week => Some(now - chrono::Duration::days(7)),
         Period::Month => Some(now - chrono::Duration::days(30)),
+    }
+}
+
+fn period_label(period: &Period) -> &'static str {
+    match period {
+        Period::All => "all",
+        Period::Today => "today",
+        Period::Week => "week",
+        Period::Month => "month",
     }
 }
 
@@ -135,7 +144,8 @@ pub fn aggregate(items: &[Interception], period: Period, model: &str) -> Report 
     };
 
     let tokens_saved = total_before.saturating_sub(total_after);
-    let price_per_1m = pricing_usd_per_1m(model);
+    let settings = Settings::load();
+    let price_per_1m = pricing_usd_per_1m(model, &settings);
     let cost_avoided_usd = (tokens_saved as f64 / 1_000_000.0) * price_per_1m;
 
     // by_family
@@ -188,7 +198,7 @@ pub fn aggregate(items: &[Interception], period: Period, model: &str) -> Report 
     }
 
     Report {
-        period: format!("{period:?}").to_lowercase(),
+        period: period_label(&period).to_string(),
         total_interceptions: filtered.len() as u32,
         total_tokens_before: total_before,
         total_tokens_after: total_after,
