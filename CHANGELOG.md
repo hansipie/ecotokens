@@ -5,6 +5,18 @@ All notable changes to this project will be documented in this file.
 The format is based on [Keep a Changelog](https://keepachangelog.com/en/1.0.0/),
 and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0.html).
 
+## [0.17.0] - 2026-04-28
+
+### Added
+
+- **Serveur MCP stdio** : expose les moteurs search, outline, symbol et trace comme serveur MCP (`rmcp`, transport stdio) via `ecotokens mcp-server` ; `ecotokens install` enregistre automatiquement le serveur dans `~/.claude/settings.json`
+- La journalisation en arrière-plan est désormais conditionnelle au flag global `--debug`
+
+### Fixed
+
+- `ecotokens uninstall` supprime maintenant l'intégralité des traces ecotokens dans `~/.claude/settings.json` : hooks PreToolUse, PostToolUse, SessionStart, SessionEnd et l'entrée du serveur MCP
+- Les étapes post-filtre ne remplacent la sortie que si le nombre de tokens diminue réellement ; la troncature d'octets génériques respecte les frontières UTF-8 ; le fallback de parsing JSON des settings est renforcé ; les désérialiseurs numériques MCP sont dédupliqués
+
 ## [0.16.0] - 2026-04-26
 
 ### Added
