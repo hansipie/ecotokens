@@ -143,27 +143,32 @@ fn test_watch_log_created_when_debug_enabled() {
 
     assert!(output.status.success());
 
-    // Wait for daemon to start
-    std::thread::sleep(std::time::Duration::from_millis(500));
+    // Wait for daemon to start, then trigger an event.
+    // Use a longer initial wait so the watcher is registered before the write.
+    std::thread::sleep(std::time::Duration::from_millis(2000));
 
     // Trigger an event
     std::fs::write(watch_dir.join("test.rs"), "fn main() {}").unwrap();
 
-    // Wait for debounce and processing
-    std::thread::sleep(std::time::Duration::from_millis(1500));
-
-    // 3. Check for log file
+    // Poll for the log file for up to 10 seconds (covers slow CI runners).
     let config_dir = config_home.join("ecotokens");
+    let deadline = std::time::Instant::now() + std::time::Duration::from_secs(10);
     let mut log_found = false;
-    if config_dir.exists() {
-        let entries = std::fs::read_dir(config_dir).unwrap();
-        for entry in entries {
-            let path = entry.unwrap().path();
-            if path.extension().and_then(|s| s.to_str()) == Some("log") {
-                log_found = true;
-                break;
+    while std::time::Instant::now() < deadline {
+        if config_dir.exists() {
+            let entries = std::fs::read_dir(&config_dir).unwrap();
+            for entry in entries {
+                let path = entry.unwrap().path();
+                if path.extension().and_then(|s| s.to_str()) == Some("log") {
+                    log_found = true;
+                    break;
+                }
             }
         }
+        if log_found {
+            break;
+        }
+        std::thread::sleep(std::time::Duration::from_millis(200));
     }
 
     // Stop first to cleanup
