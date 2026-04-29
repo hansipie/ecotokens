@@ -86,11 +86,12 @@ To install the locally built binary into Cargo's bin directory:
 cargo install --path .
 ```
 
-With exact token counting enabled:
+With exact token counting enabled via [tiktoken](https://github.com/openai/tiktoken) (cl100k_base encoding):
 
 ```bash
 cargo install --path . --features exact-tokens
 ```
+By default, token counts use a fast character heuristic (`chars × 0.25`, ~80-85% accuracy). This has no effect on filtering behavior — only the token counts recorded in metrics are more precise.
 
 ## Installation
 
@@ -158,16 +159,6 @@ ecotokens install --target all
 ```
 
 `--target all` covers Claude Code, Gemini CLI, Qwen Code, and Pi in a single command.
-
-### With exact token counting
-
-By default, token counts use a fast character heuristic (`chars × 0.25`, ~80-85% accuracy). Enable exact counting via [tiktoken](https://github.com/openai/tiktoken) (cl100k_base encoding):
-
-```bash
-cargo install --path . --features exact-tokens
-```
-
-This has no effect on filtering behavior — only the token counts recorded in metrics are more precise.
 
 ### With AI summarization
 
@@ -243,6 +234,7 @@ Interactive TUI showing token savings per command family and per project, with a
 |-----|--------|
 | `j` / `u` | Navigate up / down in list |
 | `k` / `i` | Scroll history log down / up (family log view) |
+| `l` / `o` | Scroll details / diff view down / up |
 | `p` | Switch to project view (from family view) |
 | `f` | Switch to family view (from project view) |
 | `d` | Toggle detail mode (details / diff) — family view only |
@@ -474,15 +466,20 @@ ecotokens abbreviations disable   # back to default
 
 When enabled, a post-processing pass replaces full words with shorter forms in the narrative parts of tool outputs (code blocks between triple backticks are preserved). A matching `additionalContext` payload is emitted at `SessionStart` so the model adopts the same abbreviations in its own responses.
 
-Extend or override the built-in dictionary via `abbreviations_custom` in `~/.config/ecotokens/config.json`:
+Extend or override the built-in dictionary via a separate `~/.config/ecotokens/abbreviations.json` file:
 
 ```json
 {
-  "abbreviations_enabled": true,
-  "abbreviations_custom": {
-    "function": "func",
-    "repository": "repo"
-  }
+  "function": "func",
+  "repository": "repo"
+}
+```
+
+The feature flag stays in `~/.config/ecotokens/config.json`:
+
+```json
+{
+  "abbreviations_enabled": true
 }
 ```
 
