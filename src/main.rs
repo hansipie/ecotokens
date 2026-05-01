@@ -1051,7 +1051,7 @@ fn cmd_config(
             if !m.is_empty() {
                 eprintln!("unknown model: '{}'", m);
             }
-            let mut known: Vec<&String> = settings.model_pricing.keys().collect();
+            let mut known = config::models::model_names();
             known.sort();
             eprintln!("available models:");
             for name in known {
