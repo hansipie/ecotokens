@@ -56,7 +56,8 @@ fn pricing_usd_per_1m(model: &str, settings: &Settings) -> f64 {
         return p.input_usd_per_1m;
     }
     match model {
-        "claude-haiku-4-5" => 0.80,
+        "claude-haiku-4-5" | "claude-haiku-4-5-20251001" => 1.00,
+        "claude-opus-4-7" => 5.00,
         "claude-opus-4-6" => 15.00,
         "github-copilot" => 0.0,
         _ => 3.00,

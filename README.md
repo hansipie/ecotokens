@@ -195,6 +195,7 @@ ecotokens uninstall --target all       # all targets
 | `ecotokens gain --history` | Print a savings summary table for 24h / 7 days / 30 days |
 | `ecotokens gain --json` | JSON report |
 | `ecotokens config [--debug true\|false]` | Show or update global configuration (including debug mode) |
+| `ecotokens config --model MODEL` | Set the default model used for cost calculations (empty or unknown value lists available models) |
 | `ecotokens index [--path DIR]` | Index a codebase for BM25 + symbolic search |
 | `ecotokens search QUERY [--context N] [--include GLOB] [--exclude GLOB] [--no-trace]` | Search the indexed codebase with line numbers, context, and optional trace augmentation |
 | `ecotokens outline PATH` | List symbols in a file or directory |
@@ -218,13 +219,15 @@ ecotokens uninstall --target all       # all targets
 ## Gain dashboard
 
 ```
-ecotokens gain                                          # all time
+ecotokens gain                                          # all time, uses default model from config
 ecotokens gain --period today                           # today only
 ecotokens gain --period week                            # last 7 days
-ecotokens gain --period month --model claude-sonnet-4-5 # last 30 days, custom model
+ecotokens gain --period month --model claude-sonnet-4-6 # last 30 days, override model
 ecotokens gain --history                                # summary table: 24h / 7d / 30d
 ecotokens gain --history --json                         # same, as JSON
 ```
+
+The model used for cost calculations defaults to the value set with `ecotokens config --model` (or `claude-sonnet-4-6` if not configured). Pass `--model` to override for a single invocation.
 
 Interactive TUI showing token savings per command family and per project, with a sparkline. The `--period` flag filters both the stats and the history panels.
 
@@ -448,12 +451,73 @@ Output includes:
 ```
 hook_installed        : true
 debug                 : false
+default_model         : claude-sonnet-4-6
 exclusions            : []
 embed_provider        : ollama (http://localhost:11434) model=qwen3-embedding:latest
 ai_summary_enabled    : false
 ai_summary_model      : llama3.2:3b (default)
 ai_summary_url        : http://localhost:11434 (default)
 abbreviations_enabled : false
+```
+
+### Default model for cost calculations
+
+The model selected here determines the per-token price used in gain reports:
+
+```bash
+ecotokens config --model claude-opus-4-7    # set default model
+ecotokens config --model ""                 # list available models
+ecotokens config --model unknown-model      # unknown model → lists available models
+```
+
+The model name must be present in the built-in pricing table (or overridden via `model_pricing` in `~/.config/ecotokens/config.json`). Passing an empty value or an unrecognised name prints the full list and exits.
+
+Built-in models:
+
+| Provider | Model | Input ($/1M) | Output ($/1M) |
+|----------|-------|---:|---:|
+| Anthropic | `claude-haiku-4-5` / `claude-haiku-4-5-20251001` | 1.00 | 5.00 |
+| Anthropic | `claude-sonnet-4-5` | 3.00 | 15.00 |
+| Anthropic | `claude-sonnet-4-6` | 3.00 | 15.00 |
+| Anthropic | `claude-opus-4-6` | 15.00 | 75.00 |
+| Anthropic | `claude-opus-4-7` | 5.00 | 25.00 |
+| OpenAI | `gpt-4o` | 2.50 | 10.00 |
+| OpenAI | `gpt-4o-mini` | 0.15 | 0.60 |
+| OpenAI | `gpt-4.1` | 2.00 | 8.00 |
+| OpenAI | `gpt-4.1-mini` | 0.40 | 1.60 |
+| OpenAI | `gpt-4.1-nano` | 0.10 | 0.40 |
+| OpenAI | `gpt-5` | 1.25 | 10.00 |
+| OpenAI | `gpt-5-mini` | 0.25 | 2.00 |
+| OpenAI | `gpt-5-nano` | 0.05 | 0.40 |
+| OpenAI | `o1` | 15.00 | 60.00 |
+| OpenAI | `o3` | 2.00 | 8.00 |
+| OpenAI | `o4-mini` | 1.10 | 4.40 |
+| Google | `gemini-2.5-pro` | 1.25 | 10.00 |
+| Google | `gemini-2.5-flash` | 0.30 | 2.50 |
+| Google | `gemini-2.5-flash-lite` | 0.10 | 0.40 |
+| Google | `gemini-2.0-flash` | 0.10 | 0.40 |
+| DeepSeek | `deepseek-chat` | 1.74 | 3.48 |
+| DeepSeek | `deepseek-v3` | 0.252 | 0.378 |
+| Mistral | `mistral-large` | 0.50 | 1.50 |
+| Mistral | `mistral-small` | 0.15 | 0.60 |
+| Meta | `llama-4-maverick` | 0.15 | 0.60 |
+| Meta | `llama-4-scout` | 0.08 | 0.30 |
+| Meta | `llama-3.3-70b-instruct` | 0.10 | 0.32 |
+| Alibaba | `qwen3.6-max` | 1.30 | 7.80 |
+| Alibaba | `qwen3.6-plus` | 0.50 | 3.00 |
+| Alibaba | `qwen3.6-flash` | 0.25 | 1.50 |
+| Alibaba | `qwen3.5-plus` | 0.40 | 2.40 |
+| Alibaba | `qwen3.5-flash` | 0.10 | 0.40 |
+| — | `github-copilot` | 0.00 | 0.00 |
+
+Prices are per million tokens. Override any entry or add a new model via `model_pricing` in `~/.config/ecotokens/config.json`:
+
+```json
+{
+  "model_pricing": {
+    "my-custom-model": { "input_usd_per_1m": 0.50, "output_usd_per_1m": 2.00 }
+  }
+}
 ```
 
 ### Word abbreviations *(optional)*

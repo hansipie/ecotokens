@@ -35,11 +35,20 @@ pub struct ModelPrice {
 
 fn default_model_pricing() -> HashMap<String, ModelPrice> {
     let mut m = HashMap::new();
+
+    // --- Anthropic Claude ---
     m.insert(
         "claude-haiku-4-5".into(),
         ModelPrice {
-            input_usd_per_1m: 0.80,
-            output_usd_per_1m: 4.00,
+            input_usd_per_1m: 1.00,
+            output_usd_per_1m: 5.00,
+        },
+    );
+    m.insert(
+        "claude-haiku-4-5-20251001".into(),
+        ModelPrice {
+            input_usd_per_1m: 1.00,
+            output_usd_per_1m: 5.00,
         },
     );
     m.insert(
@@ -61,6 +70,215 @@ fn default_model_pricing() -> HashMap<String, ModelPrice> {
         ModelPrice {
             input_usd_per_1m: 15.00,
             output_usd_per_1m: 75.00,
+        },
+    );
+    m.insert(
+        "claude-opus-4-7".into(),
+        ModelPrice {
+            input_usd_per_1m: 5.00,
+            output_usd_per_1m: 25.00,
+        },
+    );
+
+    // --- OpenAI GPT ---
+    m.insert(
+        "gpt-4o".into(),
+        ModelPrice {
+            input_usd_per_1m: 2.50,
+            output_usd_per_1m: 10.00,
+        },
+    );
+    m.insert(
+        "gpt-4o-mini".into(),
+        ModelPrice {
+            input_usd_per_1m: 0.15,
+            output_usd_per_1m: 0.60,
+        },
+    );
+    m.insert(
+        "gpt-4.1".into(),
+        ModelPrice {
+            input_usd_per_1m: 2.00,
+            output_usd_per_1m: 8.00,
+        },
+    );
+    m.insert(
+        "gpt-4.1-mini".into(),
+        ModelPrice {
+            input_usd_per_1m: 0.40,
+            output_usd_per_1m: 1.60,
+        },
+    );
+    m.insert(
+        "gpt-4.1-nano".into(),
+        ModelPrice {
+            input_usd_per_1m: 0.10,
+            output_usd_per_1m: 0.40,
+        },
+    );
+    m.insert(
+        "gpt-5".into(),
+        ModelPrice {
+            input_usd_per_1m: 1.25,
+            output_usd_per_1m: 10.00,
+        },
+    );
+    m.insert(
+        "gpt-5-mini".into(),
+        ModelPrice {
+            input_usd_per_1m: 0.25,
+            output_usd_per_1m: 2.00,
+        },
+    );
+    m.insert(
+        "gpt-5-nano".into(),
+        ModelPrice {
+            input_usd_per_1m: 0.05,
+            output_usd_per_1m: 0.40,
+        },
+    );
+    // --- OpenAI Reasoning ---
+    m.insert(
+        "o1".into(),
+        ModelPrice {
+            input_usd_per_1m: 15.00,
+            output_usd_per_1m: 60.00,
+        },
+    );
+    m.insert(
+        "o3".into(),
+        ModelPrice {
+            input_usd_per_1m: 2.00,
+            output_usd_per_1m: 8.00,
+        },
+    );
+    m.insert(
+        "o4-mini".into(),
+        ModelPrice {
+            input_usd_per_1m: 1.10,
+            output_usd_per_1m: 4.40,
+        },
+    );
+
+    // --- Google Gemini ---
+    m.insert(
+        "gemini-2.5-pro".into(),
+        ModelPrice {
+            input_usd_per_1m: 1.25,
+            output_usd_per_1m: 10.00,
+        },
+    );
+    m.insert(
+        "gemini-2.5-flash".into(),
+        ModelPrice {
+            input_usd_per_1m: 0.30,
+            output_usd_per_1m: 2.50,
+        },
+    );
+    m.insert(
+        "gemini-2.5-flash-lite".into(),
+        ModelPrice {
+            input_usd_per_1m: 0.10,
+            output_usd_per_1m: 0.40,
+        },
+    );
+    m.insert(
+        "gemini-2.0-flash".into(),
+        ModelPrice {
+            input_usd_per_1m: 0.10,
+            output_usd_per_1m: 0.40,
+        },
+    );
+
+    // --- DeepSeek ---
+    m.insert(
+        "deepseek-chat".into(),
+        ModelPrice {
+            input_usd_per_1m: 1.74,
+            output_usd_per_1m: 3.48,
+        },
+    );
+    m.insert(
+        "deepseek-v3".into(),
+        ModelPrice {
+            input_usd_per_1m: 0.252,
+            output_usd_per_1m: 0.378,
+        },
+    );
+
+    // --- Mistral ---
+    m.insert(
+        "mistral-large".into(),
+        ModelPrice {
+            input_usd_per_1m: 0.50,
+            output_usd_per_1m: 1.50,
+        },
+    );
+    m.insert(
+        "mistral-small".into(),
+        ModelPrice {
+            input_usd_per_1m: 0.15,
+            output_usd_per_1m: 0.60,
+        },
+    );
+
+    // --- Meta Llama ---
+    m.insert(
+        "llama-4-maverick".into(),
+        ModelPrice {
+            input_usd_per_1m: 0.15,
+            output_usd_per_1m: 0.60,
+        },
+    );
+    m.insert(
+        "llama-4-scout".into(),
+        ModelPrice {
+            input_usd_per_1m: 0.08,
+            output_usd_per_1m: 0.30,
+        },
+    );
+    m.insert(
+        "llama-3.3-70b-instruct".into(),
+        ModelPrice {
+            input_usd_per_1m: 0.10,
+            output_usd_per_1m: 0.32,
+        },
+    );
+
+    // --- Alibaba Qwen ---
+    m.insert(
+        "qwen3.6-max".into(),
+        ModelPrice {
+            input_usd_per_1m: 1.30,
+            output_usd_per_1m: 7.80,
+        },
+    );
+    m.insert(
+        "qwen3.6-plus".into(),
+        ModelPrice {
+            input_usd_per_1m: 0.50,
+            output_usd_per_1m: 3.00,
+        },
+    );
+    m.insert(
+        "qwen3.6-flash".into(),
+        ModelPrice {
+            input_usd_per_1m: 0.25,
+            output_usd_per_1m: 1.50,
+        },
+    );
+    m.insert(
+        "qwen3.5-plus".into(),
+        ModelPrice {
+            input_usd_per_1m: 0.40,
+            output_usd_per_1m: 2.40,
+        },
+    );
+    m.insert(
+        "qwen3.5-flash".into(),
+        ModelPrice {
+            input_usd_per_1m: 0.10,
+            output_usd_per_1m: 0.40,
         },
     );
     // Subscription-based: no per-token cost, token savings still tracked
@@ -214,6 +432,9 @@ impl Settings {
         let mut settings = legacy.settings;
         settings.abbreviations_custom =
             Self::load_abbreviations(abbreviations_path).unwrap_or(legacy.abbreviations_custom);
+        for (k, v) in default_model_pricing() {
+            settings.model_pricing.entry(k).or_insert(v);
+        }
         settings
     }
 
