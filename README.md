@@ -496,7 +496,6 @@ Built-in models:
 | Google | `gemini-2.5-flash` | 0.30 | 2.50 |
 | Google | `gemini-2.5-flash-lite` | 0.10 | 0.40 |
 | Google | `gemini-2.0-flash` | 0.10 | 0.40 |
-| DeepSeek | `deepseek-chat` | 1.74 | 3.48 |
 | DeepSeek | `deepseek-v3` | 0.252 | 0.378 |
 | Mistral | `mistral-large` | 0.50 | 1.50 |
 | Mistral | `mistral-small` | 0.15 | 0.60 |
