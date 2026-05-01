@@ -25,8 +25,6 @@ mod tokens;
 mod trace;
 mod tui;
 
-const DEFAULT_MODEL: &str = "sonnet";
-
 #[derive(Parser)]
 #[command(
     name = "ecotokens",
@@ -105,6 +103,9 @@ enum Commands {
         /// Set global debug mode
         #[arg(long, value_name = "true|false")]
         debug: Option<bool>,
+        /// Set the default model used for cost calculations
+        #[arg(long)]
+        model: Option<String>,
         /// Set embed provider: ollama, lmstudio, none
         #[arg(long)]
         embed_provider: Option<String>,
@@ -422,7 +423,8 @@ fn cmd_gain(period: String, json: bool, model: Option<String>, history: bool) {
             std::process::exit(1);
         }
     };
-    let model_str = model.as_deref().unwrap_or(DEFAULT_MODEL);
+    let settings = config::Settings::load();
+    let model_str = model.as_deref().unwrap_or(&settings.default_model);
     let mut items = read_from(&path).unwrap_or_default();
 
     if history {
@@ -1027,6 +1029,7 @@ fn cmd_uninstall(target: String) {
 fn cmd_config(
     json: bool,
     debug: Option<bool>,
+    model: Option<String>,
     embed_provider: Option<String>,
     embed_url: Option<String>,
     embed_model: Option<String>,
@@ -1040,6 +1043,23 @@ fn cmd_config(
 
     if let Some(d) = debug {
         settings.debug = d;
+        dirty = true;
+    }
+
+    if let Some(ref m) = model {
+        if m.is_empty() || !settings.model_pricing.contains_key(m.as_str()) {
+            if !m.is_empty() {
+                eprintln!("unknown model: '{}'", m);
+            }
+            let mut known = config::models::model_names();
+            known.sort();
+            eprintln!("available models:");
+            for name in known {
+                eprintln!("  {}", name);
+            }
+            std::process::exit(1);
+        }
+        settings.default_model = m.clone();
         dirty = true;
     }
 
@@ -1110,6 +1130,7 @@ fn cmd_config(
     } else {
         println!("hook_installed        : {}", hook_installed);
         println!("debug                 : {}", settings.debug);
+        println!("default_model         : {}", settings.default_model);
         println!("exclusions            : {:?}", settings.exclusions);
         println!("embed_provider        : {}", provider_str);
         println!("ai_summary_enabled    : {}", settings.ai_summary_enabled);
@@ -2296,10 +2317,11 @@ fn main() {
         Commands::Config {
             json,
             debug,
+            model,
             embed_provider,
             embed_url,
             embed_model,
-        } => cmd_config(json, debug, embed_provider, embed_url, embed_model),
+        } => cmd_config(json, debug, model, embed_provider, embed_url, embed_model),
         Commands::Index {
             path,
             index_dir,

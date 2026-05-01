@@ -34,44 +34,7 @@ pub struct ModelPrice {
 }
 
 fn default_model_pricing() -> HashMap<String, ModelPrice> {
-    let mut m = HashMap::new();
-    m.insert(
-        "claude-haiku-4-5".into(),
-        ModelPrice {
-            input_usd_per_1m: 0.80,
-            output_usd_per_1m: 4.00,
-        },
-    );
-    m.insert(
-        "claude-sonnet-4-5".into(),
-        ModelPrice {
-            input_usd_per_1m: 3.00,
-            output_usd_per_1m: 15.00,
-        },
-    );
-    m.insert(
-        "claude-sonnet-4-6".into(),
-        ModelPrice {
-            input_usd_per_1m: 3.00,
-            output_usd_per_1m: 15.00,
-        },
-    );
-    m.insert(
-        "claude-opus-4-6".into(),
-        ModelPrice {
-            input_usd_per_1m: 15.00,
-            output_usd_per_1m: 75.00,
-        },
-    );
-    // Subscription-based: no per-token cost, token savings still tracked
-    m.insert(
-        "github-copilot".into(),
-        ModelPrice {
-            input_usd_per_1m: 0.0,
-            output_usd_per_1m: 0.0,
-        },
-    );
-    m
+    super::models::build_pricing_map()
 }
 
 #[derive(Debug, Clone, Serialize, Deserialize)]
@@ -214,6 +177,9 @@ impl Settings {
         let mut settings = legacy.settings;
         settings.abbreviations_custom =
             Self::load_abbreviations(abbreviations_path).unwrap_or(legacy.abbreviations_custom);
+        for (k, v) in default_model_pricing() {
+            settings.model_pricing.entry(k).or_insert(v);
+        }
         settings
     }
 

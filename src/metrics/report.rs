@@ -55,12 +55,10 @@ fn pricing_usd_per_1m(model: &str, settings: &Settings) -> f64 {
     if let Some(p) = settings.model_pricing.get(model) {
         return p.input_usd_per_1m;
     }
-    match model {
-        "claude-haiku-4-5" => 0.80,
-        "claude-opus-4-6" => 15.00,
-        "github-copilot" => 0.0,
-        _ => 3.00,
+    if let Some(p) = crate::config::models::get_price(model) {
+        return p.input_usd_per_1m;
     }
+    3.00
 }
 
 fn period_start(period: &Period) -> Option<DateTime<Utc>> {

@@ -5,6 +5,17 @@ All notable changes to this project will be documented in this file.
 The format is based on [Keep a Changelog](https://keepachangelog.com/en/1.0.0/),
 and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0.html).
 
+## [0.18.0] - 2026-04-30
+
+### Added
+
+- **Tarifs LLM élargis** : table de prix étendue de 5 à 36 modèles couvrant Anthropic (Claude Haiku/Sonnet/Opus 4.x–4.7), OpenAI (GPT-4o, GPT-4.1, GPT-5, o1, o3, o4-mini), Google (Gemini 2.0/2.5), DeepSeek (V3, V4), Mistral (Large/Small), Meta Llama (3.3/4) et Alibaba Qwen (qwen3.5/3.6) — prix input et output au million de tokens
+- **`claude-haiku-4-5`** : prix mis à jour 0.80 → 1.00 $/1M input, 4.00 → 5.00 $/1M output
+- **`claude-opus-4-7`** : nouveau modèle ajouté (5.00 $/1M input, 25.00 $/1M output)
+- **`ecotokens config --model MODEL`** : nouvelle option CLI pour définir le modèle par défaut utilisé dans les rapports de gain ; affiche la liste des modèles disponibles si la valeur est vide ou inconnue
+- **`ecotokens config`** : affiche désormais `default_model` dans la sortie texte
+- **`ecotokens gain`** : utilise désormais `settings.default_model` comme fallback (au lieu de la constante hardcodée `"sonnet"`)
+
 ## [0.17.0] - 2026-04-28
 
 ### Added
