@@ -5,6 +5,30 @@ All notable changes to this project will be documented in this file.
 The format is based on [Keep a Changelog](https://keepachangelog.com/en/1.0.0/),
 and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0.html).
 
+## [0.19.0] - 2026-05-02
+
+### Added
+
+- **Recherche sémantique (feature 009)** : retrieval dual BM25+vecteur avec fusion de scores (`0.4 × BM25 + 0.6 × cosinus`) — les résultats indiquent désormais leur source via le champ `retrieval_source` (`bm25` | `vector` | `both`)
+- **`EmbedProvider::Candle`** : provider d'embedding local zéro-config basé sur [Candle](https://github.com/huggingface/candle) — modèle `sentence-transformers/all-MiniLM-L6-v2` (384 dim) téléchargé automatiquement via HuggingFace Hub ; devient le seul provider d'embedding (remplace Ollama et LmStudio)
+- **Support GPU optionnel pour Candle** : compilation avec `--features cuda` (NVIDIA) ou `--features metal` (Apple Silicon) active automatiquement le GPU ; CPU utilisé par défaut si aucune feature GPU n'est activée ou si le device est indisponible
+- **Index HNSW** (`hnsw_index.bin`) : index vectoriel ANN persisté en bincode, reconstruit en mémoire à chaque recherche (< 1 s pour < 20 k vecteurs) ; méta-données dans `hnsw_meta.json` (modèle, dimension, nombre de vecteurs, date)
+- **Chunking symbolique** : les fichiers Rust/Python/JS/TS/C/C++ sont découpés en chunks par symbole tree-sitter (une fonction = un chunk) ; les fichiers sans support tree-sitter utilisent des fenêtres de 50 lignes en fallback
+- **Embedding incrémental** : les chunks inchangés conservent leurs vecteurs entre deux indexations ; seuls les chunks nouveaux ou modifiés sont soumis au provider
+- **Détection de changement de modèle** : l'index HNSW est automatiquement reconstruit lorsque le modèle d'embedding change, sans reconstruire l'index BM25
+- **Migration automatique** `embeddings.json` → `hnsw_index.bin` : exécutée silencieusement au premier lancement après la mise à jour
+
+### Fixed
+
+- **Watcher — respect du `.gitignore`** : `reindex_single_file` ignorait le `.gitignore` lors de la ré-indexation incrémentale des fichiers modifiés ; les fichiers exclus par `.gitignore` sont désormais ignorés au même titre que lors de l'indexation complète
+
+### Changed
+
+- **`EmbedProvider`** : suppression des variants `Ollama` et `LmStudio` — Candle est désormais le seul backend d'embedding ; les configurations existantes avec `"type": "ollama"` ou `"type": "lm_studio"` sont migrées automatiquement vers Candle au chargement via le variant interne `Legacy`
+- **CLI `ecotokens config`** : `--embed-provider` n'accepte plus que `candle` et `none` (suppression de `ollama`, `lmstudio`) ; l'option `--embed-url` est supprimée (Candle n'utilise pas de service externe)
+- `EmbedProvider` : le variant par défaut passe de `None` à `Candle { model: "sentence-transformers/all-MiniLM-L6-v2" }` — les configurations existantes sans `embed_provider` héritent automatiquement du provider Candle
+- `SearchResult` : ajout des champs `line_end` (optionnel) et `retrieval_source` ; `file_path` est désormais extrait directement du document tantivy plutôt que dérivé de la clé de chunk
+
 ## [0.18.0] - 2026-04-30
 
 ### Added

@@ -48,17 +48,14 @@ impl SessionStore {
         std::fs::write(&path, serde_json::to_string_pretty(&self.0).unwrap())
     }
 
-    /// Remove stale entries: watcher is dead and no sessions reference them.
+    /// Remove stale entries: any entry whose watcher PID is dead or absent is dropped,
+    /// because a session count without a live watcher is unrecoverable.
     pub fn cleanup_dead(&mut self) {
-        for entry in self.0.values_mut() {
-            if let Some(pid) = entry.watcher_pid {
-                if !is_pid_running(pid) {
-                    entry.watcher_pid = None;
-                }
-            }
-        }
-        self.0
-            .retain(|_, e| e.sessions > 0 || e.watcher_pid.is_some());
+        self.0.retain(|_, e| {
+            e.watcher_pid
+                .map(|pid| is_pid_running(pid))
+                .unwrap_or(false)
+        });
     }
 
     /// Increment session count for `path`.

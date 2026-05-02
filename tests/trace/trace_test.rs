@@ -59,6 +59,7 @@ pub fn orchestrator() {
         index_dir: idx.path().to_path_buf(),
         progress: None,
         embed_provider: ecotokens::config::settings::EmbedProvider::None,
+        log_tx: None,
     };
     index_directory(opts).expect("indexing should succeed");
 

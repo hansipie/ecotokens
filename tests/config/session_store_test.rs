@@ -70,14 +70,17 @@ fn child_session_restarts_parent_watch_when_parent_entry_exists_without_live_wat
     let mut store = SessionStore::default();
     store.increment("/vault");
     store.register_watcher("/vault", dead_pid(), None);
+    // cleanup_dead removes the /vault entry (dead watcher).
     store.cleanup_dead();
+    assert!(!store.0.contains_key("/vault"));
 
+    // No ancestor entry exists: a new watcher is needed for the child path itself.
     let decision = store.increment_for_session("/vault/projects/petales");
 
-    assert_eq!(decision.watch_path, "/vault");
+    assert_eq!(decision.watch_path, "/vault/projects/petales");
     assert!(decision.needs_watcher);
     assert!(!decision.reused_existing_watcher);
-    assert_eq!(store.0["/vault"].sessions, 2);
+    assert_eq!(store.0["/vault/projects/petales"].sessions, 1);
 }
 
 // ── decrement / stop signal ───────────────────────────────────────────────────
@@ -187,8 +190,8 @@ fn cleanup_dead_clears_dead_watcher_pid() {
     store.register_watcher("/project-a", dead_pid(), None);
     store.cleanup_dead();
     assert!(
-        store.0["/project-a"].watcher_pid.is_none(),
-        "dead watcher pid must be cleared"
+        !store.0.contains_key("/project-a"),
+        "entry with dead watcher must be removed"
     );
 }
 
@@ -230,9 +233,8 @@ fn cleanup_dead_retains_entry_with_live_sessions_and_dead_watcher() {
     store.increment("/project-a");
     store.register_watcher("/project-a", dead_pid(), None);
     store.cleanup_dead();
-    // Entry kept (sessions > 0), but pid cleared (watcher dead).
-    assert!(store.0.contains_key("/project-a"));
-    assert!(store.0["/project-a"].watcher_pid.is_none());
+    // Dead watcher → entry removed regardless of session count.
+    assert!(!store.0.contains_key("/project-a"));
 }
 
 // ── dead watcher triggers new launch ─────────────────────────────────────────

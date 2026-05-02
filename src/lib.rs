@@ -2,6 +2,7 @@ pub mod abbreviations;
 pub mod config;
 pub mod daemon;
 pub mod duplicates;
+pub mod embed;
 pub mod filter;
 pub mod hook;
 pub mod install;

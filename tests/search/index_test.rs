@@ -30,6 +30,7 @@ fn index_empty_directory_succeeds() {
         index_dir: idx.path().to_path_buf(),
         progress: None,
         embed_provider: ecotokens::config::settings::EmbedProvider::None,
+        log_tx: None,
     };
     let stats = index_directory(opts).unwrap();
     assert_eq!(stats.file_count, 0);
@@ -46,6 +47,7 @@ fn index_fixture_project_finds_files() {
         index_dir: idx.path().to_path_buf(),
         progress: None,
         embed_provider: ecotokens::config::settings::EmbedProvider::None,
+        log_tx: None,
     };
     let stats = index_directory(opts).unwrap();
     assert!(
@@ -68,6 +70,7 @@ fn reset_clears_existing_index() {
         index_dir: idx.path().to_path_buf(),
         progress: None,
         embed_provider: ecotokens::config::settings::EmbedProvider::None,
+        log_tx: None,
     };
     index_directory(opts).unwrap();
 
@@ -78,6 +81,7 @@ fn reset_clears_existing_index() {
         index_dir: idx.path().to_path_buf(),
         progress: None,
         embed_provider: ecotokens::config::settings::EmbedProvider::None,
+        log_tx: None,
     };
     let stats2 = index_directory(opts2).unwrap();
     assert!(
@@ -101,6 +105,7 @@ fn incremental_update_does_not_duplicate() {
         index_dir: idx.path().to_path_buf(),
         progress: None,
         embed_provider: ecotokens::config::settings::EmbedProvider::None,
+        log_tx: None,
     };
     let stats1 = index_directory(opts.clone()).unwrap();
     assert!(stats1.file_count >= 2, "first pass should index files");

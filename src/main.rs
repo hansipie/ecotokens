@@ -14,6 +14,7 @@ mod abbreviations;
 mod config;
 mod daemon;
 mod duplicates;
+mod embed;
 mod filter;
 mod hook;
 mod install;
@@ -106,13 +107,10 @@ enum Commands {
         /// Set the default model used for cost calculations
         #[arg(long)]
         model: Option<String>,
-        /// Set embed provider: ollama, lmstudio, none
+        /// Set embed provider: candle, none
         #[arg(long)]
         embed_provider: Option<String>,
-        /// URL of the embeddings provider (e.g. http://localhost:11434)
-        #[arg(long)]
-        embed_url: Option<String>,
-        /// Model name for the embeddings provider (e.g. mxbai-embed-large)
+        /// Model name for the embeddings provider (e.g. sentence-transformers/all-MiniLM-L6-v2)
         #[arg(long)]
         embed_model: Option<String>,
     },
@@ -287,26 +285,17 @@ enum AbbreviationsAction {
 }
 
 /// RAII guard that restores terminal state when dropped, even on panic.
-struct TerminalGuard {
-    use_stderr: bool,
-}
+struct TerminalGuard;
 
 impl TerminalGuard {
     fn stdout() -> Self {
-        Self { use_stderr: false }
-    }
-    fn stderr() -> Self {
-        Self { use_stderr: true }
+        Self
     }
 }
 
 impl Drop for TerminalGuard {
     fn drop(&mut self) {
-        if self.use_stderr {
-            let _ = std::io::stderr().execute(LeaveAlternateScreen);
-        } else {
-            let _ = std::io::stdout().execute(LeaveAlternateScreen);
-        }
+        let _ = std::io::stdout().execute(LeaveAlternateScreen);
         let _ = disable_raw_mode();
     }
 }
@@ -1031,7 +1020,6 @@ fn cmd_config(
     debug: Option<bool>,
     model: Option<String>,
     embed_provider: Option<String>,
-    embed_url: Option<String>,
     embed_model: Option<String>,
 ) {
     use config::settings::EmbedProvider;
@@ -1065,29 +1053,15 @@ fn cmd_config(
 
     // Mutation via --embed-provider
     if let Some(ref provider_name) = embed_provider {
-        let default_url = match provider_name.as_str() {
-            "ollama" => "http://localhost:11434",
-            "lmstudio" => "http://localhost:1234",
-            _ => "",
-        };
-        let url = embed_url.clone().unwrap_or_else(|| default_url.to_string());
-        let model = embed_model.clone();
-
         settings.embed_provider = match provider_name.as_str() {
-            "ollama" => EmbedProvider::Ollama {
-                url,
-                model: model.unwrap_or_else(|| "nomic-embed-text".to_string()),
-            },
-            "lmstudio" => EmbedProvider::LmStudio {
-                url,
-                model: model.unwrap_or_else(|| "nomic-embed-text-v1.5".to_string()),
+            "candle" => EmbedProvider::Candle {
+                model: embed_model
+                    .clone()
+                    .unwrap_or_else(|| "sentence-transformers/all-MiniLM-L6-v2".to_string()),
             },
             "none" => EmbedProvider::None,
             other => {
-                eprintln!(
-                    "unknown provider: '{}'. Valid values: ollama, lmstudio, none",
-                    other
-                );
+                eprintln!("unknown provider: '{}'. Valid values: candle, none", other);
                 std::process::exit(1);
             }
         };
@@ -1095,10 +1069,11 @@ fn cmd_config(
     } else if let Some(ref m) = embed_model {
         // Changer uniquement le modèle sans toucher au provider
         match &mut settings.embed_provider {
-            EmbedProvider::Ollama { model, .. } => *model = m.clone(),
-            EmbedProvider::LmStudio { model, .. } => *model = m.clone(),
-            EmbedProvider::None => {
-                eprintln!("no embed provider configured; set one first with --embed-provider");
+            EmbedProvider::Candle { model } => *model = m.clone(),
+            EmbedProvider::None | EmbedProvider::Legacy => {
+                eprintln!(
+                    "no embed provider configured; set one first with --embed-provider candle"
+                );
                 std::process::exit(1);
             }
         }
@@ -1117,8 +1092,8 @@ fn cmd_config(
 
     let provider_str = match &settings.embed_provider {
         EmbedProvider::None => "none".to_string(),
-        EmbedProvider::Ollama { url, model } => format!("ollama ({}) model={}", url, model),
-        EmbedProvider::LmStudio { url, model } => format!("lmstudio ({}) model={}", url, model),
+        EmbedProvider::Legacy => "legacy (will migrate to candle on next save)".to_string(),
+        EmbedProvider::Candle { model } => format!("candle model={model}"),
     };
 
     let hook_installed = install::is_hook_installed(&settings_path);
@@ -1149,6 +1124,31 @@ fn cmd_config(
                 .unwrap_or("http://localhost:11434 (default)")
         );
         println!("abbreviations_enabled : {}", settings.abbreviations_enabled);
+
+        let watch_store = config::SessionStore::load();
+        let active_sessions: u32 = watch_store.0.values().map(|e| e.sessions).sum();
+        let active_watchers: usize = watch_store
+            .0
+            .values()
+            .filter(|e| {
+                e.watcher_pid
+                    .map(config::session_store::is_pid_running)
+                    .unwrap_or(false)
+            })
+            .count();
+        let auto_watch_status = if settings.auto_watch {
+            if active_watchers > 0 {
+                format!(
+                    "enabled ({} watcher(s) running, {} session(s))",
+                    active_watchers, active_sessions
+                )
+            } else {
+                "enabled (no watcher running)".to_string()
+            }
+        } else {
+            "disabled".to_string()
+        };
+        println!("auto_watch            : {}", auto_watch_status);
     }
 }
 
@@ -1156,6 +1156,12 @@ fn cmd_index(path: Option<PathBuf>, index_dir: Option<PathBuf>, reset: bool) {
     let cwd = std::env::current_dir().unwrap_or_else(|_| PathBuf::from("."));
     let target = path.unwrap_or(cwd);
     let idx_dir = index_dir.unwrap_or_else(default_index_dir);
+
+    // T055 — trigger model download if needed before starting progress bar
+    let settings = config::Settings::load();
+    if let config::settings::EmbedProvider::Candle { ref model } = settings.embed_provider {
+        let _ = embed::candle::acquire_model_files(model);
+    }
 
     let is_stderr_tty = std::io::IsTerminal::is_terminal(&std::io::stderr());
     let is_stdin_tty = std::io::IsTerminal::is_terminal(&std::io::stdin());
@@ -1170,63 +1176,77 @@ fn cmd_index(path: Option<PathBuf>, index_dir: Option<PathBuf>, reset: bool) {
         let total = search::index::count_indexable_files(&target);
 
         let counter = Arc::new(AtomicUsize::new(0));
+        eprintln!("ecotokens: indexing {}…", target.display());
+
         let opts = search::index::IndexOptions {
             reset,
             path: target,
             index_dir: idx_dir,
             progress: Some(counter.clone()),
             embed_provider: config::Settings::load().embed_provider,
+            log_tx: None,
         };
 
-        if let Err(e) = enable_raw_mode() {
-            eprintln!("failed to enable raw mode: {e}");
-        }
-        if let Err(e) = std::io::stderr().execute(EnterAlternateScreen) {
-            eprintln!("failed to enter alternate screen: {e}");
-        }
-        // Guard ensures terminal is restored even if indexing thread panics.
-        let _guard = TerminalGuard::stderr();
-        let backend = CrosstermBackend::new(std::io::stderr());
+        use indicatif::{ProgressBar, ProgressStyle};
+
+        let pb = ProgressBar::new(total);
+        pb.set_style(
+            ProgressStyle::with_template(
+                "{spinner:.blue} [{bar:40.green/white}] {pos}/{len} ({percent}%) · {per_sec} · eta {eta}",
+            )
+            .unwrap()
+            .tick_strings(&["⠋", "⠙", "⠹", "⠸", "⠼", "⠴", "⠦", "⠧", "⠇", "⠏", "✓"])
+            .progress_chars("██░"),
+        );
+        pb.enable_steady_tick(std::time::Duration::from_millis(80));
+
         let handle = std::thread::spawn(move || search::index::index_directory(opts));
 
-        let result = {
-            let mut terminal_opt = Terminal::new(backend).ok();
-            loop {
-                let done = counter.load(Ordering::Relaxed) as u64;
-                if let Some(ref mut terminal) = terminal_opt {
-                    let _ = terminal.draw(|f| {
-                        tui::progress::render_progress(
-                            f,
-                            f.area(),
-                            done,
-                            total.max(1),
-                            "Indexing…",
-                        );
-                    });
-                }
-                if handle.is_finished() {
-                    break;
-                }
-                std::thread::sleep(std::time::Duration::from_millis(50));
+        loop {
+            let done = counter.load(Ordering::Relaxed) as u64;
+            pb.set_position(done);
+            if handle.is_finished() {
+                break;
             }
-            // Draw 100%
-            if let Some(ref mut terminal) = terminal_opt {
-                let _ = terminal.draw(|f| {
-                    tui::progress::render_progress(f, f.area(), total, total.max(1), "Indexing…");
-                });
-            }
-            handle.join().expect("indexing thread panicked")
-        };
+            std::thread::sleep(std::time::Duration::from_millis(50));
+        }
+        pb.set_position(total);
+        pb.finish_and_clear();
 
-        // _guard drops here, restoring terminal before printing result
-        drop(_guard);
+        let result = handle.join().expect("indexing thread panicked");
 
         match result {
             Ok(stats) => {
-                println!(
-                    "Indexed {} files, {} chunks",
-                    stats.file_count, stats.chunk_count
-                )
+                // T064 — log token efficiency ratio after UI is clear
+                if stats.chunk_count > 0 {
+                    let avg_chunk_tokens = 150u32;
+                    let filtered = stats.chunk_count.saturating_sub(5);
+                    let tokens_saved_est = filtered * avg_chunk_tokens;
+                    println!(
+                        "ecotokens: efficiency — {} chunks indexed, ~{} tokens saved per query (top-5 filter)",
+                        stats.chunk_count, tokens_saved_est
+                    );
+                }
+
+                let sem = if let Some(ref m) = stats.embed_model {
+                    format!(
+                        "\n  Semantic: {} embeddings (model: {})",
+                        stats.vector_count, m
+                    )
+                } else {
+                    "\n  Semantic: unavailable (BM25 only)".to_string()
+                };
+                if stats.file_count == 0 {
+                    println!(
+                        "Index up to date — {} files already indexed{sem}",
+                        stats.total_file_count
+                    )
+                } else {
+                    println!(
+                        "Indexed {} files — {} chunks ({} symbolic){sem}",
+                        stats.file_count, stats.chunk_count, stats.symbolic_chunk_count
+                    )
+                }
             }
             Err(e) => {
                 eprintln!("index error: {e}");
@@ -1241,13 +1261,29 @@ fn cmd_index(path: Option<PathBuf>, index_dir: Option<PathBuf>, reset: bool) {
             index_dir: idx_dir,
             progress: None,
             embed_provider: config::Settings::load().embed_provider,
+            log_tx: None,
         };
         match search::index::index_directory(opts) {
             Ok(stats) => {
-                println!(
-                    "Indexed {} files, {} chunks",
-                    stats.file_count, stats.chunk_count
-                )
+                let sem = if let Some(ref m) = stats.embed_model {
+                    format!(
+                        "\n  Semantic: {} embeddings (model: {})",
+                        stats.vector_count, m
+                    )
+                } else {
+                    "\n  Semantic: unavailable (BM25 only)".to_string()
+                };
+                if stats.file_count == 0 {
+                    println!(
+                        "Index up to date — {} files already indexed{sem}",
+                        stats.total_file_count
+                    )
+                } else {
+                    println!(
+                        "Indexed {} files — {} chunks ({} symbolic){sem}",
+                        stats.file_count, stats.chunk_count, stats.symbolic_chunk_count
+                    )
+                }
             }
             Err(e) => {
                 eprintln!("index error: {e}");
@@ -1431,11 +1467,14 @@ fn cmd_search(query: String, top_k: usize, index_dir: Option<PathBuf>, flags: Se
                     let start = match_offset.saturating_sub(flags.context);
                     let end = (match_offset + flags.context + 1).min(lines.len());
                     let abs_line = r.line_start + 1;
+                    let line_range = if let Some(end) = r.line_end {
+                        format!("{}-{}", abs_line, end + 1)
+                    } else {
+                        format!("{}", abs_line + match_offset as u64)
+                    };
                     println!(
-                        "{}:{} (score: {:.3})",
-                        r.file_path,
-                        abs_line + match_offset as u64,
-                        r.score
+                        "{}:{} (score: {:.3}, via: {:?})",
+                        r.file_path, line_range, r.score, r.retrieval_source
                     );
                     for (i, line) in lines[start..end].iter().enumerate() {
                         println!("  {}:  {}", abs_line + (start + i) as u64, line);
@@ -1527,6 +1566,15 @@ fn cmd_watch(
     stop: bool,
     json: bool,
 ) {
+    // Purge stale entries when not in --background mode.
+    // --background is spawned by session_start right after incrementing the session count
+    // (watcher_pid still null at that point); running cleanup here would drop that valid entry.
+    if !background {
+        let mut store = config::SessionStore::load();
+        store.cleanup_dead();
+        let _ = store.save();
+    }
+
     // If --stop is requested, stop background watcher(s) and exit.
     if stop {
         let mut store = config::SessionStore::load();
@@ -1655,13 +1703,25 @@ fn cmd_watch(
     let total_files = search::index::count_indexable_files(&watch_path);
 
     let counter = Arc::new(AtomicUsize::new(0));
+    let (log_tx, log_rx) = std::sync::mpsc::channel::<String>();
     let opts = search::index::IndexOptions {
         reset: false,
         path: watch_path.clone(),
         index_dir: idx_dir.clone(),
         progress: Some(counter.clone()),
         embed_provider: config::Settings::load().embed_provider,
+        log_tx: if is_interactive { Some(log_tx) } else { None },
     };
+
+    // Pre-download embedding model before entering the TUI so that indicatif progress bars
+    // don't write to the terminal while ratatui owns the alternate screen.
+    if is_interactive {
+        if let config::settings::EmbedProvider::Candle { ref model } = opts.embed_provider {
+            if let Err(e) = embed::candle::acquire_model_files(model) {
+                eprintln!("ecotokens: warning: could not pre-download model: {e}");
+            }
+        }
+    }
 
     // Phase A — Initial indexing
     let report = if is_interactive {
@@ -1680,11 +1740,16 @@ fn cmd_watch(
 
         let index_result = {
             let mut terminal_opt = Terminal::new(backend).ok();
+            let mut log_messages: Vec<String> = Vec::new();
             loop {
+                while let Ok(msg) = log_rx.try_recv() {
+                    log_messages.push(msg);
+                }
                 let done = counter.load(Ordering::Relaxed) as u64;
                 if let Some(ref mut t) = terminal_opt {
+                    let logs = log_messages.clone();
                     let _ = t.draw(|f| {
-                        tui::watch::render_indexing(f, f.area(), done, total_files.max(1));
+                        tui::watch::render_indexing(f, f.area(), done, total_files.max(1), &logs);
                     });
                 }
                 if index_handle.is_finished() {
@@ -1692,10 +1757,20 @@ fn cmd_watch(
                 }
                 std::thread::sleep(std::time::Duration::from_millis(50));
             }
-            // Draw 100%
+            // Drain remaining messages, then draw 100%
+            while let Ok(msg) = log_rx.try_recv() {
+                log_messages.push(msg);
+            }
             if let Some(ref mut t) = terminal_opt {
+                let logs = log_messages.clone();
                 let _ = t.draw(|f| {
-                    tui::watch::render_indexing(f, f.area(), total_files, total_files.max(1));
+                    tui::watch::render_indexing(
+                        f,
+                        f.area(),
+                        total_files,
+                        total_files.max(1),
+                        &logs,
+                    );
                 });
             }
             index_handle.join().expect("indexing thread panicked")
@@ -1731,12 +1806,14 @@ fn cmd_watch(
                 while let Ok(e) = event_rx.try_recv() {
                     if e.status == "re-indexed" {
                         watch_stats.reindexed += 1;
+                        events.push(e);
                     } else if e.status.starts_with("error") {
                         watch_stats.errors += 1;
+                        events.push(e);
                     } else {
                         watch_stats.ignored += 1;
+                        // Ne pas ajouter les "ignored" à la liste d'affichage
                     }
-                    events.push(e);
                 }
 
                 let _ = terminal.draw(|f| {
@@ -2114,10 +2191,6 @@ fn cmd_session_start() {
 }
 
 fn cmd_session_end() {
-    let settings = config::Settings::load();
-    if !settings.auto_watch {
-        return;
-    }
     let cwd = std::env::current_dir().unwrap_or_else(|_| PathBuf::from("."));
     let cwd_str = cwd.to_string_lossy().to_string();
 
@@ -2319,9 +2392,8 @@ fn main() {
             debug,
             model,
             embed_provider,
-            embed_url,
             embed_model,
-        } => cmd_config(json, debug, model, embed_provider, embed_url, embed_model),
+        } => cmd_config(json, debug, model, embed_provider, embed_model),
         Commands::Index {
             path,
             index_dir,
