@@ -97,7 +97,7 @@ impl Interception {
         let savings_pct = if mode == FilterMode::Passthrough || tokens_before == 0 {
             0.0
         } else {
-            ((1.0 - tokens_after as f64 / tokens_before as f64) * 100.0) as f32
+            ((1.0 - tokens_after as f64 / tokens_before as f64) * 100.0).max(0.0) as f32
         };
         Interception {
             id: Uuid::new_v4().to_string(),
