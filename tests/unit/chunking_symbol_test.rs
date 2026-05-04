@@ -1,5 +1,4 @@
 use ecotokens::search::symbols::Symbol;
-use std::io::Write;
 use tempfile::TempDir;
 
 #[cfg(test)]
@@ -67,7 +66,7 @@ mod tests {
     // T042 — Les fichiers sans symboles tree-sitter tombent en fallback ligne
     #[test]
     fn no_symbols_falls_back_to_line_chunks() {
-        use ecotokens::search::index::{chunk_file_by_lines, chunk_file_by_symbols};
+        use ecotokens::search::index::chunk_file_by_lines;
         use ecotokens::search::symbols::parse_symbols;
 
         let dir = TempDir::new().unwrap();
