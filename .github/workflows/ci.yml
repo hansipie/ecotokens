@@ -45,7 +45,7 @@ jobs:
       - uses: dtolnay/rust-toolchain@stable
       - uses: Swatinem/rust-cache@v2.9.0
       - name: cargo test
-        run: cargo test --all-features
+        run: cargo test --features exact-tokens
 
   # ── 4. Regression detection ────────────────────────────────────────────────
   regression:

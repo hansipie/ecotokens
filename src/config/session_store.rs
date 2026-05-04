@@ -51,11 +51,8 @@ impl SessionStore {
     /// Remove stale entries: any entry whose watcher PID is dead or absent is dropped,
     /// because a session count without a live watcher is unrecoverable.
     pub fn cleanup_dead(&mut self) {
-        self.0.retain(|_, e| {
-            e.watcher_pid
-                .map(|pid| is_pid_running(pid))
-                .unwrap_or(false)
-        });
+        self.0
+            .retain(|_, e| e.watcher_pid.map(is_pid_running).unwrap_or(false));
     }
 
     /// Increment session count for `path`.
