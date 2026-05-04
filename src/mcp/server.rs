@@ -35,9 +35,10 @@ impl EcotokensServer {
         Prefer this over grep for code exploration."
     )]
     fn ecotokens_search(&self, Parameters(params): Parameters<SearchParams>) -> String {
+        let top_k = params.top_k.unwrap_or(5);
         let opts = crate::search::query::SearchOptions {
             query: params.query.clone(),
-            top_k: params.top_k.unwrap_or(5),
+            top_k,
             index_dir: self.index_dir.clone(),
             embed_provider: crate::config::Settings::load().embed_provider,
         };
