@@ -110,9 +110,10 @@ fn lookup_valid_id_returns_source_snippet() {
         index_dir: idx.path().to_path_buf(),
         progress: None,
         embed_provider: ecotokens::config::settings::EmbedProvider::None,
+        log_tx: None,
     };
     let index = open_or_create_index(&opts.index_dir, opts.reset).unwrap();
-    let mut writer = index.writer(15_000_000).unwrap();
+    let mut writer = index.writer(50_000_000).unwrap();
     write_symbols(&symbols, &mut writer).unwrap();
     writer.commit().unwrap();
 

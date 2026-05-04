@@ -19,6 +19,7 @@ pub struct Symbol {
     pub kind: String,
     pub file_path: String,
     pub line_start: u64,
+    pub line_end: u64,
     pub source: String,
 }
 
@@ -124,6 +125,7 @@ pub fn parse_symbols(path: &Path) -> Result<Vec<Symbol>, SymbolError> {
         if let Some(kind) = is_declaration_node(child.kind()) {
             if let Some(name) = extract_name(child, &content) {
                 let line_start = child.start_position().row as u64;
+                let line_end = child.end_position().row as u64;
                 let end_byte = child.end_byte().min(content.len());
                 let source_snippet = content[child.start_byte()..end_byte].to_string();
                 let id = format!("{rel}::{name}#{kind}");
@@ -133,6 +135,7 @@ pub fn parse_symbols(path: &Path) -> Result<Vec<Symbol>, SymbolError> {
                     kind: kind.to_string(),
                     file_path: rel.to_string(),
                     line_start,
+                    line_end,
                     source: source_snippet,
                 });
             }

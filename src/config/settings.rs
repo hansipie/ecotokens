@@ -2,29 +2,52 @@ use serde::{Deserialize, Serialize};
 use std::collections::HashMap;
 use std::path::{Path, PathBuf};
 
-#[derive(Debug, Clone, Default, Serialize, Deserialize, PartialEq)]
-#[serde(rename_all = "snake_case")]
+#[derive(Debug, Clone, Serialize, PartialEq)]
+#[serde(rename_all = "snake_case", tag = "type")]
 pub enum EmbedProvider {
-    #[default]
+    /// Built-in embedding via candle (zero-config, downloads model on first use).
+    Candle {
+        #[serde(default = "default_candle_model")]
+        model: String,
+    },
+    /// Disabled — embed_text returns None, search falls back to BM25 only.
     None,
-    #[serde(alias = "ollama")]
-    Ollama {
-        url: String,
-        #[serde(default = "default_ollama_model")]
-        model: String,
-    },
-    LmStudio {
-        url: String,
-        #[serde(default = "default_lmstudio_model")]
-        model: String,
-    },
+    /// Catch-all for legacy configs (ollama, lm_studio) — migrated to Candle at load time.
+    Legacy,
 }
 
-fn default_ollama_model() -> String {
-    "nomic-embed-text".to_string()
+impl<'de> serde::Deserialize<'de> for EmbedProvider {
+    fn deserialize<D: serde::Deserializer<'de>>(deserializer: D) -> Result<Self, D::Error> {
+        // Deserialize as a raw JSON value to handle both formats:
+        //   new:  {"type": "candle", "model": "..."}
+        //   old:  {"ollama": {"url": "...", "model": "..."}}  ← externally-tagged (pre-0.19)
+        let value = serde_json::Value::deserialize(deserializer)?;
+        match value.get("type").and_then(|v| v.as_str()) {
+            Some("candle") => {
+                let model = value
+                    .get("model")
+                    .and_then(|v| v.as_str())
+                    .unwrap_or("sentence-transformers/all-MiniLM-L6-v2")
+                    .to_string();
+                Ok(EmbedProvider::Candle { model })
+            }
+            Some("none") => Ok(EmbedProvider::None),
+            // Unknown type tag or missing type field (old externally-tagged format) → Legacy
+            _ => Ok(EmbedProvider::Legacy),
+        }
+    }
 }
-fn default_lmstudio_model() -> String {
-    "nomic-embed-text-v1.5".to_string()
+
+impl Default for EmbedProvider {
+    fn default() -> Self {
+        EmbedProvider::Candle {
+            model: default_candle_model(),
+        }
+    }
+}
+
+fn default_candle_model() -> String {
+    "sentence-transformers/all-MiniLM-L6-v2".to_string()
 }
 
 #[derive(Debug, Clone, Serialize, Deserialize)]
@@ -125,7 +148,7 @@ impl Default for Settings {
             debug: false,
             default_model: "claude-sonnet-4-6".into(),
             model_pricing: default_model_pricing(),
-            embed_provider: EmbedProvider::None,
+            embed_provider: EmbedProvider::default(),
             ai_summary_enabled: false,
             ai_summary_model: None,
             ai_summary_url: None,
@@ -179,6 +202,13 @@ impl Settings {
             Self::load_abbreviations(abbreviations_path).unwrap_or(legacy.abbreviations_custom);
         for (k, v) in default_model_pricing() {
             settings.model_pricing.entry(k).or_insert(v);
+        }
+        // Migrate legacy providers (None, ollama, lm_studio) → Candle (silent)
+        if matches!(
+            settings.embed_provider,
+            EmbedProvider::None | EmbedProvider::Legacy
+        ) {
+            settings.embed_provider = EmbedProvider::default();
         }
         settings
     }

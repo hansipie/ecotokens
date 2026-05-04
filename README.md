@@ -28,7 +28,7 @@ Token-saving companion for [Claude Code](https://claude.ai/code), [Gemini CLI](h
 | **Gain dashboard** | Interactive TUI — token savings by command family or project, sparkline, diff view, history log |
 | **Multi-agent support** | Works with Claude Code, Gemini CLI, Qwen Code, and Pi out of the box |
 | **Precision guarantees** | Errors, failures, and stack traces are never removed; secrets are redacted before filtering |
-| **Code intelligence** | BM25 + semantic search, symbol lookup, call graph tracing, near-duplicate detection |
+| **Code intelligence** | BM25 + vector search (Candle, zero-config), symbol lookup, call graph tracing, near-duplicate detection |
 | **MCP server** *(Claude Code, Gemini CLI, Qwen Code)* | Exposes code-intelligence tools over stdio (`ecotokens mcp-server`) and auto-registers in agent settings on install |
 | **AI summarization** *(optional)* | Large outputs compressed by a local Ollama model instead of being truncated |
 | **Word abbreviations** *(optional)* | Replace common words with shorter forms (`function`→`fn`, `configuration`→`config`, …) in narrative text, and nudge the model to do the same via a SessionStart instruction |
@@ -453,7 +453,7 @@ hook_installed        : true
 debug                 : false
 default_model         : claude-sonnet-4-6
 exclusions            : []
-embed_provider        : ollama (http://localhost:11434) model=qwen3-embedding:latest
+embed_provider        : candle (sentence-transformers/all-MiniLM-L6-v2)
 ai_summary_enabled    : false
 ai_summary_model      : llama3.2:3b (default)
 ai_summary_url        : http://localhost:11434 (default)
@@ -564,64 +564,44 @@ The feature flag stays in `~/.config/ecotokens/config.json`:
 
 > **Note:** Family detection uses the basename of the first token, so commands invoked via absolute path (`/usr/bin/git`), venv (`.venv/bin/pytest`), version managers (`~/.cargo/bin/cargo`), or wrappers (`poetry run`) are correctly matched to their family.
 
-## Embeddings (optional)
+## Embeddings
 
-When an embedding provider is configured, `ecotokens search` uses a hybrid BM25 + cosine similarity scoring (50/50) for more relevant results. Without a provider, pure BM25 is used.
+`ecotokens search` uses **dual BM25 + vector retrieval** with score fusion (`0.4 × BM25 + 0.6 × cosine`). The vector index is powered by [Candle](https://github.com/huggingface/candle) — a zero-config local embedding engine. No external service required.
 
-### Providers
+### Provider
 
-| Provider | Default URL | Default model |
-|----------|-------------|---------------|
-| `ollama` | `http://localhost:11434` | `nomic-embed-text` |
-| `lmstudio` | `http://localhost:1234` | `nomic-embed-text-v1.5` |
-
-### Configuration
+**Candle** (default) — runs `sentence-transformers/all-MiniLM-L6-v2` (384 dim) locally. The model is downloaded automatically from HuggingFace Hub on first use (~90 MB, cached in `~/.cache/huggingface/`).
 
 ```bash
-# Ollama with default model (nomic-embed-text)
-ecotokens config --embed-provider ollama --embed-url http://localhost:11434
-
-# Ollama with a custom model
-ecotokens config --embed-provider ollama --embed-url http://localhost:11434 --embed-model mxbai-embed-large
-
-# LM Studio with default model (nomic-embed-text-v1.5)
-ecotokens config --embed-provider lmstudio --embed-url http://localhost:1234
-
-# LM Studio with a custom model
-ecotokens config --embed-provider lmstudio --embed-url http://localhost:1234 --embed-model text-embedding-nomic-embed-text-v1.5
-
-# Change the model only (provider and URL are preserved)
-ecotokens config --embed-model all-minilm
-
-# View current configuration
-ecotokens config
-
-# Disable embeddings (fallback to BM25 only)
-ecotokens config --embed-provider none
+# Candle is active by default — nothing to configure
+ecotokens index --path /your/project
+ecotokens search "your query"
 ```
 
-### Model compatibility
+Each result includes a `retrieval_source` field (`bm25`, `vector`, or `both`) visible in JSON output.
 
-- **Ollama**: any model pulled via `ollama pull <model>` — e.g. `nomic-embed-text`, `mxbai-embed-large`, `all-minilm`, `bge-m3`
-- **LM Studio**: any embedding model loaded in LM Studio that exposes a `/v1/embeddings` endpoint (OpenAI-compatible)
+### Disable embeddings
 
-> **Note:** The embedding model must match the one used during indexing. If you change the model, re-run `ecotokens index` to regenerate the embeddings.
+```bash
+ecotokens config --embed-provider none    # fall back to pure BM25
+```
 
 ### Workflow
 
 ```bash
-# 1. Pull the model (Ollama example)
-ollama pull mxbai-embed-large
+# 1. Index your project (Candle embeddings computed automatically)
+ecotokens index --path /your/project
 
-# 2. Configure ecotokens
-ecotokens config --embed-provider ollama --embed-model mxbai-embed-large
-
-# 3. Re-index your project
-ecotokens index --path /your/project --reset
-
-# 4. Search with semantic scoring
+# 2. Search with hybrid scoring
 ecotokens search "your query"
+
+# 3. JSON output with retrieval_source
+ecotokens search "your query" --json
 ```
+
+### Model change detection
+
+When the configured embedding model changes, `ecotokens index` automatically rebuilds the vector index (`hnsw_index.bin`) without touching the BM25 index. Embeddings for unchanged files are reused between runs.
 
 ## AI summarization (optional)
 
@@ -674,7 +654,8 @@ Filtering is aggressive on noise, conservative on signal:
 
 - Rust ≥ 1.75 (stable)
 - One or more of: Claude Code (with hook support), Gemini CLI ≥ 0.1.0, Qwen Code, Pi ≥ 0.62.0
-- Ollama or LM Studio (optional, for semantic search embeddings and AI summarization)
+- Internet access on first use (Candle downloads `all-MiniLM-L6-v2` ~90 MB from HuggingFace Hub; cached locally after that)
+- Ollama (optional, for AI summarization only)
 
 ## Contributing
 

@@ -289,96 +289,64 @@ fn process_filter_result(
     }
 }
 
-/// AfterTool handler for Gemini CLI — replaces tool results with compressed output.
-/// Gemini uses `decision: "deny"` + `reason` to substitute the tool result.
-pub fn handle_post_gemini() {
+fn run_post_handler<T: Serialize>(
+    normalize: Option<fn(&str) -> &str>,
+    make_output: impl Fn(Option<String>) -> T,
+    fallback: impl Fn(),
+) {
     let settings = Settings::load();
     let depth = settings.post_hook_depth;
 
     let input = match read_post_input() {
         Some(mut i) => {
-            i.tool_name = normalize_gemini_tool_name(&i.tool_name).to_string();
+            if let Some(norm) = normalize {
+                i.tool_name = norm(&i.tool_name).to_string();
+            }
             i
         }
         None => {
-            if let Ok(s) = serde_json::to_string(&GeminiAfterToolOutput::allow()) {
-                print!("{s}");
-            }
+            fallback();
             return;
         }
     };
 
     let (result, family) = handle_post_input(&input, depth);
-    let output =
-        if let Some(final_output) = process_filter_result(result, &input, family, &settings) {
-            GeminiAfterToolOutput::deny(final_output)
-        } else {
-            GeminiAfterToolOutput::allow()
-        };
+    let output = make_output(process_filter_result(result, &input, family, &settings));
 
     match serde_json::to_string(&output) {
         Ok(json) => print!("{json}"),
-        Err(_) => {
+        Err(_) => fallback(),
+    }
+}
+
+/// AfterTool handler for Gemini CLI — replaces tool results with compressed output.
+/// Gemini uses `decision: "deny"` + `reason` to substitute the tool result.
+pub fn handle_post_gemini() {
+    run_post_handler(
+        Some(normalize_gemini_tool_name),
+        |o| o.map_or_else(GeminiAfterToolOutput::allow, GeminiAfterToolOutput::deny),
+        || {
             if let Ok(s) = serde_json::to_string(&GeminiAfterToolOutput::allow()) {
                 print!("{s}");
             }
-        }
-    }
+        },
+    );
 }
 
 /// PostToolUse handler for Qwen Code — injects compressed output as additionalContext.
 /// Qwen's PostToolUse uses the same additionalContext mechanism as Claude Code.
 pub fn handle_post_qwen() {
-    let settings = Settings::load();
-    let depth = settings.post_hook_depth;
-
-    let input = match read_post_input() {
-        Some(mut i) => {
-            i.tool_name = normalize_qwen_tool_name(&i.tool_name).to_string();
-            i
-        }
-        None => {
-            print!("{{}}");
-            return;
-        }
-    };
-
-    let (result, family) = handle_post_input(&input, depth);
-    let output =
-        if let Some(final_output) = process_filter_result(result, &input, family, &settings) {
-            PostHookOutput::with_context(final_output)
-        } else {
-            PostHookOutput::passthrough()
-        };
-
-    match serde_json::to_string(&output) {
-        Ok(json) => print!("{json}"),
-        Err(_) => print!("{{}}"),
-    }
+    run_post_handler(
+        Some(normalize_qwen_tool_name),
+        |o| o.map_or_else(PostHookOutput::passthrough, PostHookOutput::with_context),
+        || print!("{{}}"),
+    );
 }
 
 pub fn handle_post() {
-    let settings = Settings::load();
-    let depth = settings.post_hook_depth;
-
-    let input = match read_post_input() {
-        Some(i) => i,
-        None => {
-            print!("{{}}");
-            return;
-        }
-    };
-
-    let (result, family) = handle_post_input(&input, depth);
-    let output =
-        if let Some(final_output) = process_filter_result(result, &input, family, &settings) {
-            PostHookOutput::with_context(final_output)
-        } else {
-            PostHookOutput::passthrough()
-        };
-
-    match serde_json::to_string(&output) {
-        Ok(json) => print!("{json}"),
-        Err(_) => print!("{{}}"),
-    }
+    run_post_handler(
+        None,
+        |o| o.map_or_else(PostHookOutput::passthrough, PostHookOutput::with_context),
+        || print!("{{}}"),
+    );
 }

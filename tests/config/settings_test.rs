@@ -73,43 +73,12 @@ fn deserialization_with_missing_fields_uses_defaults() {
 // ── T072t — Tests embed_provider (CLI --embed-provider) ───────────────────────
 
 #[test]
-fn embed_provider_none_by_default() {
+fn embed_provider_candle_by_default() {
     let s = Settings::default();
-    assert_eq!(s.embed_provider, EmbedProvider::None);
-}
-
-#[test]
-fn embed_provider_ollama_roundtrip() {
-    let mut s = Settings::default();
-    s.embed_provider = EmbedProvider::Ollama {
-        url: "http://localhost:11434".to_string(),
-        model: "nomic-embed-text".to_string(),
-    };
-    let json = serde_json::to_string(&s).unwrap();
-    let s2: Settings = serde_json::from_str(&json).unwrap();
     assert_eq!(
-        s2.embed_provider,
-        EmbedProvider::Ollama {
-            url: "http://localhost:11434".to_string(),
-            model: "nomic-embed-text".to_string(),
-        }
-    );
-}
-
-#[test]
-fn embed_provider_lmstudio_roundtrip() {
-    let mut s = Settings::default();
-    s.embed_provider = EmbedProvider::LmStudio {
-        url: "http://localhost:1234".to_string(),
-        model: "nomic-embed-text-v1.5".to_string(),
-    };
-    let json = serde_json::to_string(&s).unwrap();
-    let s2: Settings = serde_json::from_str(&json).unwrap();
-    assert_eq!(
-        s2.embed_provider,
-        EmbedProvider::LmStudio {
-            url: "http://localhost:1234".to_string(),
-            model: "nomic-embed-text-v1.5".to_string(),
+        s.embed_provider,
+        EmbedProvider::Candle {
+            model: "sentence-transformers/all-MiniLM-L6-v2".to_string(),
         }
     );
 }
@@ -124,8 +93,27 @@ fn embed_provider_none_roundtrip() {
 }
 
 #[test]
-fn embed_provider_missing_in_json_defaults_to_none() {
+fn embed_provider_legacy_ollama_deserializes_to_legacy() {
+    let json = r#"{"embed_provider": {"type": "ollama", "url": "http://localhost:11434", "model": "nomic-embed-text"}}"#;
+    let s: Settings = serde_json::from_str(json).unwrap();
+    assert_eq!(s.embed_provider, EmbedProvider::Legacy);
+}
+
+#[test]
+fn embed_provider_legacy_lmstudio_deserializes_to_legacy() {
+    let json = r#"{"embed_provider": {"type": "lm_studio", "url": "http://localhost:1234", "model": "nomic-embed-text-v1.5"}}"#;
+    let s: Settings = serde_json::from_str(json).unwrap();
+    assert_eq!(s.embed_provider, EmbedProvider::Legacy);
+}
+
+#[test]
+fn embed_provider_missing_in_json_defaults_to_candle() {
     let json = r#"{"exclusions": []}"#;
     let s: Settings = serde_json::from_str(json).unwrap();
-    assert_eq!(s.embed_provider, EmbedProvider::None);
+    assert_eq!(
+        s.embed_provider,
+        EmbedProvider::Candle {
+            model: "sentence-transformers/all-MiniLM-L6-v2".to_string(),
+        }
+    );
 }

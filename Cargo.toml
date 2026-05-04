@@ -1,6 +1,6 @@
 [package]
 name = "ecotokens"
-version = "0.18.0"
+version = "0.19.0"
 edition = "2021"
 description = "Token optimizer for AI coding assistants — hooks into Claude Code/Gemini CLI to compress shell outputs and track USD savings"
 license = "MIT"
@@ -15,6 +15,8 @@ default = ["embeddings", "ai-summary"]
 exact-tokens = ["tiktoken-rs"]
 embeddings = []
 ai-summary = []
+cuda  = ["candle-core/cuda",  "candle-nn/cuda",  "candle-transformers/cuda"]
+metal = ["candle-core/metal", "candle-nn/metal", "candle-transformers/metal"]
 
 [dependencies]
 rmcp = { version = "1", features = ["server", "transport-io"] }
@@ -29,6 +31,7 @@ dirs = "5"
 rusqlite = { version = "0.31", features = ["bundled"] }
 toml = "0.8"
 ratatui = { version = "0.29", features = ["crossterm"] }
+indicatif = "0.17"
 uuid = { version = "1", features = ["v4"] }
 chrono = { version = "0.4", features = ["serde"] }
 
@@ -47,6 +50,15 @@ tree-sitter-cpp = "0.23"
 # P3 daemon — file watcher
 notify = "6"
 
+# P9 — semantic search (HNSW vector index + candle embedding)
+hnsw_rs = "0.3"
+candle-core = "0.9"
+candle-nn = "0.9"
+candle-transformers = "0.9"
+hf-hub = "0.3"
+tokenizers = { version = "0.19", default-features = false, features = ["onig"] }
+bincode = "1"
+
 # Optional
 tiktoken-rs = { version = "0.5", optional = true }
 reqwest = { version = "0.12", features = ["json", "blocking", "rustls-tls"], default-features = false }
@@ -54,6 +66,9 @@ reqwest = { version = "0.12", features = ["json", "blocking", "rustls-tls"], def
 # Daemonization for background watch
 [target.'cfg(unix)'.dependencies]
 daemonize = "0.5"
+
+[target.'cfg(target_env = "musl")'.dependencies]
+openssl = { version = "0.10", features = ["vendored"] }
 
 [dev-dependencies]
 tempfile = "3"
@@ -274,3 +289,19 @@ path = "tests/integration/config_test.rs"
 [[test]]
 name = "abbreviations_test"
 path = "tests/abbreviations/abbreviate_test.rs"
+
+[[test]]
+name = "hnsw_test"
+path = "tests/unit/hnsw_test.rs"
+
+[[test]]
+name = "embed_candle_test"
+path = "tests/unit/embed_candle_test.rs"
+
+[[test]]
+name = "chunking_symbol_test"
+path = "tests/unit/chunking_symbol_test.rs"
+
+[[test]]
+name = "semantic_search_test"
+path = "tests/integration/semantic_search_test.rs"

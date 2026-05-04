@@ -10,6 +10,7 @@ fn make_symbol(name: &str, line: u64) -> Symbol {
         kind: "fn".to_string(),
         file_path: "lib.rs".to_string(),
         line_start: line,
+        line_end: line,
         source: format!("fn {name}() {{}}"),
     }
 }

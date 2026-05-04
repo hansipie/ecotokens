@@ -72,6 +72,7 @@ pub fn watch_directory(
             pending.remove(&path);
             let ts = chrono::Utc::now().format("%H:%M:%S").to_string();
             let status = reindex_single_file(&path, watch_path, index_dir);
+
             if event_tx
                 .send(WatchEvent {
                     path,
@@ -91,10 +92,33 @@ pub fn watch_directory(
     Ok(())
 }
 
+fn is_gitignored(path: &Path, root: &Path) -> bool {
+    let mut builder = ignore::gitignore::GitignoreBuilder::new(root);
+    let gitignore = root.join(".gitignore");
+    if gitignore.exists() {
+        let _ = builder.add(&gitignore);
+    }
+    let Ok(gi) = builder.build() else {
+        return false;
+    };
+    // Path::strip_prefix (stdlib) supprime proprement le séparateur, ce qui
+    // donne "target/foo.rs" et non "/target/foo.rs". Le strip_prefix interne
+    // de la crate ignore est octet-par-octet et laisse un '/' résiduel qui
+    // empêche le matching des patterns gitignore.
+    let rel = path.strip_prefix(root).unwrap_or(path);
+    // matched_path_or_any_parents remonte les composantes : "target/build.rs"
+    // est ignoré parce que son parent "target" matche le pattern "target/".
+    gi.matched_path_or_any_parents(rel, path.is_dir())
+        .is_ignore()
+}
+
 /// Ré-indexe un seul fichier dans l'index tantivy.
 fn reindex_single_file(path: &Path, watch_path: &Path, index_dir: &Path) -> String {
     let ext = path.extension().and_then(|e| e.to_str()).unwrap_or("");
     if !is_indexable_extension(ext) {
+        return "ignored".to_string();
+    }
+    if is_gitignored(path, watch_path) {
         return "ignored".to_string();
     }
 
@@ -115,7 +139,7 @@ fn reindex_single_file(path: &Path, watch_path: &Path, index_dir: &Path) -> Stri
 
     let (_, file_path_field, content_field, kind_field, line_start_field, _) = build_schema();
 
-    let mut writer = match index.writer(8_000_000) {
+    let mut writer = match index.writer(100_000_000) {
         Ok(w) => w,
         Err(e) => return format!("error: {e}"),
     };

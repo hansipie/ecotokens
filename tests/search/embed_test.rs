@@ -9,35 +9,15 @@ fn test_provider_none_returns_none() {
     assert!(result.is_none(), "provider None doit retourner None");
 }
 
-// ── Tests Ollama provider (T068) ───────────────────────────────────────────────
+// ── Tests Legacy provider (T068) ──────────────────────────────────────────────
 
-/// Provider Ollama avec URL invalide → embed_text retourne None (fallback BM25).
+/// Provider Legacy (ancien ollama/lmstudio) → embed_text retourne None (fallback BM25).
 #[test]
-fn test_ollama_provider_unavailable_falls_back_to_none() {
-    let provider = EmbedProvider::Ollama {
-        url: "http://127.0.0.1:1".into(),
-        model: "nomic-embed-text".into(),
-    };
-    let result = embed_text("hello", &provider);
+fn test_legacy_provider_falls_back_to_none() {
+    let result = embed_text("hello", &EmbedProvider::Legacy);
     assert!(
         result.is_none(),
-        "provider indisponible doit retourner None (fallback BM25)"
-    );
-}
-
-// ── Tests LM Studio provider (T069) ───────────────────────────────────────────
-
-/// Provider LM Studio avec URL invalide → embed_text retourne None (fallback BM25).
-#[test]
-fn test_lmstudio_provider_unavailable_falls_back_to_none() {
-    let provider = EmbedProvider::LmStudio {
-        url: "http://127.0.0.1:1".into(),
-        model: "nomic-embed-text-v1.5".into(),
-    };
-    let result = embed_text("hello", &provider);
-    assert!(
-        result.is_none(),
-        "provider indisponible doit retourner None (fallback BM25)"
+        "provider Legacy doit retourner None (fallback BM25)"
     );
 }
 
