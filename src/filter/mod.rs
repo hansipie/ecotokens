@@ -41,6 +41,19 @@ fn is_cpp_command(command: &str) -> bool {
     )
 }
 
+/// Extrait la commande passée à `-c` dans `bash -c "..."`, `sh -c '...'`, etc.
+fn extract_shell_c_inner(cmd: &str) -> Option<&str> {
+    let pos = cmd.find(" -c ")?;
+    let inner = cmd[pos + 4..].trim();
+    if inner.len() >= 2 {
+        let b = inner.as_bytes();
+        if (b[0] == b'"' && b[b.len() - 1] == b'"') || (b[0] == b'\'' && b[b.len() - 1] == b'\'') {
+            return Some(&inner[1..inner.len() - 1]);
+        }
+    }
+    Some(inner)
+}
+
 pub fn detect_family(command: &str) -> CommandFamily {
     let cmd = command.trim();
 
@@ -99,6 +112,11 @@ pub fn detect_family(command: &str) -> CommandFamily {
         CommandFamily::Network
     } else if prog == "psql" {
         CommandFamily::Db
+    } else if matches!(prog, "bash" | "sh" | "zsh" | "dash") {
+        // `bash -c "git status"` → détecter la famille de la commande interne
+        extract_shell_c_inner(cmd)
+            .map(detect_family)
+            .unwrap_or(CommandFamily::Generic)
     } else {
         CommandFamily::Generic
     }

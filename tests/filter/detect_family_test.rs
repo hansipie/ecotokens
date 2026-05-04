@@ -151,6 +151,56 @@ fn python_versioned() {
     );
 }
 
+// --- bash -c / sh -c wrapping ---
+
+#[test]
+fn bash_c_git() {
+    assert_eq!(detect_family("bash -c \"git status\""), CommandFamily::Git);
+}
+
+#[test]
+fn bash_c_cargo() {
+    assert_eq!(
+        detect_family("bash -c 'cargo build --release'"),
+        CommandFamily::Cargo
+    );
+}
+
+#[test]
+fn sh_c_npm() {
+    assert_eq!(detect_family("sh -c \"npm test\""), CommandFamily::Js);
+}
+
+#[test]
+fn zsh_c_python() {
+    assert_eq!(
+        detect_family("zsh -c \"python3 script.py\""),
+        CommandFamily::Python
+    );
+}
+
+#[test]
+fn bash_e_c_git() {
+    // Flags supplémentaires avant -c
+    assert_eq!(
+        detect_family("bash -e -c \"git log --oneline\""),
+        CommandFamily::Git
+    );
+}
+
+#[test]
+fn bash_c_unquoted() {
+    assert_eq!(detect_family("bash -c cargo test"), CommandFamily::Cargo);
+}
+
+#[test]
+fn bash_c_unknown_stays_generic() {
+    assert_eq!(
+        detect_family("bash -c \"bundle exec rspec\""),
+        CommandFamily::Generic
+    );
+}
+
 // --- Cas qui doivent rester Generic ---
 
 #[test]
