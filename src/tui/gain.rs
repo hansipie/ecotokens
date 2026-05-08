@@ -24,6 +24,7 @@ pub enum DetailMode {
     #[default]
     Details,
     Diff,
+    SplitRaw,
 }
 
 #[derive(Clone, Copy, Default, PartialEq, Eq)]
@@ -46,7 +47,8 @@ impl DetailMode {
     pub fn toggle(self) -> Self {
         match self {
             DetailMode::Details => DetailMode::Diff,
-            DetailMode::Diff => DetailMode::Details,
+            DetailMode::Diff => DetailMode::SplitRaw,
+            DetailMode::SplitRaw => DetailMode::Details,
         }
     }
 }
@@ -213,6 +215,7 @@ pub fn render_gain(
     log_scroll: &mut usize,
     log_selected: Option<usize>,
     gauge_scroll: &mut usize,
+    split_raw_after_scroll: &mut usize,
 ) {
     // Outer layout: stats | pool(family+detail) | sparkline
     let outer = Layout::default()
@@ -248,6 +251,7 @@ pub fn render_gain(
             items,
             detail_mode,
             history_scroll,
+            split_raw_after_scroll,
             selected_proj_item,
         );
         render_sparkline(frame, outer[2], items, sparkline_mode);
@@ -305,6 +309,7 @@ pub fn render_gain(
         display_items,
         detail_mode,
         history_scroll,
+        split_raw_after_scroll,
         selected_log_item,
     );
     render_sparkline(frame, outer[2], items, sparkline_mode);
@@ -682,6 +687,7 @@ fn render_detail_inner<'a>(
     items: &'a [Interception],
     detail_mode: DetailMode,
     history_scroll: &mut usize,
+    after_scroll: &mut usize,
     selected_item: Option<&'a Interception>,
     empty_hint: &str,
     display_name: impl FnOnce(&str) -> String,
@@ -719,10 +725,12 @@ fn render_detail_inner<'a>(
         return;
     };
 
-    if detail_mode == DetailMode::Diff {
-        render_diff_panel(frame, area, &label, item, history_scroll);
-    } else {
-        render_details_panel(frame, area, &label, item, history_scroll);
+    match detail_mode {
+        DetailMode::Diff => render_diff_panel(frame, area, &label, item, history_scroll),
+        DetailMode::SplitRaw => {
+            render_split_raw_panel(frame, area, &label, item, history_scroll, after_scroll)
+        }
+        DetailMode::Details => render_details_panel(frame, area, &label, item, history_scroll),
     }
 }
 
@@ -733,6 +741,7 @@ fn render_detail<'a>(
     items: &'a [Interception],
     detail_mode: DetailMode,
     history_scroll: &mut usize,
+    after_scroll: &mut usize,
     selected_item: Option<&'a Interception>,
 ) {
     render_detail_inner(
@@ -742,6 +751,7 @@ fn render_detail<'a>(
         items,
         detail_mode,
         history_scroll,
+        after_scroll,
         selected_item,
         " j u: select a family  [d] diff/log  [p] projects",
         |n| n.to_string(),
@@ -762,6 +772,7 @@ fn render_project_detail<'a>(
     items: &'a [Interception],
     detail_mode: DetailMode,
     history_scroll: &mut usize,
+    after_scroll: &mut usize,
     selected_item: Option<&'a Interception>,
 ) {
     render_detail_inner(
@@ -771,6 +782,7 @@ fn render_project_detail<'a>(
         items,
         detail_mode,
         history_scroll,
+        after_scroll,
         selected_item,
         " j u: select a project  [d] diff  [f] families",
         project_label,
@@ -884,9 +896,9 @@ fn render_details_panel(
     *history_scroll = (*history_scroll).min(max_scroll);
     let scroll = *history_scroll;
     let scroll_hint = if lines.len() > visible {
-        format!("[{}/{}]  [o/l]  [d] diff ", scroll + 1, lines.len())
+        format!("[{}/{}]  [o/l]  [d] cycle ", scroll + 1, lines.len())
     } else {
-        format!("{} lines  [o/l] scroll  [d] diff ", lines.len())
+        format!("{} lines  [o/l] scroll  [d] cycle ", lines.len())
     };
     let block = Block::default()
         .borders(Borders::ALL)
@@ -898,6 +910,9 @@ fn render_details_panel(
         .wrap(Wrap { trim: false });
     frame.render_widget(p, area);
 }
+
+const MAX_HUNK_LINES: usize = 15;
+const KEEP_LINES: usize = 5;
 
 fn render_diff_panel(
     frame: &mut Frame,
@@ -929,7 +944,7 @@ fn render_diff_panel(
 
     if is_binary(before_text) || is_binary(after_text) {
         let block = Block::default().borders(Borders::ALL).title(format!(
-            " Diff : {name} · {cmd_short} · {}→{} tok ({}{:.0}%) · {ts_short}  [d] detail ",
+            " Diff : {name} · {cmd_short} · {}→{} tok ({}{:.0}%) · {ts_short}  [d] cycle ",
             item.tokens_before,
             item.tokens_after,
             if item.savings_pct >= 0.0 { '-' } else { '+' },
@@ -942,69 +957,139 @@ fn render_diff_panel(
         return;
     }
 
-    let diff = TextDiff::from_lines(before_text, after_text);
+    let available_width = area.width.saturating_sub(2) as usize;
 
-    let mut lines: Vec<Line> = Vec::new();
-    for group in diff.grouped_ops(3) {
-        // hunk header
-        let old_range = group.first().and_then(|op| diff.iter_changes(op).next());
-        let _ = old_range; // just for structure; build @@ line from op bounds
+    // ── Étape 1 : en-tête visuel BEFORE / AFTER ──────────────────────────────
+    let tb = item.tokens_before;
+    let ta = item.tokens_after;
+    let pct = if tb > 0 {
+        (1.0 - ta as f64 / tb as f64) * 100.0
+    } else {
+        0.0
+    };
+
+    let before_prefix = format!(" BEFORE  {:>8} tokens  ", tb);
+    let after_prefix = format!(" AFTER  {:>8} tokens  ", ta);
+    let dash_fill = available_width.saturating_sub(before_prefix.len());
+    let dashes: String = "─".repeat(dash_fill);
+
+    let bar_width = (area.width as usize).saturating_sub(40).max(5);
+    let suffix = format!("  −{:.1} %", pct.max(0.0));
+    let bar_avail = available_width
+        .saturating_sub(after_prefix.len())
+        .saturating_sub(suffix.len());
+    let bar_total = bar_width.min(bar_avail);
+    let filled = ((pct / 100.0) * bar_total as f64).round() as usize;
+    let filled = filled.min(bar_total);
+    let bar: String = "▌".repeat(filled) + &"░".repeat(bar_total - filled);
+
+    let mut lines: Vec<Line> = vec![
+        Line::from(vec![
+            Span::styled(
+                " BEFORE  ",
+                Style::default().fg(Color::Red).add_modifier(Modifier::BOLD),
+            ),
+            Span::styled(
+                format!("{:>8} tokens  ", tb),
+                Style::default().fg(Color::White),
+            ),
+            Span::styled(dashes, Style::default().fg(Color::DarkGray)),
+        ]),
+        Line::from(vec![
+            Span::styled(
+                " AFTER  ",
+                Style::default()
+                    .fg(Color::Green)
+                    .add_modifier(Modifier::BOLD),
+            ),
+            Span::styled(
+                format!("{:>8} tokens  ", ta),
+                Style::default().fg(Color::White),
+            ),
+            Span::styled(bar, Style::default().fg(Color::Green)),
+            Span::styled(
+                suffix,
+                Style::default()
+                    .fg(Color::Green)
+                    .add_modifier(Modifier::BOLD),
+            ),
+        ]),
+        Line::from(Span::styled(
+            "─".repeat(available_width),
+            Style::default().fg(Color::DarkGray),
+        )),
+    ];
+
+    // ── Étape 2 & 3 : hunks numérotés + troncature ──────────────────────────
+    let diff = TextDiff::from_lines(before_text, after_text);
+    let all_groups = diff.grouped_ops(3);
+    let total_groups = all_groups.len();
+
+    for (hunk_idx, group) in all_groups.iter().enumerate() {
         let first = &group[0];
-        let last = &group[group.len() - 1];
         let old_start = first.old_range().start + 1;
-        let new_start = first.new_range().start + 1;
-        let old_len: usize = group.iter().map(|op| op.old_range().len()).sum();
-        let new_len: usize = group.iter().map(|op| op.new_range().len()).sum();
-        let _ = last;
+        let section_label = format!(
+            "─── section {}/{}  l.{old_start} ",
+            hunk_idx + 1,
+            total_groups
+        );
+        let section_fill =
+            "─".repeat(available_width.saturating_sub(section_label.chars().count()));
         lines.push(Line::from(Span::styled(
-            format!("@@ -{old_start},{old_len} +{new_start},{new_len} @@"),
+            format!("{section_label}{section_fill}"),
             Style::default()
                 .fg(Color::Cyan)
                 .add_modifier(Modifier::BOLD),
         )));
 
-        for op in &group {
-            for change in diff.iter_changes(op) {
-                let (prefix, color) = match change.tag() {
-                    ChangeTag::Delete => ("-", Color::Red),
-                    ChangeTag::Insert => ("+", Color::Green),
-                    ChangeTag::Equal => (" ", Color::DarkGray),
-                };
-                let value = change.value().trim_end_matches('\n');
+        for op in group {
+            let changes: Vec<_> = diff.iter_changes(op).collect();
+            let all_delete = changes.iter().all(|c| c.tag() == ChangeTag::Delete);
+            let all_insert = changes.iter().all(|c| c.tag() == ChangeTag::Insert);
+            let truncate = changes.len() > MAX_HUNK_LINES && (all_delete || all_insert);
+
+            if truncate {
+                let omitted = changes.len() - 2 * KEEP_LINES;
+                for change in &changes[..KEEP_LINES] {
+                    push_diff_line(&mut lines, change);
+                }
                 lines.push(Line::from(Span::styled(
-                    format!("{prefix}{value}"),
-                    Style::default().fg(color),
+                    format!("⋯  +{omitted} lignes omises  ⋯"),
+                    Style::default().fg(Color::DarkGray),
                 )));
+                for change in &changes[changes.len() - KEEP_LINES..] {
+                    push_diff_line(&mut lines, change);
+                }
+            } else {
+                for change in &changes {
+                    push_diff_line(&mut lines, change);
+                }
             }
         }
     }
 
-    if lines.is_empty() {
+    if lines.len() <= 3 {
+        // Only the header was added, no hunks
         lines.push(Line::from(Span::styled(
             "(no differences)",
             Style::default().fg(Color::DarkGray),
         )));
     }
 
-    // Build block after computing lines so scroll hint can be included.
     let n = lines.len();
-    // Use a temporary block to compute inner height for visible calculation.
     let tmp_block = Block::default().borders(Borders::ALL);
     let visible = tmp_block.inner(area).height as usize;
     let max_scroll = n.saturating_sub(visible);
     *history_scroll = (*history_scroll).min(max_scroll);
     let scroll = *history_scroll;
     let scroll_hint = if n > visible {
-        format!("[{}/{}]  [o/l]  [d] detail ", scroll + 1, n)
+        format!("[{}/{}]  [o/l]  [d] cycle ", scroll + 1, n)
     } else {
-        format!("{n} lines  [o/l] scroll  [d] detail ")
+        format!("{n} lines  [o/l] scroll  [d] cycle ")
     };
     let block = Block::default().borders(Borders::ALL).title(format!(
-        " Diff : {name} · {cmd_short} · {}→{} tok ({}{:.0}%) · {ts_short} · {scroll_hint}",
-        item.tokens_before,
-        item.tokens_after,
-        if item.savings_pct >= 0.0 { '-' } else { '+' },
-        item.savings_pct.abs(),
+        " Diff : {name} · {cmd_short} · {}→{} tok · {ts_short} · {scroll_hint}",
+        item.tokens_before, item.tokens_after,
     ));
     let inner = block.inner(area);
     frame.render_widget(block, area);
@@ -1014,6 +1099,103 @@ fn render_diff_panel(
             .wrap(Wrap { trim: false })
             .scroll((scroll as u16, 0)),
         inner,
+    );
+}
+
+fn push_diff_line(lines: &mut Vec<Line>, change: &similar::Change<&str>) {
+    let (prefix, color) = match change.tag() {
+        ChangeTag::Delete => ("-", Color::Red),
+        ChangeTag::Insert => ("+", Color::Green),
+        ChangeTag::Equal => (" ", Color::DarkGray),
+    };
+    let value = change.value().trim_end_matches('\n');
+    lines.push(Line::from(Span::styled(
+        format!("{prefix}{value}"),
+        Style::default().fg(color),
+    )));
+}
+
+// ── Étape 4 : mode SplitRaw ─────────────────────────────────────────────────
+fn render_split_raw_panel(
+    frame: &mut Frame,
+    area: Rect,
+    name: &str,
+    item: &Interception,
+    history_scroll: &mut usize,
+    after_scroll: &mut usize,
+) {
+    let ts_short = item.timestamp.get(..16).unwrap_or(&item.timestamp);
+    let before_text = item.content_before.as_deref().unwrap_or("(vide)");
+    let after_text = item.content_after.as_deref().unwrap_or("(vide)");
+
+    let chunks = Layout::default()
+        .direction(Direction::Vertical)
+        .constraints([Constraint::Percentage(50), Constraint::Percentage(50)])
+        .split(area);
+
+    let before_lines: Vec<Line> = before_text
+        .lines()
+        .map(|l| Line::from(Span::styled(l.to_string(), Style::default().fg(Color::Red))))
+        .collect();
+    let after_lines: Vec<Line> = after_text
+        .lines()
+        .map(|l| {
+            Line::from(Span::styled(
+                l.to_string(),
+                Style::default().fg(Color::Green),
+            ))
+        })
+        .collect();
+
+    // BEFORE : scrollable via o/l
+    let visible_top = chunks[0].height.saturating_sub(2) as usize;
+    let max_before = before_lines.len().saturating_sub(visible_top);
+    *history_scroll = (*history_scroll).min(max_before);
+    let scroll_before = *history_scroll;
+
+    let before_hint = if before_lines.len() > visible_top {
+        format!(
+            "[{}/{}]  [o/l]  [d] cycle ",
+            scroll_before + 1,
+            before_lines.len()
+        )
+    } else {
+        format!("{} lignes  [o/l]  [d] cycle ", before_lines.len())
+    };
+
+    // AFTER : scrollable via Maj+O/Maj+L
+    let visible_bot = chunks[1].height.saturating_sub(2) as usize;
+    let max_after = after_lines.len().saturating_sub(visible_bot);
+    *after_scroll = (*after_scroll).min(max_after);
+    let scroll_after = *after_scroll;
+
+    let after_hint = if after_lines.len() > visible_bot {
+        format!("[{}/{}]  [O/L] ", scroll_after + 1, after_lines.len())
+    } else {
+        format!("{} lignes  [O/L] ", after_lines.len())
+    };
+
+    let top_block = Block::default().borders(Borders::ALL).title(format!(
+        " BEFORE · {name} · {} tok · {ts_short} · {before_hint}",
+        item.tokens_before
+    ));
+    let bot_block = Block::default()
+        .borders(Borders::ALL)
+        .title(format!(" AFTER · {} tok · {after_hint}", item.tokens_after));
+
+    frame.render_widget(
+        Paragraph::new(before_lines)
+            .block(top_block)
+            .wrap(Wrap { trim: false })
+            .scroll((scroll_before as u16, 0)),
+        chunks[0],
+    );
+    frame.render_widget(
+        Paragraph::new(after_lines)
+            .block(bot_block)
+            .wrap(Wrap { trim: false })
+            .scroll((scroll_after as u16, 0)),
+        chunks[1],
     );
 }
 

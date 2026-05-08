@@ -1,6 +1,6 @@
 [package]
 name = "ecotokens"
-version = "0.19.0"
+version = "0.20.0"
 edition = "2021"
 description = "Token optimizer for AI coding assistants — hooks into Claude Code/Gemini CLI to compress shell outputs and track USD savings"
 license = "MIT"
@@ -22,6 +22,7 @@ metal = ["candle-core/metal", "candle-nn/metal", "candle-transformers/metal"]
 rmcp = { version = "1", features = ["server", "transport-io"] }
 tokio = { version = "1", features = ["rt", "macros", "io-util"] }
 clap = { version = "4", features = ["derive"] }
+clap_complete = "4"
 serde = { version = "1", features = ["derive"] }
 serde_json = "1"
 similar = "2"

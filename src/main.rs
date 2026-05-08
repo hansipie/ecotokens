@@ -478,6 +478,7 @@ fn cmd_gain(period: String, json: bool, model: Option<String>, history: bool) {
             let mut log_scroll: usize = 0;
             let mut log_selected: Option<usize> = None;
             let mut gauge_scroll: usize = 0;
+            let mut split_raw_after_scroll: usize = 0;
             let mut last_reload = std::time::Instant::now();
             // Precomputed once at load time, updated only on reload.
             let mut sorted_projects: Vec<(String, f32)> = sorted_projects_from(&report);
@@ -515,6 +516,7 @@ fn cmd_gain(period: String, json: bool, model: Option<String>, history: bool) {
                         &mut log_scroll,
                         log_selected,
                         &mut gauge_scroll,
+                        &mut split_raw_after_scroll,
                     );
                 });
                 if poll(std::time::Duration::from_millis(500)).unwrap_or(false) {
@@ -544,6 +546,21 @@ fn cmd_gain(period: String, json: bool, model: Option<String>, history: bool) {
                             detail_mode = detail_mode.toggle();
                             history_scroll = 0;
                             log_scroll = 0;
+                            split_raw_after_scroll = 0;
+                        }
+                        // Maj+O/Maj+L scrollent le panneau APRÈS en mode SplitRaw.
+                        if detail_mode == tui::gain::DetailMode::SplitRaw {
+                            match key.code {
+                                KeyCode::Char('L') => {
+                                    split_raw_after_scroll =
+                                        split_raw_after_scroll.saturating_add(1);
+                                }
+                                KeyCode::Char('O') => {
+                                    split_raw_after_scroll =
+                                        split_raw_after_scroll.saturating_sub(1);
+                                }
+                                _ => {}
+                            }
                         }
                         if gain_mode == tui::gain::GainMode::Family && family_count > 0 {
                             match key.code {
