@@ -5,6 +5,20 @@ All notable changes to this project will be documented in this file.
 The format is based on [Keep a Changelog](https://keepachangelog.com/en/1.0.0/),
 and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0.html).
 
+## [0.20.0] - 2026-05-08
+
+### Added
+
+- **Shell completions** : nouvelle sous-commande `ecotokens completions SHELL` — génère un script de complétion natif pour `bash`, `zsh`, `fish`, `powershell` ou `elvish` via `clap_complete`
+
+### Changed
+
+- **`ecotokens gain` — vue diff améliorée** :
+  - En-tête visuel AVANT/APRÈS avec barre de progression inline et pourcentage d'économie
+  - Séparateurs de sections numérotés (`─── section 1/3  l.N ───`) en remplacement des marqueurs `@@ @@` illisibles
+  - Troncature automatique des séquences homogènes de plus de 15 lignes (`⋯ +N lignes omises ⋯`) pour éviter les diffs de 800 lignes rouges
+  - Nouveau mode **SplitRaw** (`[d]` cycle `Details → Diff → SplitRaw`) : vue panneau splitté 50/50 — AVANT en rouge (o/l) / APRÈS en vert (Maj+O / Maj+L) — utile pour les transformations radicales où le diff unifié est bruité
+
 ## [0.19.0] - 2026-05-02
 
 ### Added

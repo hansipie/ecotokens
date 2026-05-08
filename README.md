@@ -215,6 +215,25 @@ ecotokens uninstall --target all       # all targets
 | `ecotokens clear --older-than DURATION` | Delete interceptions older than a duration (e.g. `30d`, `2w`, `1m`) |
 | `ecotokens clear --family FAMILY` | Delete interceptions of a specific command family |
 | `ecotokens clear --project PATH` | Delete interceptions for a specific project (use `"[undefined]"` for entries without a git root) |
+| `ecotokens completions SHELL` | Generate a shell completion script (`bash`, `zsh`, `fish`, `powershell`, `elvish`) |
+
+## Shell completions
+
+```bash
+# zsh
+ecotokens completions zsh > ~/.zsh/completions/_ecotokens
+
+# bash
+ecotokens completions bash > ~/.local/share/bash-completion/completions/ecotokens
+
+# fish
+ecotokens completions fish > ~/.config/fish/completions/ecotokens.fish
+
+# PowerShell
+ecotokens completions powershell >> $PROFILE
+```
+
+Reload your shell (or open a new terminal) to activate completions.
 
 ## Gain dashboard
 
@@ -237,10 +256,11 @@ Interactive TUI showing token savings per command family and per project, with a
 |-----|--------|
 | `j` / `u` | Navigate up / down in list |
 | `k` / `i` | Scroll history log down / up (family log view) |
-| `l` / `o` | Scroll details / diff view down / up |
+| `l` / `o` | Scroll detail / diff / SplitRaw AVANT panel down / up |
+| `L` / `O` | Scroll SplitRaw APRÈS panel down / up |
 | `p` | Switch to project view (from family view) |
 | `f` | Switch to family view (from project view) |
-| `d` | Toggle detail mode (details / diff) — family view only |
+| `d` | Cycle detail mode (details → diff → split raw) — family view only |
 | `s` | Cycle sparkline scale (linear / log / capped) |
 | `q` / `Esc` | Quit |
 

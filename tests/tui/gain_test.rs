@@ -38,6 +38,7 @@ fn draw_gain(
                 &mut 0,
                 None,
                 &mut 0,
+                &mut 0,
             )
         })
         .unwrap();
@@ -189,6 +190,7 @@ fn gain_renders_without_panic_on_empty_data() {
                 &mut 0,
                 None,
                 &mut 0,
+                &mut 0,
             )
         })
         .unwrap();
@@ -230,6 +232,7 @@ fn gain_sparkline_present_adaptive() {
                 &mut 0,
                 None,
                 &mut 0,
+                &mut 0,
             )
         })
         .unwrap();
@@ -268,6 +271,7 @@ fn gain_shows_family_breakdown() {
                 &mut 0,
                 None,
                 &mut 0,
+                &mut 0,
             )
         })
         .unwrap();
@@ -302,6 +306,7 @@ fn gain_detail_no_content_shows_fallback() {
                 &mut 0,
                 &mut 0,
                 None,
+                &mut 0,
                 &mut 0,
             )
         })
@@ -370,6 +375,7 @@ fn gain_diff_mode_renders_diff_markers() {
                 &mut 0,
                 None,
                 &mut 0,
+                &mut 0,
             )
         })
         .unwrap();
@@ -413,6 +419,7 @@ fn gain_detail_mode_supports_scroll() {
                 &mut 0,
                 None,
                 &mut 0,
+                &mut 0,
             )
         })
         .unwrap();
@@ -452,6 +459,7 @@ fn gain_log_mode_renders_history() {
                 &mut 0,
                 &mut 0,
                 None,
+                &mut 0,
                 &mut 0,
             )
         })
@@ -508,6 +516,7 @@ fn gain_project_log_mode_renders_history() {
                 &mut 0,
                 None,
                 &mut 0,
+                &mut 0,
             )
         })
         .unwrap();
@@ -552,6 +561,7 @@ fn gain_project_history_panel_refreshes_between_draws() {
                 &mut 0,
                 None,
                 &mut 0,
+                &mut 0,
             )
         })
         .unwrap();
@@ -581,6 +591,7 @@ fn gain_project_history_panel_refreshes_between_draws() {
                 &mut 0,
                 &mut 0,
                 None,
+                &mut 0,
                 &mut 0,
             )
         })

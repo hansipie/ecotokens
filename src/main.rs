@@ -1,4 +1,5 @@
-use clap::{Parser, Subcommand};
+use clap::{CommandFactory, Parser, Subcommand};
+use clap_complete::{generate, Shell};
 use ratatui::backend::CrosstermBackend;
 use ratatui::crossterm::event::{poll, read, Event, KeyCode, KeyEventKind, KeyModifiers};
 use ratatui::crossterm::terminal::{
@@ -13,6 +14,7 @@ use crate::config::default_index_dir;
 mod abbreviations;
 mod config;
 mod daemon;
+mod debuglog;
 mod duplicates;
 mod embed;
 mod filter;
@@ -104,6 +106,9 @@ enum Commands {
         /// Set global debug mode
         #[arg(long, value_name = "true|false")]
         debug: Option<bool>,
+        /// Enable or disable debug logging to ~/.config/ecotokens/debug.log
+        #[arg(long, value_name = "true|false")]
+        debuglog: Option<bool>,
         /// Set the default model used for cost calculations
         #[arg(long)]
         model: Option<String>,
@@ -242,6 +247,11 @@ enum Commands {
         #[arg(long)]
         index_dir: Option<PathBuf>,
     },
+    /// Generate shell completion script (bash, zsh, fish, powershell, elvish)
+    Completions {
+        /// Target shell
+        shell: Shell,
+    },
 }
 
 #[derive(Subcommand)]
@@ -325,7 +335,18 @@ fn cmd_filter(args: Vec<String>, debug: bool, cwd: Option<PathBuf>) {
         eprintln!("ecotokens filter: no command given");
         std::process::exit(1);
     }
+    let settings = config::Settings::load();
+    let logger = debuglog::DebugLogger::new(settings.debuglog);
+    let uid = debuglog::gen_uid();
+
     let command = args.join(" ");
+    logger.log(
+        &uid,
+        "filter",
+        "input",
+        &serde_json::json!({"cmd": command, "cwd": cwd.as_ref().map(|p| p.display().to_string())}),
+    );
+
     let start = std::time::Instant::now();
 
     let output = std::process::Command::new(&args[0])
@@ -352,10 +373,15 @@ fn cmd_filter(args: Vec<String>, debug: bool, cwd: Option<PathBuf>) {
     let (filtered, tokens_before, tokens_after) =
         filter::run_filter_pipeline_with_cwd(&command, &raw, duration_ms, cwd.as_deref());
 
-    let settings = config::Settings::load();
     if debug || settings.debug {
         eprintln!("[ecotokens debug] command={command} tokens_before={tokens_before} tokens_after={tokens_after}");
     }
+    logger.log(
+        &uid,
+        "filter",
+        "output",
+        &serde_json::json!({"filtered": filtered, "tokens_before": tokens_before, "tokens_after": tokens_after}),
+    );
 
     print!("{filtered}");
     if exit_code != 0 {
@@ -452,6 +478,7 @@ fn cmd_gain(period: String, json: bool, model: Option<String>, history: bool) {
             let mut log_scroll: usize = 0;
             let mut log_selected: Option<usize> = None;
             let mut gauge_scroll: usize = 0;
+            let mut split_raw_after_scroll: usize = 0;
             let mut last_reload = std::time::Instant::now();
             // Precomputed once at load time, updated only on reload.
             let mut sorted_projects: Vec<(String, f32)> = sorted_projects_from(&report);
@@ -489,6 +516,7 @@ fn cmd_gain(period: String, json: bool, model: Option<String>, history: bool) {
                         &mut log_scroll,
                         log_selected,
                         &mut gauge_scroll,
+                        &mut split_raw_after_scroll,
                     );
                 });
                 if poll(std::time::Duration::from_millis(500)).unwrap_or(false) {
@@ -518,6 +546,21 @@ fn cmd_gain(period: String, json: bool, model: Option<String>, history: bool) {
                             detail_mode = detail_mode.toggle();
                             history_scroll = 0;
                             log_scroll = 0;
+                            split_raw_after_scroll = 0;
+                        }
+                        // Maj+O/Maj+L scrollent le panneau APRÈS en mode SplitRaw.
+                        if detail_mode == tui::gain::DetailMode::SplitRaw {
+                            match key.code {
+                                KeyCode::Char('L') => {
+                                    split_raw_after_scroll =
+                                        split_raw_after_scroll.saturating_add(1);
+                                }
+                                KeyCode::Char('O') => {
+                                    split_raw_after_scroll =
+                                        split_raw_after_scroll.saturating_sub(1);
+                                }
+                                _ => {}
+                            }
                         }
                         if gain_mode == tui::gain::GainMode::Family && family_count > 0 {
                             match key.code {
@@ -1018,6 +1061,7 @@ fn cmd_uninstall(target: String) {
 fn cmd_config(
     json: bool,
     debug: Option<bool>,
+    debuglog: Option<bool>,
     model: Option<String>,
     embed_provider: Option<String>,
     embed_model: Option<String>,
@@ -1031,6 +1075,11 @@ fn cmd_config(
 
     if let Some(d) = debug {
         settings.debug = d;
+        dirty = true;
+    }
+
+    if let Some(d) = debuglog {
+        settings.debuglog = d;
         dirty = true;
     }
 
@@ -1105,6 +1154,7 @@ fn cmd_config(
     } else {
         println!("hook_installed        : {}", hook_installed);
         println!("debug                 : {}", settings.debug);
+        println!("debuglog              : {}", settings.debuglog);
         println!("default_model         : {}", settings.default_model);
         println!("exclusions            : {:?}", settings.exclusions);
         println!("embed_provider        : {}", provider_str);
@@ -1294,6 +1344,15 @@ fn cmd_index(path: Option<PathBuf>, index_dir: Option<PathBuf>, reset: bool) {
 }
 
 fn cmd_outline(path: PathBuf, kinds: Option<Vec<String>>, depth: Option<u32>, json: bool) {
+    let logger = debuglog::DebugLogger::new(config::Settings::load().debuglog);
+    let uid = debuglog::gen_uid();
+    logger.log(
+        &uid,
+        "outline",
+        "input",
+        &serde_json::json!({"path": path.display().to_string(), "kinds": kinds, "depth": depth}),
+    );
+
     let opts = search::outline::OutlineOptions {
         path,
         depth,
@@ -1302,19 +1361,26 @@ fn cmd_outline(path: PathBuf, kinds: Option<Vec<String>>, depth: Option<u32>, js
     };
     match search::outline::outline_path(opts) {
         Ok(symbols) => {
-            if json {
-                let slim: Vec<_> = symbols
-                    .iter()
-                    .map(|s| {
-                        serde_json::json!({
-                            "id": s.id,
-                            "name": s.name,
-                            "kind": s.kind,
-                            "file_path": s.file_path,
-                            "line_start": s.line_start,
-                        })
+            let slim: Vec<_> = symbols
+                .iter()
+                .map(|s| {
+                    serde_json::json!({
+                        "id": s.id,
+                        "name": s.name,
+                        "kind": s.kind,
+                        "file_path": s.file_path,
+                        "line_start": s.line_start,
                     })
-                    .collect();
+                })
+                .collect();
+            logger.log(
+                &uid,
+                "outline",
+                "output",
+                &serde_json::Value::Array(slim.clone()),
+            );
+
+            if json {
                 println!("{}", serde_json::to_string_pretty(&slim).unwrap());
             } else if std::io::IsTerminal::is_terminal(&std::io::stdout()) {
                 if let Err(e) = enable_raw_mode() {
@@ -1362,10 +1428,28 @@ fn cmd_outline(path: PathBuf, kinds: Option<Vec<String>>, depth: Option<u32>, js
 }
 
 fn cmd_symbol(id: String, index_dir: Option<PathBuf>) {
+    let logger = debuglog::DebugLogger::new(config::Settings::load().debuglog);
+    let uid = debuglog::gen_uid();
+    logger.log(&uid, "symbol", "input", &serde_json::json!({"id": id}));
+
     let idx_dir = index_dir.unwrap_or_else(default_index_dir);
     match search::symbols::lookup_symbol(&id, &idx_dir) {
-        Ok(Some(snippet)) => println!("{snippet}"),
+        Ok(Some(snippet)) => {
+            logger.log(
+                &uid,
+                "symbol",
+                "output",
+                &serde_json::json!({"source": snippet}),
+            );
+            println!("{snippet}");
+        }
         Ok(None) => {
+            logger.log(
+                &uid,
+                "symbol",
+                "output",
+                &serde_json::json!({"error": "not found"}),
+            );
             eprintln!("Symbol not found: {id}");
             std::process::exit(1);
         }
@@ -1392,9 +1476,29 @@ struct SearchFlags {
 }
 
 fn cmd_search(query: String, top_k: usize, index_dir: Option<PathBuf>, flags: SearchFlags) {
+    let settings = config::Settings::load();
+    let logger = debuglog::DebugLogger::new(settings.debuglog);
+    let uid = debuglog::gen_uid();
+    logger.log(
+        &uid,
+        "search",
+        "input",
+        &serde_json::json!({
+            "query": query,
+            "top_k": top_k,
+            "flags": {
+                "context": flags.context,
+                "include": flags.include,
+                "exclude": flags.exclude,
+                "no_trace": flags.no_trace,
+                "json": flags.json,
+            }
+        }),
+    );
+
     let using_global_index = index_dir.is_none();
     let idx_dir = index_dir.unwrap_or_else(default_index_dir);
-    let embed_provider = config::Settings::load().embed_provider;
+    let embed_provider = settings.embed_provider;
     let opts = search::query::SearchOptions {
         query: query.clone(),
         top_k,
@@ -1432,6 +1536,13 @@ fn cmd_search(query: String, top_k: usize, index_dir: Option<PathBuf>, flags: Se
                     kept.push(r);
                 }
             }
+
+            logger.log(
+                &uid,
+                "search",
+                "output",
+                &serde_json::to_value(&kept).unwrap_or(serde_json::Value::Null),
+            );
 
             if flags.json {
                 // #64 — augment JSON output with callers if applicable
@@ -2281,6 +2392,12 @@ fn cmd_abbreviations_list() {
     }
 }
 
+fn cmd_completions(shell: Shell) {
+    let mut cmd = Cli::command();
+    let name = cmd.get_name().to_string();
+    generate(shell, &mut cmd, name, &mut std::io::stdout());
+}
+
 fn parse_version(v: &str) -> Option<(u32, u32, u32)> {
     let mut parts = v.splitn(3, '.');
     let major = parts.next()?.parse().ok()?;
@@ -2390,10 +2507,11 @@ fn main() {
         Commands::Config {
             json,
             debug,
+            debuglog,
             model,
             embed_provider,
             embed_model,
-        } => cmd_config(json, debug, model, embed_provider, embed_model),
+        } => cmd_config(json, debug, debuglog, model, embed_provider, embed_model),
         Commands::Index {
             path,
             index_dir,
@@ -2474,6 +2592,7 @@ fn main() {
             AbbreviationsAction::Disable => cmd_abbreviations_disable(),
             AbbreviationsAction::List => cmd_abbreviations_list(),
         },
+        Commands::Completions { shell } => cmd_completions(shell),
         Commands::McpServer { index_dir } => {
             let idx_dir = index_dir.unwrap_or_else(default_index_dir);
             let rt = tokio::runtime::Builder::new_current_thread()

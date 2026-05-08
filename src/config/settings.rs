@@ -105,6 +105,9 @@ pub struct Settings {
     /// Extra word→abbreviation pairs that override/extend the built-in dictionary
     #[serde(skip_serializing, skip_deserializing, default)]
     pub abbreviations_custom: HashMap<String, String>,
+    /// Write command input/output to ~/.config/ecotokens/debug.log (default: false)
+    #[serde(default)]
+    pub debuglog: bool,
 }
 
 #[derive(Debug, Clone, Default, Deserialize)]
@@ -158,6 +161,7 @@ impl Default for Settings {
             post_hook_depth: 1,
             abbreviations_enabled: false,
             abbreviations_custom: HashMap::new(),
+            debuglog: false,
         }
     }
 }

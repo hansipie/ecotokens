@@ -65,7 +65,7 @@ impl GeminiAfterToolOutput {
     }
 }
 
-#[derive(Debug, Clone, Deserialize)]
+#[derive(Debug, Clone, Deserialize, Serialize)]
 pub struct PostHookInput {
     pub tool_name: String,
     pub tool_input: serde_json::Value,
@@ -296,6 +296,8 @@ fn run_post_handler<T: Serialize>(
 ) {
     let settings = Settings::load();
     let depth = settings.post_hook_depth;
+    let logger = crate::debuglog::DebugLogger::new(settings.debuglog);
+    let uid = crate::debuglog::gen_uid();
 
     let input = match read_post_input() {
         Some(mut i) => {
@@ -310,11 +312,26 @@ fn run_post_handler<T: Serialize>(
         }
     };
 
+    logger.log(
+        &uid,
+        "hook-post",
+        "input",
+        &serde_json::to_value(&input).unwrap_or(serde_json::Value::Null),
+    );
+
     let (result, family) = handle_post_input(&input, depth);
     let output = make_output(process_filter_result(result, &input, family, &settings));
 
     match serde_json::to_string(&output) {
-        Ok(json) => print!("{json}"),
+        Ok(json) => {
+            logger.log(
+                &uid,
+                "hook-post",
+                "output",
+                &serde_json::from_str(&json).unwrap_or(serde_json::Value::Null),
+            );
+            print!("{json}");
+        }
         Err(_) => fallback(),
     }
 }
