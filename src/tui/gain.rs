@@ -734,6 +734,7 @@ fn render_detail_inner<'a>(
     }
 }
 
+#[allow(clippy::too_many_arguments)]
 fn render_detail<'a>(
     frame: &mut Frame,
     area: Rect,
@@ -765,6 +766,7 @@ fn render_detail<'a>(
     )
 }
 
+#[allow(clippy::too_many_arguments)]
 fn render_project_detail<'a>(
     frame: &mut Frame,
     area: Rect,
