@@ -314,51 +314,7 @@ ecotokens abbreviations disable   # back to default
 
 When enabled, a post-processing pass replaces full words with shorter forms in the narrative parts of tool outputs (code blocks between triple backticks are preserved). A matching `additionalContext` payload is emitted at `SessionStart` so the model adopts the same abbreviations in its own responses.
 
-Default abbreviations:
-
-| Word | Abbreviation |
-|------|--------------|
-| `administrator` | `admin` |
-| `administrators` | `admins` |
-| `application` | `app` |
-| `argument` | `arg` |
-| `arguments` | `args` |
-| `attribute` | `attr` |
-| `attributes` | `attrs` |
-| `command` | `cmd` |
-| `commands` | `cmds` |
-| `configuration` | `config` |
-| `database` | `db` |
-| `dependencies` | `deps` |
-| `dependency` | `dep` |
-| `development` | `dev` |
-| `directories` | `dirs` |
-| `directory` | `dir` |
-| `documentation` | `docs` |
-| `environment` | `env` |
-| `error` | `err` |
-| `errors` | `errs` |
-| `function` | `fn` |
-| `implementation` | `impl` |
-| `implementations` | `impls` |
-| `information` | `info` |
-| `message` | `msg` |
-| `messages` | `msgs` |
-| `package` | `pkg` |
-| `packages` | `pkgs` |
-| `parameter` | `param` |
-| `parameters` | `params` |
-| `production` | `prod` |
-| `reference` | `ref` |
-| `references` | `refs` |
-| `repositories` | `repos` |
-| `repository` | `repo` |
-| `request` | `req` |
-| `response` | `resp` |
-| `variable` | `var` |
-| `variables` | `vars` |
-| `warning` | `warn` |
-| `warnings` | `warns` |
+See the full list of default abbreviations in [docs/abbreviations.md](docs/abbreviations.md).
 
 Keep the feature flag in `~/.config/ecotokens/config.json`
 
@@ -455,6 +411,21 @@ ecotokens config           # show all settings (text)
 ecotokens config --json    # show all settings (JSON)
 ```
 
+Output includes:
+
+```bash
+hook_installed        : true
+debug                 : false
+debuglog              : false
+default_model         : claude-sonnet-4-6
+exclusions            : []
+embed_provider        : candle (sentence-transformers/all-MiniLM-L6-v2)
+ai_summary_enabled    : false
+ai_summary_model      : llama3.2:3b (default)
+ai_summary_url        : http://localhost:11434 (default)
+abbreviations_enabled : false
+```
+
 ### Debug mode
 
 Enable the global debug mode to see detailed interception logs and enable background logging for the `watch` command:
@@ -466,19 +437,23 @@ ecotokens config --debug false
 
 This updates the `debug` field in `~/.config/ecotokens/config.json`.
 
-Output includes:
+### Debug file logging
 
+Enable structured per-hook logging to a file for deeper tracing of what ecotokens intercepts:
+
+```bash
+ecotokens config --debuglog true
+ecotokens config --debuglog false
 ```
-hook_installed        : true
-debug                 : false
-default_model         : claude-sonnet-4-6
-exclusions            : []
-embed_provider        : candle (sentence-transformers/all-MiniLM-L6-v2)
-ai_summary_enabled    : false
-ai_summary_model      : llama3.2:3b (default)
-ai_summary_url        : http://localhost:11434 (default)
-abbreviations_enabled : false
+
+When enabled, every hook invocation appends a JSONL entry to `~/.config/ecotokens/debug.log`:
+
+```json
+{"ts":"2026-05-08T12:00:00Z","uid":"a1b2c3d4","cmd":"git status","phase":"input","data":{...}}
+{"ts":"2026-05-08T12:00:00Z","uid":"a1b2c3d4","cmd":"git status","phase":"output","data":{...}}
 ```
+
+Each entry contains a short `uid` to correlate the input and output phases of the same invocation. Distinct from `--debug` (which prints to stderr) — `--debuglog` writes silently to disk and survives across sessions.
 
 ### Default model for cost calculations
 
@@ -492,44 +467,9 @@ ecotokens config --model unknown-model      # unknown model → lists available 
 
 The model name must be present in the built-in pricing table (or overridden via `model_pricing` in `~/.config/ecotokens/config.json`). Passing an empty value or an unrecognised name prints the full list and exits.
 
-Built-in models:
+See the full list of built-in models and prices in [docs/models.md](docs/models.md).
 
-| Provider | Model | Input ($/1M) | Output ($/1M) |
-|----------|-------|---:|---:|
-| Anthropic | `claude-haiku-4-5` / `claude-haiku-4-5-20251001` | 1.00 | 5.00 |
-| Anthropic | `claude-sonnet-4-5` | 3.00 | 15.00 |
-| Anthropic | `claude-sonnet-4-6` | 3.00 | 15.00 |
-| Anthropic | `claude-opus-4-6` | 15.00 | 75.00 |
-| Anthropic | `claude-opus-4-7` | 5.00 | 25.00 |
-| OpenAI | `gpt-4o` | 2.50 | 10.00 |
-| OpenAI | `gpt-4o-mini` | 0.15 | 0.60 |
-| OpenAI | `gpt-4.1` | 2.00 | 8.00 |
-| OpenAI | `gpt-4.1-mini` | 0.40 | 1.60 |
-| OpenAI | `gpt-4.1-nano` | 0.10 | 0.40 |
-| OpenAI | `gpt-5` | 1.25 | 10.00 |
-| OpenAI | `gpt-5-mini` | 0.25 | 2.00 |
-| OpenAI | `gpt-5-nano` | 0.05 | 0.40 |
-| OpenAI | `o1` | 15.00 | 60.00 |
-| OpenAI | `o3` | 2.00 | 8.00 |
-| OpenAI | `o4-mini` | 1.10 | 4.40 |
-| Google | `gemini-2.5-pro` | 1.25 | 10.00 |
-| Google | `gemini-2.5-flash` | 0.30 | 2.50 |
-| Google | `gemini-2.5-flash-lite` | 0.10 | 0.40 |
-| Google | `gemini-2.0-flash` | 0.10 | 0.40 |
-| DeepSeek | `deepseek-v3` | 0.252 | 0.378 |
-| Mistral | `mistral-large` | 0.50 | 1.50 |
-| Mistral | `mistral-small` | 0.15 | 0.60 |
-| Meta | `llama-4-maverick` | 0.15 | 0.60 |
-| Meta | `llama-4-scout` | 0.08 | 0.30 |
-| Meta | `llama-3.3-70b-instruct` | 0.10 | 0.32 |
-| Alibaba | `qwen3.6-max` | 1.30 | 7.80 |
-| Alibaba | `qwen3.6-plus` | 0.50 | 3.00 |
-| Alibaba | `qwen3.6-flash` | 0.25 | 1.50 |
-| Alibaba | `qwen3.5-plus` | 0.40 | 2.40 |
-| Alibaba | `qwen3.5-flash` | 0.10 | 0.40 |
-| — | `github-copilot` | 0.00 | 0.00 |
-
-Prices are per million tokens. Override any entry or add a new model via `model_pricing` in `~/.config/ecotokens/config.json`:
+Override any entry or add a new model via `model_pricing` in `~/.config/ecotokens/config.json`:
 
 ```json
 {
