@@ -256,10 +256,11 @@ Interactive TUI showing token savings per command family and per project, with a
 |-----|--------|
 | `j` / `u` | Navigate up / down in list |
 | `k` / `i` | Scroll history log down / up (family log view) |
-| `l` / `o` | Scroll details / diff view down / up |
+| `l` / `o` | Scroll detail / diff / SplitRaw AVANT panel down / up |
+| `L` / `O` | Scroll SplitRaw APRÈS panel down / up |
 | `p` | Switch to project view (from family view) |
 | `f` | Switch to family view (from project view) |
-| `d` | Toggle detail mode (details / diff) — family view only |
+| `d` | Cycle detail mode (details → diff → split raw) — family view only |
 | `s` | Cycle sparkline scale (linear / log / capped) |
 | `q` / `Esc` | Quit |
 
