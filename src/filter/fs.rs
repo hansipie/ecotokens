@@ -1,6 +1,7 @@
 use crate::filter::generic::filter_generic;
 use lazy_regex::regex;
 use std::collections::HashMap;
+use std::collections::HashSet;
 
 const FS_LINE_THRESHOLD: u32 = 100;
 
@@ -31,12 +32,15 @@ const NOISY_DIRS: &[&str] = &[
     ".vscode",
 ];
 
+fn noisy_dirs_set() -> &'static HashSet<&'static str> {
+    static NOISY_DIRS_SET: std::sync::OnceLock<HashSet<&'static str>> = std::sync::OnceLock::new();
+    NOISY_DIRS_SET.get_or_init(|| NOISY_DIRS.iter().copied().collect())
+}
+
 fn is_noisy_entry(name: &str) -> bool {
     let base = name.trim().trim_end_matches('/');
-    for noisy in NOISY_DIRS {
-        if base == *noisy {
-            return true;
-        }
+    if noisy_dirs_set().contains(base) {
+        return true;
     }
     // Match *.egg-info pattern
     if base.ends_with(".egg-info") {
@@ -209,7 +213,17 @@ pub fn filter_tree(output: &str) -> String {
     let filtered: Vec<&str> = lines
         .iter()
         .copied()
-        .filter(|line| !NOISY_DIRS.iter().any(|noisy| line.contains(noisy)))
+        .filter(|line| {
+            if line.trim().is_empty() {
+                return true;
+            }
+            // Check if any component of the tree branch is a noisy directory.
+            // Tree output usually uses │, ├, └, ──.
+            let clean = line.replace(['│', '├', '└', '─'], " ");
+            !clean
+                .split_whitespace()
+                .any(|token| token.split('/').any(is_noisy_entry))
+        })
         .collect();
 
     const MAX_TREE_LINES: usize = 200;

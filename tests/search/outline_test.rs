@@ -141,6 +141,7 @@ fn outline_without_base_absolute_path_id_mismatch() {
         index_dir: idx.path().to_path_buf(),
         progress: None,
         embed_provider: ecotokens::config::settings::EmbedProvider::None,
+        log_tx: None,
     })
     .unwrap();
 
@@ -211,6 +212,7 @@ fn outline_ids_match_index_lookup() {
         index_dir: idx.path().to_path_buf(),
         progress: None,
         embed_provider: ecotokens::config::settings::EmbedProvider::None,
+        log_tx: None,
     })
     .unwrap();
 

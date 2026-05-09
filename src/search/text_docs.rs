@@ -40,6 +40,7 @@ fn extract_markdown(content: &str, rel_path: &str) -> Vec<Symbol> {
             kind: level.to_string(),
             file_path: rel_path.to_string(),
             line_start: line_idx as u64,
+            line_end: line_idx as u64,
             source: line.to_string(),
         });
     }
@@ -65,6 +66,7 @@ fn extract_toml(content: &str, rel_path: &str) -> Vec<Symbol> {
                 kind: "table".to_string(),
                 file_path: rel_path.to_string(),
                 line_start: line_idx as u64,
+                line_end: line_idx as u64,
                 source: line.to_string(),
             });
         }
@@ -90,6 +92,7 @@ fn extract_json(content: &str, rel_path: &str) -> Vec<Symbol> {
                 kind: "key".to_string(),
                 file_path: rel_path.to_string(),
                 line_start: i as u64,
+                line_end: i as u64,
                 source: key.clone(),
             }
         })
@@ -113,6 +116,7 @@ fn extract_yaml(content: &str, rel_path: &str) -> Vec<Symbol> {
                     kind: "key".to_string(),
                     file_path: rel_path.to_string(),
                     line_start: line_idx as u64,
+                    line_end: line_idx as u64,
                     source: line.to_string(),
                 });
             }

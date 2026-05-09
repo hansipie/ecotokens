@@ -4,6 +4,26 @@ pub const THRESHOLD_LINES: u32 = 500;
 const HEAD_TAIL_LINES: usize = 20;
 const HEAD_TAIL_BYTES: usize = 2048;
 
+fn floor_char_boundary(s: &str, mut idx: usize) -> usize {
+    if idx >= s.len() {
+        return s.len();
+    }
+    while idx > 0 && !s.is_char_boundary(idx) {
+        idx -= 1;
+    }
+    idx
+}
+
+fn ceil_char_boundary(s: &str, mut idx: usize) -> usize {
+    if idx >= s.len() {
+        return s.len();
+    }
+    while idx < s.len() && !s.is_char_boundary(idx) {
+        idx += 1;
+    }
+    idx
+}
+
 fn summarize_by_lines(lines: &[&str], line_count: usize) -> String {
     if line_count <= HEAD_TAIL_LINES * 2 {
         return lines.join("\n");
@@ -43,8 +63,10 @@ pub fn filter_generic(output: &str, threshold_lines: u32, threshold_bytes: u32) 
 
     // When very few large lines trigger the byte threshold, truncate by bytes.
     if over_bytes && line_count <= HEAD_TAIL_LINES * 2 {
-        let head = &output[..HEAD_TAIL_BYTES.min(byte_len / 2)];
-        let tail_start = byte_len.saturating_sub(HEAD_TAIL_BYTES.min(byte_len / 2));
+        let slice_len = HEAD_TAIL_BYTES.min(byte_len / 2);
+        let head_end = floor_char_boundary(output, slice_len);
+        let tail_start = ceil_char_boundary(output, byte_len.saturating_sub(slice_len));
+        let head = &output[..head_end];
         let tail = &output[tail_start..];
         return format!(
             "{}\n[ecotokens] ... {} bytes omitted ({} total) ...\n{}",

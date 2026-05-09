@@ -1,7 +1,5 @@
 use ecotokens::config::settings::EmbedProvider;
-use ecotokens::search::embed::{
-    cosine_similarity, embed_text, get_lmstudio_embedding, get_ollama_embedding,
-};
+use ecotokens::search::embed::{cosine_similarity, embed_text};
 
 // ── Tests provider None ────────────────────────────────────────────────────────
 
@@ -11,75 +9,15 @@ fn test_provider_none_returns_none() {
     assert!(result.is_none(), "provider None doit retourner None");
 }
 
-// ── Tests Ollama provider (T068) ───────────────────────────────────────────────
+// ── Tests Legacy provider (T068) ──────────────────────────────────────────────
 
-/// URL invalide → erreur claire (connexion refusée ou feature non activée).
+/// Provider Legacy (ancien ollama/lmstudio) → embed_text retourne None (fallback BM25).
 #[test]
-fn test_ollama_invalid_url_returns_error() {
-    // Port 1 est toujours fermé : connexion refusée immédiatement
-    let result = get_ollama_embedding("test text", "http://127.0.0.1:1");
-    assert!(result.is_err(), "URL invalide doit retourner une erreur");
-    let err = result.unwrap_err();
-    assert!(!err.is_empty(), "le message d'erreur ne doit pas être vide");
-}
-
-/// Provider Ollama avec URL invalide → embed_text retourne None (fallback BM25).
-#[test]
-fn test_ollama_provider_unavailable_falls_back_to_none() {
-    let provider = EmbedProvider::Ollama {
-        url: "http://127.0.0.1:1".into(),
-        model: "nomic-embed-text".into(),
-    };
-    let result = embed_text("hello", &provider);
+fn test_legacy_provider_falls_back_to_none() {
+    let result = embed_text("hello", &EmbedProvider::Legacy);
     assert!(
         result.is_none(),
-        "provider indisponible doit retourner None (fallback BM25)"
-    );
-}
-
-/// URL avec schéma incorrect → erreur claire.
-#[test]
-fn test_ollama_malformed_url_returns_error() {
-    let result = get_ollama_embedding("text", "not-a-url");
-    assert!(result.is_err());
-}
-
-// ── Tests LM Studio provider (T069) ───────────────────────────────────────────
-
-/// URL invalide → erreur claire.
-#[test]
-fn test_lmstudio_invalid_url_returns_error() {
-    let result = get_lmstudio_embedding("test text", "http://127.0.0.1:1");
-    assert!(result.is_err(), "URL invalide doit retourner une erreur");
-    let err = result.unwrap_err();
-    assert!(!err.is_empty(), "le message d'erreur ne doit pas être vide");
-}
-
-/// Provider LM Studio avec URL invalide → embed_text retourne None (fallback BM25).
-#[test]
-fn test_lmstudio_provider_unavailable_falls_back_to_none() {
-    let provider = EmbedProvider::LmStudio {
-        url: "http://127.0.0.1:1".into(),
-        model: "nomic-embed-text-v1.5".into(),
-    };
-    let result = embed_text("hello", &provider);
-    assert!(
-        result.is_none(),
-        "provider indisponible doit retourner None (fallback BM25)"
-    );
-}
-
-/// LM Studio utilise le format OpenAI-compatible (/v1/embeddings).
-/// On vérifie que c'est bien une erreur de connexion et non de protocole.
-#[test]
-fn test_lmstudio_openai_compatible_endpoint() {
-    let result = get_lmstudio_embedding("hello", "http://127.0.0.1:1");
-    assert!(result.is_err());
-    // Le message ne doit pas mentionner "lmstudio" ou "ollama" — c'est une erreur réseau
-    let err = result.unwrap_err();
-    assert!(
-        !err.contains("panic"),
-        "erreur ne doit pas être un panic : {err}"
+        "provider Legacy doit retourner None (fallback BM25)"
     );
 }
 

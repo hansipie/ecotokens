@@ -1,0 +1,87 @@
+use rmcp::schemars;
+use serde::Deserialize;
+
+/// Deserialize an optional integer that may arrive as a JSON string or number.
+/// Claude Code sometimes sends numeric parameters as strings (e.g. `"5"` instead of `5`).
+macro_rules! impl_de_opt_num {
+    ($name:ident, $type:ty, $as_method:ident, $err_msg:expr) => {
+        fn $name<'de, D>(d: D) -> Result<Option<$type>, D::Error>
+        where
+            D: serde::Deserializer<'de>,
+        {
+            let v = Option::<serde_json::Value>::deserialize(d)?;
+            match v {
+                None => Ok(None),
+                Some(serde_json::Value::Number(n)) => n
+                    .$as_method()
+                    .map(|n| Some(n as $type))
+                    .ok_or_else(|| serde::de::Error::custom($err_msg)),
+                Some(serde_json::Value::String(s)) => s
+                    .parse::<$type>()
+                    .map(Some)
+                    .map_err(serde::de::Error::custom),
+                Some(other) => Err(serde::de::Error::custom(format!(
+                    "expected number or string, got {other}"
+                ))),
+            }
+        }
+    };
+}
+
+impl_de_opt_num!(de_opt_usize, usize, as_u64, "expected non-negative integer");
+impl_de_opt_num!(de_opt_u32, u32, as_u64, "expected non-negative integer");
+impl_de_opt_num!(de_opt_f32, f32, as_f64, "expected number");
+
+#[derive(Debug, Deserialize, schemars::JsonSchema)]
+pub struct SearchParams {
+    #[schemars(description = "The search query")]
+    pub query: String,
+    #[schemars(description = "Maximum number of results (default: 5)")]
+    #[serde(default, deserialize_with = "de_opt_usize")]
+    pub top_k: Option<usize>,
+}
+
+#[derive(Debug, Deserialize, schemars::JsonSchema)]
+pub struct OutlineParams {
+    #[schemars(description = "Path to a file or directory")]
+    pub path: String,
+    #[schemars(description = "Recursion depth for directories")]
+    #[serde(default, deserialize_with = "de_opt_u32")]
+    pub depth: Option<u32>,
+    #[schemars(description = "Filter by symbol kinds (fn, struct, impl, etc.)")]
+    pub kinds: Option<Vec<String>>,
+}
+
+#[derive(Debug, Deserialize, schemars::JsonSchema)]
+pub struct SymbolParams {
+    #[schemars(description = "Stable symbol ID (e.g., src/lib.rs::greet#fn)")]
+    pub id: String,
+}
+
+#[derive(Debug, Deserialize, schemars::JsonSchema)]
+pub struct TraceParams {
+    #[schemars(description = "Symbol name to trace")]
+    pub symbol: String,
+}
+
+#[derive(Debug, Deserialize, schemars::JsonSchema)]
+pub struct TraceCalleesParams {
+    #[schemars(description = "Symbol name to trace")]
+    pub symbol: String,
+    #[schemars(description = "Recursion depth (default: 1)")]
+    #[serde(default, deserialize_with = "de_opt_u32")]
+    pub depth: Option<u32>,
+}
+
+#[derive(Debug, Deserialize, schemars::JsonSchema)]
+pub struct DuplicatesParams {
+    #[schemars(description = "Minimum similarity percentage to report (0–100, default: 70)")]
+    #[serde(default, deserialize_with = "de_opt_f32")]
+    pub threshold: Option<f32>,
+    #[schemars(description = "Minimum code block size in lines (default: 5)")]
+    #[serde(default, deserialize_with = "de_opt_usize")]
+    pub min_lines: Option<usize>,
+    #[schemars(description = "Maximum number of duplicate groups to return (default: 10)")]
+    #[serde(default, deserialize_with = "de_opt_usize")]
+    pub top_k: Option<usize>,
+}

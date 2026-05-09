@@ -30,6 +30,7 @@ fn index_empty_directory_succeeds() {
         index_dir: idx.path().to_path_buf(),
         progress: None,
         embed_provider: ecotokens::config::settings::EmbedProvider::None,
+        log_tx: None,
     };
     let stats = index_directory(opts).unwrap();
     assert_eq!(stats.file_count, 0);
@@ -46,6 +47,7 @@ fn index_fixture_project_finds_files() {
         index_dir: idx.path().to_path_buf(),
         progress: None,
         embed_provider: ecotokens::config::settings::EmbedProvider::None,
+        log_tx: None,
     };
     let stats = index_directory(opts).unwrap();
     assert!(
@@ -68,6 +70,7 @@ fn reset_clears_existing_index() {
         index_dir: idx.path().to_path_buf(),
         progress: None,
         embed_provider: ecotokens::config::settings::EmbedProvider::None,
+        log_tx: None,
     };
     index_directory(opts).unwrap();
 
@@ -78,6 +81,7 @@ fn reset_clears_existing_index() {
         index_dir: idx.path().to_path_buf(),
         progress: None,
         embed_provider: ecotokens::config::settings::EmbedProvider::None,
+        log_tx: None,
     };
     let stats2 = index_directory(opts2).unwrap();
     assert!(
@@ -88,6 +92,9 @@ fn reset_clears_existing_index() {
 
 #[test]
 fn incremental_update_does_not_duplicate() {
+    use std::thread;
+    use std::time::Duration;
+
     let src = TempDir::new().unwrap();
     let idx = TempDir::new().unwrap();
     make_fixture(&src);
@@ -98,9 +105,24 @@ fn incremental_update_does_not_duplicate() {
         index_dir: idx.path().to_path_buf(),
         progress: None,
         embed_provider: ecotokens::config::settings::EmbedProvider::None,
+        log_tx: None,
     };
-    index_directory(opts.clone()).unwrap();
+    let stats1 = index_directory(opts.clone()).unwrap();
+    assert!(stats1.file_count >= 2, "first pass should index files");
+
+    // Modify one file to trigger re-indexing (wait to ensure mtime changes)
+    thread::sleep(Duration::from_millis(1100));
+    fs::write(
+        src.path().join("main.rs"),
+        "fn main() {\n    println!(\"updated\");\n}\n",
+    )
+    .unwrap();
+
     let stats2 = index_directory(opts).unwrap();
-    // Incremental: chunk count should not explode
-    assert!(stats2.chunk_count > 0);
+    // Incremental: should only have re-indexed the modified file
+    assert_eq!(
+        stats2.file_count, 1,
+        "incremental should process only changed files"
+    );
+    assert!(stats2.chunk_count > 0, "changed file should produce chunks");
 }

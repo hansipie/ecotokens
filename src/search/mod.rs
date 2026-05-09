@@ -1,4 +1,5 @@
 pub mod embed;
+pub mod hnsw;
 pub mod index;
 pub mod outline;
 pub mod query;

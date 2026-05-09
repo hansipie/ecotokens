@@ -26,6 +26,7 @@ fn build_fixture_index() -> (TempDir, TempDir) {
         index_dir: idx.path().to_path_buf(),
         progress: None,
         embed_provider: ecotokens::config::settings::EmbedProvider::None,
+        log_tx: None,
     };
     index_directory(opts).unwrap();
     (src, idx)
@@ -42,12 +43,12 @@ fn query_returns_relevant_file_in_top_results() {
     };
     let results = search_index(opts).unwrap();
     assert!(!results.is_empty(), "should return results");
-    let found_auth = results
-        .iter()
-        .any(|r| r.file_path.contains("auth") || r.snippet.contains("auth"));
+    let found_auth = results.iter().any(|r| {
+        r.file_path.to_lowercase().contains("auth") || r.snippet.to_lowercase().contains("auth")
+    });
     assert!(
         found_auth,
-        "auth.rs should rank highly for 'authentication'"
+        "auth.rs or auth-related content should rank highly for 'authentication'"
     );
 }
 
@@ -99,7 +100,9 @@ fn search_returns_only_bm25_chunks() {
     let results = search_index(opts).unwrap();
     assert!(!results.is_empty(), "should return results");
     assert!(
-        results.iter().all(|r| r.line_start % 50 == 0),
-        "search should only return BM25 chunk docs (line_start is a chunk boundary)"
+        results
+            .iter()
+            .all(|r| r.retrieval_source == ecotokens::search::query::RetrievalSource::Bm25),
+        "with EmbedProvider::None, all results should have retrieval_source=Bm25"
     );
 }

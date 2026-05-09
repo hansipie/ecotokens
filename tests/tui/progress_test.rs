@@ -58,6 +58,7 @@ fn index_directory_produces_bm25_entries() {
         index_dir: idx.path().to_path_buf(),
         progress: None,
         embed_provider: ecotokens::config::settings::EmbedProvider::None,
+        log_tx: None,
     };
     let stats = index_directory(opts).unwrap();
     assert!(stats.file_count >= 1, "should index at least 1 file");

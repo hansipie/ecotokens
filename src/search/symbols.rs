@@ -19,13 +19,12 @@ pub struct Symbol {
     pub kind: String,
     pub file_path: String,
     pub line_start: u64,
+    pub line_end: u64,
     pub source: String,
 }
 
 #[derive(Debug)]
 pub enum SymbolError {
-    #[allow(dead_code)]
-    UnsupportedLanguage(String),
     Io(std::io::Error),
     Parse,
 }
@@ -33,7 +32,6 @@ pub enum SymbolError {
 impl std::fmt::Display for SymbolError {
     fn fmt(&self, f: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {
         match self {
-            SymbolError::UnsupportedLanguage(l) => write!(f, "unsupported language: {l}"),
             SymbolError::Io(e) => write!(f, "io error: {e}"),
             SymbolError::Parse => write!(f, "parse error"),
         }
@@ -52,7 +50,9 @@ fn language_for_ext(ext: &str) -> Option<Language> {
     match ext {
         "rs" => Some(tree_sitter_rust::LANGUAGE.into()),
         "py" => Some(tree_sitter_python::LANGUAGE.into()),
-        "js" | "ts" | "jsx" | "tsx" => Some(tree_sitter_javascript::LANGUAGE.into()),
+        "ts" => Some(tree_sitter_typescript::LANGUAGE_TYPESCRIPT.into()),
+        "tsx" => Some(tree_sitter_typescript::LANGUAGE_TSX.into()),
+        "js" | "jsx" => Some(tree_sitter_javascript::LANGUAGE.into()),
         "c" | "h" => Some(tree_sitter_c::LANGUAGE.into()),
         "cpp" | "cc" | "cxx" | "hpp" | "hh" | "hxx" => Some(tree_sitter_cpp::LANGUAGE.into()),
         _ => None,
@@ -67,15 +67,15 @@ fn is_declaration_node(node_kind: &str) -> Option<&'static str> {
         "impl_item" => Some("impl"),
         "enum_item" => Some("enum"),
         "trait_item" => Some("trait"),
-        "function_definition" => Some("fn"),    // Python, C, C++
-        "class_definition" => Some("struct"),   // Python
-        "function_declaration" => Some("fn"),   // JS
-        "class_declaration" => Some("struct"),  // JS
-        "struct_specifier" => Some("struct"),   // C, C++
-        "enum_specifier" => Some("enum"),       // C, C++
-        "type_definition" => Some("type"),      // C (typedef)
-        "class_specifier" => Some("struct"),    // C++
-        "namespace_definition" => Some("impl"), // C++
+        "function_definition" => Some("fn"),   // Python, C, C++
+        "class_definition" => Some("struct"),  // Python
+        "function_declaration" => Some("fn"),  // JS
+        "class_declaration" => Some("struct"), // JS
+        "struct_specifier" => Some("struct"),  // C, C++
+        "enum_specifier" => Some("enum"),      // C, C++
+        "type_definition" => Some("type"),     // C (typedef)
+        "class_specifier" => Some("struct"),   // C++
+        "namespace_definition" => Some("namespace"), // C++
         _ => None,
     }
 }
@@ -125,6 +125,7 @@ pub fn parse_symbols(path: &Path) -> Result<Vec<Symbol>, SymbolError> {
         if let Some(kind) = is_declaration_node(child.kind()) {
             if let Some(name) = extract_name(child, &content) {
                 let line_start = child.start_position().row as u64;
+                let line_end = child.end_position().row as u64;
                 let end_byte = child.end_byte().min(content.len());
                 let source_snippet = content[child.start_byte()..end_byte].to_string();
                 let id = format!("{rel}::{name}#{kind}");
@@ -134,6 +135,7 @@ pub fn parse_symbols(path: &Path) -> Result<Vec<Symbol>, SymbolError> {
                     kind: kind.to_string(),
                     file_path: rel.to_string(),
                     line_start,
+                    line_end,
                     source: source_snippet,
                 });
             }

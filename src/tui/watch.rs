@@ -77,23 +77,52 @@ fn render_phase_rail(
 }
 
 /// Full rendering during the initial indexing phase.
-pub fn render_indexing(frame: &mut Frame, area: Rect, done: u64, total: u64) {
+pub fn render_indexing(frame: &mut Frame, area: Rect, done: u64, total: u64, logs: &[String]) {
     let chunks = Layout::default()
         .direction(Direction::Vertical)
         .constraints([
             Constraint::Length(3),
             Constraint::Length(3),
             Constraint::Min(1),
+            Constraint::Length(1),
         ])
         .split(area);
 
     render_phase_rail(frame, chunks[0], &WatchPhase::Indexing, None);
     crate::tui::progress::render_progress(frame, chunks[1], done, total, " Initial indexing... ");
 
-    let placeholder = Paragraph::new("Indexing in progress - watching will start next...")
-        .block(Block::default().borders(Borders::ALL).title(" Events "))
-        .style(Style::default().fg(Color::DarkGray));
-    frame.render_widget(placeholder, chunks[2]);
+    let log_area = chunks[2];
+    if logs.is_empty() {
+        let placeholder = Paragraph::new("Indexing in progress — watching will start next...")
+            .block(Block::default().borders(Borders::ALL).title(" Log "))
+            .style(Style::default().fg(Color::DarkGray));
+        frame.render_widget(placeholder, log_area);
+    } else {
+        let visible = log_area.height.saturating_sub(2) as usize;
+        let items: Vec<ListItem> = logs
+            .iter()
+            .rev()
+            .take(visible.max(1))
+            .rev()
+            .map(|msg| {
+                let color = if msg.contains("warning") || msg.contains("Skipping") {
+                    Color::Yellow
+                } else {
+                    Color::DarkGray
+                };
+                ListItem::new(Line::from(Span::styled(
+                    msg.clone(),
+                    Style::default().fg(color),
+                )))
+            })
+            .collect();
+        let list = List::new(items).block(Block::default().borders(Borders::ALL).title(" Log "));
+        frame.render_widget(list, log_area);
+    }
+
+    let help =
+        Paragraph::new(" q/Esc: quit  Ctrl-C: stop").style(Style::default().fg(Color::DarkGray));
+    frame.render_widget(help, chunks[3]);
 }
 
 /// Full rendering during the watching phase.

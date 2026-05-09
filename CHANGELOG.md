@@ -5,6 +5,67 @@ All notable changes to this project will be documented in this file.
 The format is based on [Keep a Changelog](https://keepachangelog.com/en/1.0.0/),
 and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0.html).
 
+## [0.20.0] - 2026-05-08
+
+### Added
+
+- **Shell completions** : nouvelle sous-commande `ecotokens completions SHELL` — génère un script de complétion natif pour `bash`, `zsh`, `fish`, `powershell` ou `elvish` via `clap_complete`
+
+### Changed
+
+- **`ecotokens gain` — vue diff améliorée** :
+  - En-tête visuel AVANT/APRÈS avec barre de progression inline et pourcentage d'économie
+  - Séparateurs de sections numérotés (`─── section 1/3  l.N ───`) en remplacement des marqueurs `@@ @@` illisibles
+  - Troncature automatique des séquences homogènes de plus de 15 lignes (`⋯ +N lignes omises ⋯`) pour éviter les diffs de 800 lignes rouges
+  - Nouveau mode **SplitRaw** (`[d]` cycle `Details → Diff → SplitRaw`) : vue panneau splitté 50/50 — AVANT en rouge (o/l) / APRÈS en vert (Maj+O / Maj+L) — utile pour les transformations radicales où le diff unifié est bruité
+
+## [0.19.0] - 2026-05-02
+
+### Added
+
+- **Recherche sémantique (feature 009)** : retrieval dual BM25+vecteur avec fusion de scores (`0.4 × BM25 + 0.6 × cosinus`) — les résultats indiquent désormais leur source via le champ `retrieval_source` (`bm25` | `vector` | `both`)
+- **`EmbedProvider::Candle`** : provider d'embedding local zéro-config basé sur [Candle](https://github.com/huggingface/candle) — modèle `sentence-transformers/all-MiniLM-L6-v2` (384 dim) téléchargé automatiquement via HuggingFace Hub ; devient le seul provider d'embedding (remplace Ollama et LmStudio)
+- **Support GPU optionnel pour Candle** : compilation avec `--features cuda` (NVIDIA) ou `--features metal` (Apple Silicon) active automatiquement le GPU ; CPU utilisé par défaut si aucune feature GPU n'est activée ou si le device est indisponible
+- **Index HNSW** (`hnsw_index.bin`) : index vectoriel ANN persisté en bincode, reconstruit en mémoire à chaque recherche (< 1 s pour < 20 k vecteurs) ; méta-données dans `hnsw_meta.json` (modèle, dimension, nombre de vecteurs, date)
+- **Chunking symbolique** : les fichiers Rust/Python/JS/TS/C/C++ sont découpés en chunks par symbole tree-sitter (une fonction = un chunk) ; les fichiers sans support tree-sitter utilisent des fenêtres de 50 lignes en fallback
+- **Embedding incrémental** : les chunks inchangés conservent leurs vecteurs entre deux indexations ; seuls les chunks nouveaux ou modifiés sont soumis au provider
+- **Détection de changement de modèle** : l'index HNSW est automatiquement reconstruit lorsque le modèle d'embedding change, sans reconstruire l'index BM25
+- **Migration automatique** `embeddings.json` → `hnsw_index.bin` : exécutée silencieusement au premier lancement après la mise à jour
+
+### Fixed
+
+- **Watcher — respect du `.gitignore`** : `reindex_single_file` ignorait le `.gitignore` lors de la ré-indexation incrémentale des fichiers modifiés ; les fichiers exclus par `.gitignore` sont désormais ignorés au même titre que lors de l'indexation complète
+
+### Changed
+
+- **`EmbedProvider`** : suppression des variants `Ollama` et `LmStudio` — Candle est désormais le seul backend d'embedding ; les configurations existantes avec `"type": "ollama"` ou `"type": "lm_studio"` sont migrées automatiquement vers Candle au chargement via le variant interne `Legacy`
+- **CLI `ecotokens config`** : `--embed-provider` n'accepte plus que `candle` et `none` (suppression de `ollama`, `lmstudio`) ; l'option `--embed-url` est supprimée (Candle n'utilise pas de service externe)
+- `EmbedProvider` : le variant par défaut passe de `None` à `Candle { model: "sentence-transformers/all-MiniLM-L6-v2" }` — les configurations existantes sans `embed_provider` héritent automatiquement du provider Candle
+- `SearchResult` : ajout des champs `line_end` (optionnel) et `retrieval_source` ; `file_path` est désormais extrait directement du document tantivy plutôt que dérivé de la clé de chunk
+
+## [0.18.0] - 2026-04-30
+
+### Added
+
+- **Tarifs LLM élargis** : table de prix étendue de 5 à 36 modèles couvrant Anthropic (Claude Haiku/Sonnet/Opus 4.x–4.7), OpenAI (GPT-4o, GPT-4.1, GPT-5, o1, o3, o4-mini), Google (Gemini 2.0/2.5), DeepSeek (V3, V4), Mistral (Large/Small), Meta Llama (3.3/4) et Alibaba Qwen (qwen3.5/3.6) — prix input et output au million de tokens
+- **`claude-haiku-4-5`** : prix mis à jour 0.80 → 1.00 $/1M input, 4.00 → 5.00 $/1M output
+- **`claude-opus-4-7`** : nouveau modèle ajouté (5.00 $/1M input, 25.00 $/1M output)
+- **`ecotokens config --model MODEL`** : nouvelle option CLI pour définir le modèle par défaut utilisé dans les rapports de gain ; affiche la liste des modèles disponibles si la valeur est vide ou inconnue
+- **`ecotokens config`** : affiche désormais `default_model` dans la sortie texte
+- **`ecotokens gain`** : utilise désormais `settings.default_model` comme fallback (au lieu de la constante hardcodée `"sonnet"`)
+
+## [0.17.0] - 2026-04-28
+
+### Added
+
+- **Serveur MCP stdio** : expose les moteurs search, outline, symbol et trace comme serveur MCP (`rmcp`, transport stdio) via `ecotokens mcp-server` ; `ecotokens install` enregistre automatiquement le serveur dans `~/.claude/settings.json`
+- La journalisation en arrière-plan est désormais conditionnelle au flag global `--debug`
+
+### Fixed
+
+- `ecotokens uninstall` supprime maintenant l'intégralité des traces ecotokens dans `~/.claude/settings.json` : hooks PreToolUse, PostToolUse, SessionStart, SessionEnd et l'entrée du serveur MCP
+- Les étapes post-filtre ne remplacent la sortie que si le nombre de tokens diminue réellement ; la troncature d'octets génériques respecte les frontières UTF-8 ; le fallback de parsing JSON des settings est renforcé ; les désérialiseurs numériques MCP sont dédupliqués
+
 ## [0.16.0] - 2026-04-26
 
 ### Added

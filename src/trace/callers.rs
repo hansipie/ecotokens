@@ -8,6 +8,8 @@ use tantivy::{Index, ReloadPolicy, TantivyDocument, Term};
 use super::{CallEdge, TraceError};
 use crate::search::index::build_schema;
 
+const MAX_SYMBOL_DOCS: usize = 10_000;
+
 /// Find all callers of the given symbol name in the indexed codebase.
 /// Searches symbol source code for call expressions matching `symbol_name(`.
 pub fn find_callers(symbol_name: &str, index_dir: &Path) -> Result<Vec<CallEdge>, TraceError> {
@@ -28,7 +30,12 @@ pub fn find_callers(symbol_name: &str, index_dir: &Path) -> Result<Vec<CallEdge>
     let kind_term = Term::from_field_text(kind_field, "symbol");
     let kind_query = TermQuery::new(kind_term, IndexRecordOption::Basic);
 
-    let top_docs = searcher.search(&kind_query, &TopDocs::with_limit(10_000))?;
+    let top_docs = searcher.search(&kind_query, &TopDocs::with_limit(MAX_SYMBOL_DOCS))?;
+    if top_docs.len() >= MAX_SYMBOL_DOCS {
+        eprintln!(
+            "ecotokens: warning: symbol limit ({MAX_SYMBOL_DOCS}) reached; some callers may be missing"
+        );
+    }
 
     let call_pattern = format!("{symbol_name}(");
     let mut edges = Vec::new();
@@ -59,8 +66,21 @@ pub fn find_callers(symbol_name: &str, index_dir: &Path) -> Result<Vec<CallEdge>
             continue;
         }
 
-        // Check if source contains a call to the target symbol
-        if source.contains(&call_pattern) {
+        // Filter out comment lines to reduce false positives
+        let non_comment_source: String = source
+            .lines()
+            .filter(|l| {
+                let t = l.trim();
+                !t.starts_with("//")
+                    && !t.starts_with('#')
+                    && !t.starts_with("--")
+                    && !t.starts_with('*')
+            })
+            .collect::<Vec<_>>()
+            .join("\n");
+
+        // Check if source (excluding comments) contains a call to the target symbol
+        if non_comment_source.contains(&call_pattern) {
             let file = doc
                 .get_first(file_path_field)
                 .and_then(|v| v.as_str())
@@ -68,7 +88,7 @@ pub fn find_callers(symbol_name: &str, index_dir: &Path) -> Result<Vec<CallEdge>
                 .to_string();
 
             // Find the line of the call within this symbol's source
-            let call_line = source
+            let call_line = non_comment_source
                 .lines()
                 .enumerate()
                 .find(|(_, l)| l.contains(&call_pattern))

@@ -1,4 +1,5 @@
-use clap::{Parser, Subcommand};
+use clap::{CommandFactory, Parser, Subcommand};
+use clap_complete::{generate, Shell};
 use ratatui::backend::CrosstermBackend;
 use ratatui::crossterm::event::{poll, read, Event, KeyCode, KeyEventKind, KeyModifiers};
 use ratatui::crossterm::terminal::{
@@ -13,18 +14,19 @@ use crate::config::default_index_dir;
 mod abbreviations;
 mod config;
 mod daemon;
+mod debuglog;
 mod duplicates;
+mod embed;
 mod filter;
 mod hook;
 mod install;
 mod masking;
+mod mcp;
 mod metrics;
 mod search;
 mod tokens;
 mod trace;
 mod tui;
-
-const DEFAULT_MODEL: &str = "sonnet";
 
 #[derive(Parser)]
 #[command(
@@ -101,13 +103,19 @@ enum Commands {
     Config {
         #[arg(long)]
         json: bool,
-        /// Set embed provider: ollama, lmstudio, none
+        /// Set global debug mode
+        #[arg(long, value_name = "true|false")]
+        debug: Option<bool>,
+        /// Enable or disable debug logging to ~/.config/ecotokens/debug.log
+        #[arg(long, value_name = "true|false")]
+        debuglog: Option<bool>,
+        /// Set the default model used for cost calculations
+        #[arg(long)]
+        model: Option<String>,
+        /// Set embed provider: candle, none
         #[arg(long)]
         embed_provider: Option<String>,
-        /// URL of the embeddings provider (e.g. http://localhost:11434)
-        #[arg(long)]
-        embed_url: Option<String>,
-        /// Model name for the embeddings provider (e.g. mxbai-embed-large)
+        /// Model name for the embeddings provider (e.g. sentence-transformers/all-MiniLM-L6-v2)
         #[arg(long)]
         embed_model: Option<String>,
     },
@@ -234,6 +242,16 @@ enum Commands {
         #[arg(long)]
         check: bool,
     },
+    /// Start the MCP server (stdio transport — for Claude Code mcpServers registration)
+    McpServer {
+        #[arg(long)]
+        index_dir: Option<PathBuf>,
+    },
+    /// Generate shell completion script (bash, zsh, fish, powershell, elvish)
+    Completions {
+        /// Target shell
+        shell: Shell,
+    },
 }
 
 #[derive(Subcommand)]
@@ -277,26 +295,17 @@ enum AbbreviationsAction {
 }
 
 /// RAII guard that restores terminal state when dropped, even on panic.
-struct TerminalGuard {
-    use_stderr: bool,
-}
+struct TerminalGuard;
 
 impl TerminalGuard {
     fn stdout() -> Self {
-        Self { use_stderr: false }
-    }
-    fn stderr() -> Self {
-        Self { use_stderr: true }
+        Self
     }
 }
 
 impl Drop for TerminalGuard {
     fn drop(&mut self) {
-        if self.use_stderr {
-            let _ = std::io::stderr().execute(LeaveAlternateScreen);
-        } else {
-            let _ = std::io::stdout().execute(LeaveAlternateScreen);
-        }
+        let _ = std::io::stdout().execute(LeaveAlternateScreen);
         let _ = disable_raw_mode();
     }
 }
@@ -326,7 +335,18 @@ fn cmd_filter(args: Vec<String>, debug: bool, cwd: Option<PathBuf>) {
         eprintln!("ecotokens filter: no command given");
         std::process::exit(1);
     }
+    let settings = config::Settings::load();
+    let logger = debuglog::DebugLogger::new(settings.debuglog);
+    let uid = debuglog::gen_uid();
+
     let command = args.join(" ");
+    logger.log(
+        &uid,
+        "filter",
+        "input",
+        &serde_json::json!({"cmd": command, "cwd": cwd.as_ref().map(|p| p.display().to_string())}),
+    );
+
     let start = std::time::Instant::now();
 
     let output = std::process::Command::new(&args[0])
@@ -353,9 +373,15 @@ fn cmd_filter(args: Vec<String>, debug: bool, cwd: Option<PathBuf>) {
     let (filtered, tokens_before, tokens_after) =
         filter::run_filter_pipeline_with_cwd(&command, &raw, duration_ms, cwd.as_deref());
 
-    if debug {
+    if debug || settings.debug {
         eprintln!("[ecotokens debug] command={command} tokens_before={tokens_before} tokens_after={tokens_after}");
     }
+    logger.log(
+        &uid,
+        "filter",
+        "output",
+        &serde_json::json!({"filtered": filtered, "tokens_before": tokens_before, "tokens_after": tokens_after}),
+    );
 
     print!("{filtered}");
     if exit_code != 0 {
@@ -412,7 +438,8 @@ fn cmd_gain(period: String, json: bool, model: Option<String>, history: bool) {
             std::process::exit(1);
         }
     };
-    let model_str = model.as_deref().unwrap_or(DEFAULT_MODEL);
+    let settings = config::Settings::load();
+    let model_str = model.as_deref().unwrap_or(&settings.default_model);
     let mut items = read_from(&path).unwrap_or_default();
 
     if history {
@@ -451,6 +478,7 @@ fn cmd_gain(period: String, json: bool, model: Option<String>, history: bool) {
             let mut log_scroll: usize = 0;
             let mut log_selected: Option<usize> = None;
             let mut gauge_scroll: usize = 0;
+            let mut split_raw_after_scroll: usize = 0;
             let mut last_reload = std::time::Instant::now();
             // Precomputed once at load time, updated only on reload.
             let mut sorted_projects: Vec<(String, f32)> = sorted_projects_from(&report);
@@ -488,6 +516,7 @@ fn cmd_gain(period: String, json: bool, model: Option<String>, history: bool) {
                         &mut log_scroll,
                         log_selected,
                         &mut gauge_scroll,
+                        &mut split_raw_after_scroll,
                     );
                 });
                 if poll(std::time::Duration::from_millis(500)).unwrap_or(false) {
@@ -517,6 +546,21 @@ fn cmd_gain(period: String, json: bool, model: Option<String>, history: bool) {
                             detail_mode = detail_mode.toggle();
                             history_scroll = 0;
                             log_scroll = 0;
+                            split_raw_after_scroll = 0;
+                        }
+                        // Maj+O/Maj+L scrollent le panneau APRÈS en mode SplitRaw.
+                        if detail_mode == tui::gain::DetailMode::SplitRaw {
+                            match key.code {
+                                KeyCode::Char('L') => {
+                                    split_raw_after_scroll =
+                                        split_raw_after_scroll.saturating_add(1);
+                                }
+                                KeyCode::Char('O') => {
+                                    split_raw_after_scroll =
+                                        split_raw_after_scroll.saturating_sub(1);
+                                }
+                                _ => {}
+                            }
                         }
                         if gain_mode == tui::gain::GainMode::Family && family_count > 0 {
                             match key.code {
@@ -705,6 +749,18 @@ fn cmd_install(target: String, ai_summary: bool, ai_summary_model: Option<String
                 std::process::exit(1);
             }
         }
+        match install::install_mcp_server(&claude_path) {
+            Ok(()) => {
+                println!(
+                    "ecotokens MCP server registered → {}",
+                    claude_path.display()
+                );
+            }
+            Err(e) => {
+                eprintln!("install error (mcp server): {e}");
+                std::process::exit(1);
+            }
+        }
     }
 
     if install_gemini {
@@ -723,6 +779,15 @@ fn cmd_install(target: String, ai_summary: bool, ai_summary_model: Option<String
                     }
                     Err(e) => {
                         eprintln!("install error (gemini post-hook): {e}");
+                        std::process::exit(1);
+                    }
+                }
+                match install::install_mcp_server(p) {
+                    Ok(()) => {
+                        println!("ecotokens MCP server registered (Gemini) → {}", p.display())
+                    }
+                    Err(e) => {
+                        eprintln!("install error (gemini mcp server): {e}");
                         std::process::exit(1);
                     }
                 }
@@ -753,6 +818,18 @@ fn cmd_install(target: String, ai_summary: bool, ai_summary_model: Option<String
                     }
                     Err(e) => {
                         eprintln!("install error (qwen post-hook): {e}");
+                        std::process::exit(1);
+                    }
+                }
+                match install::install_mcp_server(p) {
+                    Ok(()) => {
+                        println!(
+                            "ecotokens MCP server registered (Qwen Code) → {}",
+                            p.display()
+                        )
+                    }
+                    Err(e) => {
+                        eprintln!("install error (qwen mcp server): {e}");
                         std::process::exit(1);
                     }
                 }
@@ -832,19 +909,30 @@ fn cmd_uninstall(target: String) {
 
     if uninstall_claude {
         let had_hook = install::is_hook_installed(&claude_path);
-        let had_mcp = install::is_mcp_registered(&claude_json);
+        let had_post_hook = install::is_post_hook_installed(&claude_path);
+        let had_mcp = install::is_mcp_registered(&claude_path);
+        let had_session = install::are_session_hooks_installed(&claude_path);
         match install::uninstall_hook(&claude_path, &claude_json) {
             Ok(()) => {
                 if had_hook {
                     println!("ecotokens hook removed ← {}", claude_path.display());
                 }
+                if had_post_hook {
+                    println!("ecotokens post-hook removed ← {}", claude_path.display());
+                }
                 if had_mcp {
                     println!(
                         "ecotokens MCP server unregistered ← {}",
-                        claude_json.display()
+                        claude_path.display()
                     );
                 }
-                if !had_hook && !had_mcp {
+                if had_session {
+                    println!(
+                        "ecotokens session hooks removed ← {}",
+                        claude_path.display()
+                    );
+                }
+                if !had_hook && !had_post_hook && !had_mcp && !had_session {
                     println!("ecotokens: nothing to uninstall (claude)");
                 }
             }
@@ -972,43 +1060,57 @@ fn cmd_uninstall(target: String) {
 
 fn cmd_config(
     json: bool,
+    debug: Option<bool>,
+    debuglog: Option<bool>,
+    model: Option<String>,
     embed_provider: Option<String>,
-    embed_url: Option<String>,
     embed_model: Option<String>,
 ) {
     use config::settings::EmbedProvider;
 
     let mut settings = config::Settings::load();
     let settings_path = default_settings_path();
-    let claude_json = default_claude_json_path();
 
     let mut dirty = false;
 
+    if let Some(d) = debug {
+        settings.debug = d;
+        dirty = true;
+    }
+
+    if let Some(d) = debuglog {
+        settings.debuglog = d;
+        dirty = true;
+    }
+
+    if let Some(ref m) = model {
+        if m.is_empty() || !settings.model_pricing.contains_key(m.as_str()) {
+            if !m.is_empty() {
+                eprintln!("unknown model: '{}'", m);
+            }
+            let mut known = config::models::model_names();
+            known.sort();
+            eprintln!("available models:");
+            for name in known {
+                eprintln!("  {}", name);
+            }
+            std::process::exit(1);
+        }
+        settings.default_model = m.clone();
+        dirty = true;
+    }
+
     // Mutation via --embed-provider
     if let Some(ref provider_name) = embed_provider {
-        let default_url = match provider_name.as_str() {
-            "ollama" => "http://localhost:11434",
-            "lmstudio" => "http://localhost:1234",
-            _ => "",
-        };
-        let url = embed_url.clone().unwrap_or_else(|| default_url.to_string());
-        let model = embed_model.clone();
-
         settings.embed_provider = match provider_name.as_str() {
-            "ollama" => EmbedProvider::Ollama {
-                url,
-                model: model.unwrap_or_else(|| "nomic-embed-text".to_string()),
-            },
-            "lmstudio" => EmbedProvider::LmStudio {
-                url,
-                model: model.unwrap_or_else(|| "nomic-embed-text-v1.5".to_string()),
+            "candle" => EmbedProvider::Candle {
+                model: embed_model
+                    .clone()
+                    .unwrap_or_else(|| "sentence-transformers/all-MiniLM-L6-v2".to_string()),
             },
             "none" => EmbedProvider::None,
             other => {
-                eprintln!(
-                    "unknown provider: '{}'. Valid values: ollama, lmstudio, none",
-                    other
-                );
+                eprintln!("unknown provider: '{}'. Valid values: candle, none", other);
                 std::process::exit(1);
             }
         };
@@ -1016,10 +1118,11 @@ fn cmd_config(
     } else if let Some(ref m) = embed_model {
         // Changer uniquement le modèle sans toucher au provider
         match &mut settings.embed_provider {
-            EmbedProvider::Ollama { model, .. } => *model = m.clone(),
-            EmbedProvider::LmStudio { model, .. } => *model = m.clone(),
-            EmbedProvider::None => {
-                eprintln!("no embed provider configured; set one first with --embed-provider");
+            EmbedProvider::Candle { model } => *model = m.clone(),
+            EmbedProvider::None | EmbedProvider::Legacy => {
+                eprintln!(
+                    "no embed provider configured; set one first with --embed-provider candle"
+                );
                 std::process::exit(1);
             }
         }
@@ -1028,7 +1131,7 @@ fn cmd_config(
 
     if dirty {
         match settings.save() {
-            Ok(()) => eprintln!("embed_provider updated"),
+            Ok(()) => eprintln!("settings updated"),
             Err(e) => {
                 eprintln!("save error: {e}");
                 std::process::exit(1);
@@ -1038,12 +1141,11 @@ fn cmd_config(
 
     let provider_str = match &settings.embed_provider {
         EmbedProvider::None => "none".to_string(),
-        EmbedProvider::Ollama { url, model } => format!("ollama ({}) model={}", url, model),
-        EmbedProvider::LmStudio { url, model } => format!("lmstudio ({}) model={}", url, model),
+        EmbedProvider::Legacy => "legacy (will migrate to candle on next save)".to_string(),
+        EmbedProvider::Candle { model } => format!("candle model={model}"),
     };
 
     let hook_installed = install::is_hook_installed(&settings_path);
-    let _ = claude_json;
 
     if json {
         let mut v = serde_json::to_value(&settings).unwrap();
@@ -1052,6 +1154,8 @@ fn cmd_config(
     } else {
         println!("hook_installed        : {}", hook_installed);
         println!("debug                 : {}", settings.debug);
+        println!("debuglog              : {}", settings.debuglog);
+        println!("default_model         : {}", settings.default_model);
         println!("exclusions            : {:?}", settings.exclusions);
         println!("embed_provider        : {}", provider_str);
         println!("ai_summary_enabled    : {}", settings.ai_summary_enabled);
@@ -1070,6 +1174,31 @@ fn cmd_config(
                 .unwrap_or("http://localhost:11434 (default)")
         );
         println!("abbreviations_enabled : {}", settings.abbreviations_enabled);
+
+        let watch_store = config::SessionStore::load();
+        let active_sessions: u32 = watch_store.0.values().map(|e| e.sessions).sum();
+        let active_watchers: usize = watch_store
+            .0
+            .values()
+            .filter(|e| {
+                e.watcher_pid
+                    .map(config::session_store::is_pid_running)
+                    .unwrap_or(false)
+            })
+            .count();
+        let auto_watch_status = if settings.auto_watch {
+            if active_watchers > 0 {
+                format!(
+                    "enabled ({} watcher(s) running, {} session(s))",
+                    active_watchers, active_sessions
+                )
+            } else {
+                "enabled (no watcher running)".to_string()
+            }
+        } else {
+            "disabled".to_string()
+        };
+        println!("auto_watch            : {}", auto_watch_status);
     }
 }
 
@@ -1077,6 +1206,12 @@ fn cmd_index(path: Option<PathBuf>, index_dir: Option<PathBuf>, reset: bool) {
     let cwd = std::env::current_dir().unwrap_or_else(|_| PathBuf::from("."));
     let target = path.unwrap_or(cwd);
     let idx_dir = index_dir.unwrap_or_else(default_index_dir);
+
+    // T055 — trigger model download if needed before starting progress bar
+    let settings = config::Settings::load();
+    if let config::settings::EmbedProvider::Candle { ref model } = settings.embed_provider {
+        let _ = embed::candle::acquire_model_files(model);
+    }
 
     let is_stderr_tty = std::io::IsTerminal::is_terminal(&std::io::stderr());
     let is_stdin_tty = std::io::IsTerminal::is_terminal(&std::io::stdin());
@@ -1091,63 +1226,77 @@ fn cmd_index(path: Option<PathBuf>, index_dir: Option<PathBuf>, reset: bool) {
         let total = search::index::count_indexable_files(&target);
 
         let counter = Arc::new(AtomicUsize::new(0));
+        eprintln!("ecotokens: indexing {}…", target.display());
+
         let opts = search::index::IndexOptions {
             reset,
             path: target,
             index_dir: idx_dir,
             progress: Some(counter.clone()),
             embed_provider: config::Settings::load().embed_provider,
+            log_tx: None,
         };
 
-        if let Err(e) = enable_raw_mode() {
-            eprintln!("failed to enable raw mode: {e}");
-        }
-        if let Err(e) = std::io::stderr().execute(EnterAlternateScreen) {
-            eprintln!("failed to enter alternate screen: {e}");
-        }
-        // Guard ensures terminal is restored even if indexing thread panics.
-        let _guard = TerminalGuard::stderr();
-        let backend = CrosstermBackend::new(std::io::stderr());
+        use indicatif::{ProgressBar, ProgressStyle};
+
+        let pb = ProgressBar::new(total);
+        pb.set_style(
+            ProgressStyle::with_template(
+                "{spinner:.blue} [{bar:40.green/white}] {pos}/{len} ({percent}%) · {per_sec} · eta {eta}",
+            )
+            .unwrap()
+            .tick_strings(&["⠋", "⠙", "⠹", "⠸", "⠼", "⠴", "⠦", "⠧", "⠇", "⠏", "✓"])
+            .progress_chars("██░"),
+        );
+        pb.enable_steady_tick(std::time::Duration::from_millis(80));
+
         let handle = std::thread::spawn(move || search::index::index_directory(opts));
 
-        let result = {
-            let mut terminal_opt = Terminal::new(backend).ok();
-            loop {
-                let done = counter.load(Ordering::Relaxed) as u64;
-                if let Some(ref mut terminal) = terminal_opt {
-                    let _ = terminal.draw(|f| {
-                        tui::progress::render_progress(
-                            f,
-                            f.area(),
-                            done,
-                            total.max(1),
-                            "Indexing…",
-                        );
-                    });
-                }
-                if handle.is_finished() {
-                    break;
-                }
-                std::thread::sleep(std::time::Duration::from_millis(50));
+        loop {
+            let done = counter.load(Ordering::Relaxed) as u64;
+            pb.set_position(done);
+            if handle.is_finished() {
+                break;
             }
-            // Draw 100%
-            if let Some(ref mut terminal) = terminal_opt {
-                let _ = terminal.draw(|f| {
-                    tui::progress::render_progress(f, f.area(), total, total.max(1), "Indexing…");
-                });
-            }
-            handle.join().expect("indexing thread panicked")
-        };
+            std::thread::sleep(std::time::Duration::from_millis(50));
+        }
+        pb.set_position(total);
+        pb.finish_and_clear();
 
-        // _guard drops here, restoring terminal before printing result
-        drop(_guard);
+        let result = handle.join().expect("indexing thread panicked");
 
         match result {
             Ok(stats) => {
-                println!(
-                    "Indexed {} files, {} chunks",
-                    stats.file_count, stats.chunk_count
-                )
+                // T064 — log token efficiency ratio after UI is clear
+                if stats.chunk_count > 0 {
+                    let avg_chunk_tokens = 150u32;
+                    let filtered = stats.chunk_count.saturating_sub(5);
+                    let tokens_saved_est = filtered * avg_chunk_tokens;
+                    println!(
+                        "ecotokens: efficiency — {} chunks indexed, ~{} tokens saved per query (top-5 filter)",
+                        stats.chunk_count, tokens_saved_est
+                    );
+                }
+
+                let sem = if let Some(ref m) = stats.embed_model {
+                    format!(
+                        "\n  Semantic: {} embeddings (model: {})",
+                        stats.vector_count, m
+                    )
+                } else {
+                    "\n  Semantic: unavailable (BM25 only)".to_string()
+                };
+                if stats.file_count == 0 {
+                    println!(
+                        "Index up to date — {} files already indexed{sem}",
+                        stats.total_file_count
+                    )
+                } else {
+                    println!(
+                        "Indexed {} files — {} chunks ({} symbolic){sem}",
+                        stats.file_count, stats.chunk_count, stats.symbolic_chunk_count
+                    )
+                }
             }
             Err(e) => {
                 eprintln!("index error: {e}");
@@ -1162,13 +1311,29 @@ fn cmd_index(path: Option<PathBuf>, index_dir: Option<PathBuf>, reset: bool) {
             index_dir: idx_dir,
             progress: None,
             embed_provider: config::Settings::load().embed_provider,
+            log_tx: None,
         };
         match search::index::index_directory(opts) {
             Ok(stats) => {
-                println!(
-                    "Indexed {} files, {} chunks",
-                    stats.file_count, stats.chunk_count
-                )
+                let sem = if let Some(ref m) = stats.embed_model {
+                    format!(
+                        "\n  Semantic: {} embeddings (model: {})",
+                        stats.vector_count, m
+                    )
+                } else {
+                    "\n  Semantic: unavailable (BM25 only)".to_string()
+                };
+                if stats.file_count == 0 {
+                    println!(
+                        "Index up to date — {} files already indexed{sem}",
+                        stats.total_file_count
+                    )
+                } else {
+                    println!(
+                        "Indexed {} files — {} chunks ({} symbolic){sem}",
+                        stats.file_count, stats.chunk_count, stats.symbolic_chunk_count
+                    )
+                }
             }
             Err(e) => {
                 eprintln!("index error: {e}");
@@ -1179,6 +1344,15 @@ fn cmd_index(path: Option<PathBuf>, index_dir: Option<PathBuf>, reset: bool) {
 }
 
 fn cmd_outline(path: PathBuf, kinds: Option<Vec<String>>, depth: Option<u32>, json: bool) {
+    let logger = debuglog::DebugLogger::new(config::Settings::load().debuglog);
+    let uid = debuglog::gen_uid();
+    logger.log(
+        &uid,
+        "outline",
+        "input",
+        &serde_json::json!({"path": path.display().to_string(), "kinds": kinds, "depth": depth}),
+    );
+
     let opts = search::outline::OutlineOptions {
         path,
         depth,
@@ -1187,19 +1361,26 @@ fn cmd_outline(path: PathBuf, kinds: Option<Vec<String>>, depth: Option<u32>, js
     };
     match search::outline::outline_path(opts) {
         Ok(symbols) => {
-            if json {
-                let slim: Vec<_> = symbols
-                    .iter()
-                    .map(|s| {
-                        serde_json::json!({
-                            "id": s.id,
-                            "name": s.name,
-                            "kind": s.kind,
-                            "file_path": s.file_path,
-                            "line_start": s.line_start,
-                        })
+            let slim: Vec<_> = symbols
+                .iter()
+                .map(|s| {
+                    serde_json::json!({
+                        "id": s.id,
+                        "name": s.name,
+                        "kind": s.kind,
+                        "file_path": s.file_path,
+                        "line_start": s.line_start,
                     })
-                    .collect();
+                })
+                .collect();
+            logger.log(
+                &uid,
+                "outline",
+                "output",
+                &serde_json::Value::Array(slim.clone()),
+            );
+
+            if json {
                 println!("{}", serde_json::to_string_pretty(&slim).unwrap());
             } else if std::io::IsTerminal::is_terminal(&std::io::stdout()) {
                 if let Err(e) = enable_raw_mode() {
@@ -1247,10 +1428,28 @@ fn cmd_outline(path: PathBuf, kinds: Option<Vec<String>>, depth: Option<u32>, js
 }
 
 fn cmd_symbol(id: String, index_dir: Option<PathBuf>) {
+    let logger = debuglog::DebugLogger::new(config::Settings::load().debuglog);
+    let uid = debuglog::gen_uid();
+    logger.log(&uid, "symbol", "input", &serde_json::json!({"id": id}));
+
     let idx_dir = index_dir.unwrap_or_else(default_index_dir);
     match search::symbols::lookup_symbol(&id, &idx_dir) {
-        Ok(Some(snippet)) => println!("{snippet}"),
+        Ok(Some(snippet)) => {
+            logger.log(
+                &uid,
+                "symbol",
+                "output",
+                &serde_json::json!({"source": snippet}),
+            );
+            println!("{snippet}");
+        }
         Ok(None) => {
+            logger.log(
+                &uid,
+                "symbol",
+                "output",
+                &serde_json::json!({"error": "not found"}),
+            );
             eprintln!("Symbol not found: {id}");
             std::process::exit(1);
         }
@@ -1262,21 +1461,10 @@ fn cmd_symbol(id: String, index_dir: Option<PathBuf>) {
 }
 
 fn glob_matches(pattern: &str, path: &str) -> bool {
-    if let Some(ext) = pattern.strip_prefix("*.") {
-        path.ends_with(&format!(".{ext}"))
-    } else {
-        path == pattern || path.ends_with(&format!("/{pattern}"))
-    }
-}
-
-fn git_root() -> Option<PathBuf> {
-    std::process::Command::new("git")
-        .args(["rev-parse", "--show-toplevel"])
-        .output()
+    globset::Glob::new(pattern)
         .ok()
-        .filter(|o| o.status.success())
-        .and_then(|o| String::from_utf8(o.stdout).ok())
-        .map(|s| PathBuf::from(s.trim()))
+        .map(|g| g.compile_matcher().is_match(path))
+        .unwrap_or(false)
 }
 
 struct SearchFlags {
@@ -1288,9 +1476,29 @@ struct SearchFlags {
 }
 
 fn cmd_search(query: String, top_k: usize, index_dir: Option<PathBuf>, flags: SearchFlags) {
+    let settings = config::Settings::load();
+    let logger = debuglog::DebugLogger::new(settings.debuglog);
+    let uid = debuglog::gen_uid();
+    logger.log(
+        &uid,
+        "search",
+        "input",
+        &serde_json::json!({
+            "query": query,
+            "top_k": top_k,
+            "flags": {
+                "context": flags.context,
+                "include": flags.include,
+                "exclude": flags.exclude,
+                "no_trace": flags.no_trace,
+                "json": flags.json,
+            }
+        }),
+    );
+
     let using_global_index = index_dir.is_none();
     let idx_dir = index_dir.unwrap_or_else(default_index_dir);
-    let embed_provider = config::Settings::load().embed_provider;
+    let embed_provider = settings.embed_provider;
     let opts = search::query::SearchOptions {
         query: query.clone(),
         top_k,
@@ -1301,7 +1509,7 @@ fn cmd_search(query: String, top_k: usize, index_dir: Option<PathBuf>, flags: Se
         Ok(mut results) => {
             // Restrict to current git project when using the global index
             if using_global_index {
-                if let Some(root) = git_root() {
+                if let Some(root) = crate::config::git_root() {
                     results.retain(|r| root.join(&r.file_path).exists());
                 }
             }
@@ -1328,6 +1536,13 @@ fn cmd_search(query: String, top_k: usize, index_dir: Option<PathBuf>, flags: Se
                     kept.push(r);
                 }
             }
+
+            logger.log(
+                &uid,
+                "search",
+                "output",
+                &serde_json::to_value(&kept).unwrap_or(serde_json::Value::Null),
+            );
 
             if flags.json {
                 // #64 — augment JSON output with callers if applicable
@@ -1363,11 +1578,14 @@ fn cmd_search(query: String, top_k: usize, index_dir: Option<PathBuf>, flags: Se
                     let start = match_offset.saturating_sub(flags.context);
                     let end = (match_offset + flags.context + 1).min(lines.len());
                     let abs_line = r.line_start + 1;
+                    let line_range = if let Some(end) = r.line_end {
+                        format!("{}-{}", abs_line, end + 1)
+                    } else {
+                        format!("{}", abs_line + match_offset as u64)
+                    };
                     println!(
-                        "{}:{} (score: {:.3})",
-                        r.file_path,
-                        abs_line + match_offset as u64,
-                        r.score
+                        "{}:{} (score: {:.3}, via: {:?})",
+                        r.file_path, line_range, r.score, r.retrieval_source
                     );
                     for (i, line) in lines[start..end].iter().enumerate() {
                         println!("  {}:  {}", abs_line + (start + i) as u64, line);
@@ -1459,6 +1677,15 @@ fn cmd_watch(
     stop: bool,
     json: bool,
 ) {
+    // Purge stale entries when not in --background mode.
+    // --background is spawned by session_start right after incrementing the session count
+    // (watcher_pid still null at that point); running cleanup here would drop that valid entry.
+    if !background {
+        let mut store = config::SessionStore::load();
+        store.cleanup_dead();
+        let _ = store.save();
+    }
+
     // If --stop is requested, stop background watcher(s) and exit.
     if stop {
         let mut store = config::SessionStore::load();
@@ -1587,13 +1814,25 @@ fn cmd_watch(
     let total_files = search::index::count_indexable_files(&watch_path);
 
     let counter = Arc::new(AtomicUsize::new(0));
+    let (log_tx, log_rx) = std::sync::mpsc::channel::<String>();
     let opts = search::index::IndexOptions {
         reset: false,
         path: watch_path.clone(),
         index_dir: idx_dir.clone(),
         progress: Some(counter.clone()),
         embed_provider: config::Settings::load().embed_provider,
+        log_tx: if is_interactive { Some(log_tx) } else { None },
     };
+
+    // Pre-download embedding model before entering the TUI so that indicatif progress bars
+    // don't write to the terminal while ratatui owns the alternate screen.
+    if is_interactive {
+        if let config::settings::EmbedProvider::Candle { ref model } = opts.embed_provider {
+            if let Err(e) = embed::candle::acquire_model_files(model) {
+                eprintln!("ecotokens: warning: could not pre-download model: {e}");
+            }
+        }
+    }
 
     // Phase A — Initial indexing
     let report = if is_interactive {
@@ -1612,11 +1851,16 @@ fn cmd_watch(
 
         let index_result = {
             let mut terminal_opt = Terminal::new(backend).ok();
+            let mut log_messages: Vec<String> = Vec::new();
             loop {
+                while let Ok(msg) = log_rx.try_recv() {
+                    log_messages.push(msg);
+                }
                 let done = counter.load(Ordering::Relaxed) as u64;
                 if let Some(ref mut t) = terminal_opt {
+                    let logs = log_messages.clone();
                     let _ = t.draw(|f| {
-                        tui::watch::render_indexing(f, f.area(), done, total_files.max(1));
+                        tui::watch::render_indexing(f, f.area(), done, total_files.max(1), &logs);
                     });
                 }
                 if index_handle.is_finished() {
@@ -1624,10 +1868,20 @@ fn cmd_watch(
                 }
                 std::thread::sleep(std::time::Duration::from_millis(50));
             }
-            // Draw 100%
+            // Drain remaining messages, then draw 100%
+            while let Ok(msg) = log_rx.try_recv() {
+                log_messages.push(msg);
+            }
             if let Some(ref mut t) = terminal_opt {
+                let logs = log_messages.clone();
                 let _ = t.draw(|f| {
-                    tui::watch::render_indexing(f, f.area(), total_files, total_files.max(1));
+                    tui::watch::render_indexing(
+                        f,
+                        f.area(),
+                        total_files,
+                        total_files.max(1),
+                        &logs,
+                    );
                 });
             }
             index_handle.join().expect("indexing thread panicked")
@@ -1663,12 +1917,14 @@ fn cmd_watch(
                 while let Ok(e) = event_rx.try_recv() {
                     if e.status == "re-indexed" {
                         watch_stats.reindexed += 1;
+                        events.push(e);
                     } else if e.status.starts_with("error") {
                         watch_stats.errors += 1;
+                        events.push(e);
                     } else {
                         watch_stats.ignored += 1;
+                        // Ne pas ajouter les "ignored" à la liste d'affichage
                     }
-                    events.push(e);
                 }
 
                 let _ = terminal.draw(|f| {
@@ -1722,16 +1978,15 @@ fn cmd_watch(
             daemon::watcher::watch_directory(&watch_path_clone, &idx_dir_clone, event_tx, stop_rx)
         });
 
-        // Background mode: log events to watch.log
-        let log_file = config::SessionStore::load()
-            .log_file_for(&watch_path_str)
-            .map(std::path::PathBuf::from);
-
-        if log_file.is_none() {
-            eprintln!(
-                "ecotokens watch: warning: no log file configured, events will not be recorded"
-            );
-        }
+        // Background mode: log events to watch.log (only if debug is enabled)
+        let settings = config::Settings::load();
+        let log_file = if settings.debug {
+            config::SessionStore::load()
+                .log_file_for(&watch_path_str)
+                .map(std::path::PathBuf::from)
+        } else {
+            None
+        };
 
         while let Ok(e) = event_rx.recv() {
             if let Some(ref path) = log_file {
@@ -1976,6 +2231,15 @@ fn cmd_clear(
     println!("Deleted {delete_count} interception(s).");
 }
 
+fn stable_hash(s: &str) -> u64 {
+    let mut h: u64 = 14695981039346656037;
+    for b in s.bytes() {
+        h ^= b as u64;
+        h = h.wrapping_mul(1099511628211);
+    }
+    h
+}
+
 /// Derive a per-path log filename from the watched directory.
 /// `/home/user/my-project` → `~/.config/ecotokens/watch_home_user_my-project.log`
 fn watch_log_path(watch_path: &std::path::Path) -> PathBuf {
@@ -1990,10 +2254,13 @@ fn watch_log_path(watch_path: &std::path::Path) -> PathBuf {
             }
         })
         .collect();
+
+    let fingerprint = format!("{:016x}", stable_hash(&watch_path.to_string_lossy()));
+
     dirs::config_dir()
         .unwrap_or_else(|| PathBuf::from("."))
         .join("ecotokens")
-        .join(format!("watch{sanitized}.log"))
+        .join(format!("watch{sanitized}_{fingerprint}.log"))
 }
 
 fn cmd_session_start() {
@@ -2009,10 +2276,12 @@ fn cmd_session_start() {
         let _ = store.save();
 
         if decision.reused_existing_watcher {
-            eprintln!(
-                "ecotokens auto-watch: CWD is covered by existing watch on {}, skipping.",
-                decision.watch_path
-            );
+            if settings.debug {
+                eprintln!(
+                    "ecotokens auto-watch: CWD is covered by existing watch on {}, skipping.",
+                    decision.watch_path
+                );
+            }
         } else if decision.needs_watcher {
             let _ = std::process::Command::new("ecotokens")
                 .args(["watch", "--background", "--path", &decision.watch_path])
@@ -2033,10 +2302,6 @@ fn cmd_session_start() {
 }
 
 fn cmd_session_end() {
-    let settings = config::Settings::load();
-    if !settings.auto_watch {
-        return;
-    }
     let cwd = std::env::current_dir().unwrap_or_else(|_| PathBuf::from("."));
     let cwd_str = cwd.to_string_lossy().to_string();
 
@@ -2125,6 +2390,12 @@ fn cmd_abbreviations_list() {
     for (word, abbrev) in pairs {
         println!("  {word} → {abbrev}");
     }
+}
+
+fn cmd_completions(shell: Shell) {
+    let mut cmd = Cli::command();
+    let name = cmd.get_name().to_string();
+    generate(shell, &mut cmd, name, &mut std::io::stdout());
 }
 
 fn parse_version(v: &str) -> Option<(u32, u32, u32)> {
@@ -2235,10 +2506,12 @@ fn main() {
         Commands::Uninstall { target } => cmd_uninstall(target),
         Commands::Config {
             json,
+            debug,
+            debuglog,
+            model,
             embed_provider,
-            embed_url,
             embed_model,
-        } => cmd_config(json, embed_provider, embed_url, embed_model),
+        } => cmd_config(json, debug, debuglog, model, embed_provider, embed_model),
         Commands::Index {
             path,
             index_dir,
@@ -2319,5 +2592,15 @@ fn main() {
             AbbreviationsAction::Disable => cmd_abbreviations_disable(),
             AbbreviationsAction::List => cmd_abbreviations_list(),
         },
+        Commands::Completions { shell } => cmd_completions(shell),
+        Commands::McpServer { index_dir } => {
+            let idx_dir = index_dir.unwrap_or_else(default_index_dir);
+            let rt = tokio::runtime::Builder::new_current_thread()
+                .enable_all()
+                .build()
+                .expect("tokio runtime");
+            rt.block_on(mcp::server::run_server(idx_dir))
+                .expect("mcp server error");
+        }
     }
 }

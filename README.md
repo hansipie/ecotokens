@@ -28,7 +28,8 @@ Token-saving companion for [Claude Code](https://claude.ai/code), [Gemini CLI](h
 | **Gain dashboard** | Interactive TUI — token savings by command family or project, sparkline, diff view, history log |
 | **Multi-agent support** | Works with Claude Code, Gemini CLI, Qwen Code, and Pi out of the box |
 | **Precision guarantees** | Errors, failures, and stack traces are never removed; secrets are redacted before filtering |
-| **Code intelligence** | BM25 + semantic search, symbol lookup, call graph tracing, near-duplicate detection |
+| **Code intelligence** | BM25 + vector search (Candle, zero-config), symbol lookup, call graph tracing, near-duplicate detection |
+| **MCP server** *(Claude Code, Gemini CLI, Qwen Code)* | Exposes code-intelligence tools over stdio (`ecotokens mcp-server`) and auto-registers in agent settings on install |
 | **AI summarization** *(optional)* | Large outputs compressed by a local Ollama model instead of being truncated |
 | **Word abbreviations** *(optional)* | Replace common words with shorter forms (`function`→`fn`, `configuration`→`config`, …) in narrative text, and nudge the model to do the same via a SessionStart instruction |
 | **Zero config** | One `ecotokens install` command — works automatically from there |
@@ -85,11 +86,12 @@ To install the locally built binary into Cargo's bin directory:
 cargo install --path .
 ```
 
-With exact token counting enabled:
+With exact token counting enabled via [tiktoken](https://github.com/openai/tiktoken) (cl100k_base encoding):
 
 ```bash
 cargo install --path . --features exact-tokens
 ```
+By default, token counts use a fast character heuristic (`chars × 0.25`, ~80-85% accuracy). This has no effect on filtering behavior — only the token counts recorded in metrics are more precise.
 
 ## Installation
 
@@ -98,6 +100,19 @@ cargo install --path . --features exact-tokens
 ```bash
 cargo install --path .
 ecotokens install
+```
+
+In addition to hook installation, this also registers an MCP server entry in `~/.claude/settings.json`:
+
+```json
+{
+  "mcpServers": {
+    "ecotokens": {
+      "command": "ecotokens",
+      "args": ["mcp-server"]
+    }
+  }
+}
 ```
 
 ### Gemini CLI
@@ -111,6 +126,8 @@ ecotokens install --target gemini
 
 This writes `BeforeTool` and `AfterTool` hook entries into `~/.gemini/settings.json`. The `AfterTool` hook intercepts `read_file`, `search_file_content`, and `list_directory` results.
 
+It also registers the ecotokens MCP server in `~/.gemini/settings.json`.
+
 ### Qwen Code
 
 Requires [Qwen Code](https://github.com/QwenLM/qwen-code).
@@ -121,6 +138,8 @@ ecotokens install --target qwen
 ```
 
 This writes `PreToolUse` and `PostToolUse` hook entries into `~/.qwen/settings.json`. The `PostToolUse` hook intercepts `read_file`, `search_files`, and `list_dir` results.
+
+It also registers the ecotokens MCP server in `~/.qwen/settings.json`.
 
 ### Pi
 
@@ -140,16 +159,6 @@ ecotokens install --target all
 ```
 
 `--target all` covers Claude Code, Gemini CLI, Qwen Code, and Pi in a single command.
-
-### With exact token counting
-
-By default, token counts use a fast character heuristic (`chars × 0.25`, ~80-85% accuracy). Enable exact counting via [tiktoken](https://github.com/openai/tiktoken) (cl100k_base encoding):
-
-```bash
-cargo install --path . --features exact-tokens
-```
-
-This has no effect on filtering behavior — only the token counts recorded in metrics are more precise.
 
 ### With AI summarization
 
@@ -176,8 +185,8 @@ ecotokens uninstall --target all       # all targets
 
 | Command | Description |
 |---------|-------------|
-| `ecotokens install` | Install the PreToolUse + PostToolUse hooks in `~/.claude/settings.json` |
-| `ecotokens uninstall` | Remove the hooks |
+| `ecotokens install` | Install the PreToolUse + PostToolUse hooks and register the MCP server entry in `~/.claude/settings.json` |
+| `ecotokens uninstall` | Remove all hooks (PreToolUse, PostToolUse, SessionStart, SessionEnd) and the MCP server entry |
 | `ecotokens filter -- CMD [ARGS]` | Run a command, filter its output, record metrics |
 | `ecotokens filter --cwd DIR -- CMD [ARGS]` | Same, with an explicit working directory |
 | `ecotokens hook-post` | PostToolUse handler — intercept native tool results (Read, Grep, Glob) |
@@ -185,7 +194,8 @@ ecotokens uninstall --target all       # all targets
 | `ecotokens gain --period PERIOD` | Filter TUI to a time window (`all`, `today`, `week`, `month`) |
 | `ecotokens gain --history` | Print a savings summary table for 24h / 7 days / 30 days |
 | `ecotokens gain --json` | JSON report |
-| `ecotokens config` | Show current configuration |
+| `ecotokens config [--debug true\|false]` | Show or update global configuration (including debug mode) |
+| `ecotokens config --model MODEL` | Set the default model used for cost calculations (empty or unknown value lists available models) |
 | `ecotokens index [--path DIR]` | Index a codebase for BM25 + symbolic search |
 | `ecotokens search QUERY [--context N] [--include GLOB] [--exclude GLOB] [--no-trace]` | Search the indexed codebase with line numbers, context, and optional trace augmentation |
 | `ecotokens outline PATH` | List symbols in a file or directory |
@@ -193,6 +203,7 @@ ecotokens uninstall --target all       # all targets
 | `ecotokens trace callers SYMBOL` | Find callers of a symbol |
 | `ecotokens trace callees SYMBOL` | Find callees of a symbol |
 | `ecotokens watch [--path DIR]` | Watch a directory and keep the index up to date |
+| `ecotokens mcp-server [--index-dir DIR]` | Start the stdio MCP server exposing search/outline/symbol/trace/duplicates tools |
 | `ecotokens auto-watch enable` | Start watch automatically on each Claude Code session |
 | `ecotokens auto-watch disable` | Disable automatic watch |
 | `ecotokens abbreviations enable` | Replace common words with abbreviations in filtered outputs + inject a matching instruction at SessionStart |
@@ -204,17 +215,38 @@ ecotokens uninstall --target all       # all targets
 | `ecotokens clear --older-than DURATION` | Delete interceptions older than a duration (e.g. `30d`, `2w`, `1m`) |
 | `ecotokens clear --family FAMILY` | Delete interceptions of a specific command family |
 | `ecotokens clear --project PATH` | Delete interceptions for a specific project (use `"[undefined]"` for entries without a git root) |
+| `ecotokens completions SHELL` | Generate a shell completion script (`bash`, `zsh`, `fish`, `powershell`, `elvish`) |
+
+## Shell completions
+
+```bash
+# zsh
+ecotokens completions zsh > ~/.zsh/completions/_ecotokens
+
+# bash
+ecotokens completions bash > ~/.local/share/bash-completion/completions/ecotokens
+
+# fish
+ecotokens completions fish > ~/.config/fish/completions/ecotokens.fish
+
+# PowerShell
+ecotokens completions powershell >> $PROFILE
+```
+
+Reload your shell (or open a new terminal) to activate completions.
 
 ## Gain dashboard
 
 ```
-ecotokens gain                                          # all time
+ecotokens gain                                          # all time, uses default model from config
 ecotokens gain --period today                           # today only
 ecotokens gain --period week                            # last 7 days
-ecotokens gain --period month --model claude-sonnet-4-5 # last 30 days, custom model
+ecotokens gain --period month --model claude-sonnet-4-6 # last 30 days, override model
 ecotokens gain --history                                # summary table: 24h / 7d / 30d
 ecotokens gain --history --json                         # same, as JSON
 ```
+
+The model used for cost calculations defaults to the value set with `ecotokens config --model` (or `claude-sonnet-4-6` if not configured). Pass `--model` to override for a single invocation.
 
 Interactive TUI showing token savings per command family and per project, with a sparkline. The `--period` flag filters both the stats and the history panels.
 
@@ -224,9 +256,11 @@ Interactive TUI showing token savings per command family and per project, with a
 |-----|--------|
 | `j` / `u` | Navigate up / down in list |
 | `k` / `i` | Scroll history log down / up (family log view) |
+| `l` / `o` | Scroll detail / diff / SplitRaw BEFORE panel down / up |
+| `L` / `O` | Scroll SplitRaw AFTER panel down / up |
 | `p` | Switch to project view (from family view) |
 | `f` | Switch to family view (from project view) |
-| `d` | Toggle detail mode (details / diff) — family view only |
+| `d` | Cycle detail mode (details → diff → split raw) — family view only |
 | `s` | Cycle sparkline scale (linear / log / capped) |
 | `q` / `Esc` | Quit |
 
@@ -249,11 +283,13 @@ The output is compressed by the same family-specific filters used by the hook, a
 ```bash
 ecotokens watch                    # foreground, TUI progress
 ecotokens watch --path ./src       # watch a specific directory
-ecotokens watch --background       # fork to background, log to stdout
+ecotokens watch --background       # fork to background
 ecotokens watch --status           # show status of background process
 ecotokens watch --status --json    # JSON status output
 ecotokens watch --stop             # stop the background process
 ```
+
+> **Note:** Background logs are only written if global `debug` is enabled (`ecotokens config --debug true`).
 
 ### Auto-watch *(Claude Code <del>& Qwen Code</del>)*
 
@@ -278,51 +314,7 @@ ecotokens abbreviations disable   # back to default
 
 When enabled, a post-processing pass replaces full words with shorter forms in the narrative parts of tool outputs (code blocks between triple backticks are preserved). A matching `additionalContext` payload is emitted at `SessionStart` so the model adopts the same abbreviations in its own responses.
 
-Default abbreviations:
-
-| Word | Abbreviation |
-|------|--------------|
-| `administrator` | `admin` |
-| `administrators` | `admins` |
-| `application` | `app` |
-| `argument` | `arg` |
-| `arguments` | `args` |
-| `attribute` | `attr` |
-| `attributes` | `attrs` |
-| `command` | `cmd` |
-| `commands` | `cmds` |
-| `configuration` | `config` |
-| `database` | `db` |
-| `dependencies` | `deps` |
-| `dependency` | `dep` |
-| `development` | `dev` |
-| `directories` | `dirs` |
-| `directory` | `dir` |
-| `documentation` | `docs` |
-| `environment` | `env` |
-| `error` | `err` |
-| `errors` | `errs` |
-| `function` | `fn` |
-| `implementation` | `impl` |
-| `implementations` | `impls` |
-| `information` | `info` |
-| `message` | `msg` |
-| `messages` | `msgs` |
-| `package` | `pkg` |
-| `packages` | `pkgs` |
-| `parameter` | `param` |
-| `parameters` | `params` |
-| `production` | `prod` |
-| `reference` | `ref` |
-| `references` | `refs` |
-| `repositories` | `repos` |
-| `repository` | `repo` |
-| `request` | `req` |
-| `response` | `resp` |
-| `variable` | `var` |
-| `variables` | `vars` |
-| `warning` | `warn` |
-| `warnings` | `warns` |
+See the full list of default abbreviations in [docs/abbreviations.md](docs/abbreviations.md).
 
 Keep the feature flag in `~/.config/ecotokens/config.json`
 
@@ -343,7 +335,25 @@ Keep the feature flag in `~/.config/ecotokens/config.json`
 
 ## Bonus Tools
 
-_Less code is less tokens_
+### MCP server (Claude Code, Gemini CLI, Qwen Code)
+
+`ecotokens mcp-server` starts a stdio MCP server backed by the ecotokens index and trace engines.
+
+```bash
+ecotokens mcp-server
+ecotokens mcp-server --index-dir ~/.config/ecotokens/index
+```
+
+Exposed tools:
+
+- `ecotokens_search` — BM25 + semantic search
+- `ecotokens_outline` — symbol outline for file/directory
+- `ecotokens_symbol` — fetch full symbol source by stable ID
+- `ecotokens_trace_callers` — find callers of a symbol
+- `ecotokens_trace_callees` — find callees (with depth)
+- `ecotokens_duplicates` — detect near-duplicate code blocks
+
+For Claude Code, Gemini CLI, and Qwen Code, `ecotokens install` registers this server automatically in each target's settings file.
 
 ### Search command
 
@@ -381,6 +391,8 @@ Results are automatically scoped to the current git project when using the globa
 
 ### Duplicates command
 
+_Less code is less tokens_
+
 `ecotokens duplicates` scans the indexed codebase for near-identical code blocks and reports them grouped by similarity.
 
 ```bash
@@ -401,15 +413,70 @@ ecotokens config --json    # show all settings (JSON)
 
 Output includes:
 
-```
+```bash
 hook_installed        : true
 debug                 : false
+debuglog              : false
+default_model         : claude-sonnet-4-6
 exclusions            : []
-embed_provider        : ollama (http://localhost:11434) model=qwen3-embedding:latest
+embed_provider        : candle (sentence-transformers/all-MiniLM-L6-v2)
 ai_summary_enabled    : false
 ai_summary_model      : llama3.2:3b (default)
 ai_summary_url        : http://localhost:11434 (default)
 abbreviations_enabled : false
+```
+
+### Debug mode
+
+Enable the global debug mode to see detailed interception logs and enable background logging for the `watch` command:
+
+```bash
+ecotokens config --debug true
+ecotokens config --debug false
+```
+
+This updates the `debug` field in `~/.config/ecotokens/config.json`.
+
+### Debug file logging
+
+Enable structured per-hook logging to a file for deeper tracing of what ecotokens intercepts:
+
+```bash
+ecotokens config --debuglog true
+ecotokens config --debuglog false
+```
+
+When enabled, every hook invocation appends a JSONL entry to `~/.config/ecotokens/debug.log`:
+
+```json
+{"ts":"2026-05-08T12:00:00Z","uid":"a1b2c3d4","cmd":"git status","phase":"input","data":{...}}
+{"ts":"2026-05-08T12:00:00Z","uid":"a1b2c3d4","cmd":"git status","phase":"output","data":{...}}
+```
+
+Each entry contains a short `uid` to correlate the input and output phases of the same invocation. Distinct from `--debug` (which prints to stderr) — `--debuglog` writes silently to disk and survives across sessions.
+
+### Default model for cost calculations
+
+The model selected here determines the per-token price used in gain reports:
+
+```bash
+ecotokens config --model claude-opus-4-7    # set default model
+ecotokens config --model ""                 # list available models
+ecotokens config --model unknown-model      # unknown model → lists available models
+```
+
+The model name must be present in the built-in pricing table (or overridden via `model_pricing` in `~/.config/ecotokens/config.json`). Passing an empty value or an unrecognised name prints the full list and exits.
+
+See the full list of built-in models and prices in [docs/models.md](docs/models.md).
+
+Override any entry or add a new model via `model_pricing` in `~/.config/ecotokens/config.json`:
+
+```json
+{
+  "model_pricing": {
+    "my-custom-model": { "input_usd_per_1m": 0.50, "output_usd_per_1m": 2.00 }
+  }
+}
 ```
 
 ### Word abbreviations *(optional)*
@@ -422,15 +489,20 @@ ecotokens abbreviations disable   # back to default
 
 When enabled, a post-processing pass replaces full words with shorter forms in the narrative parts of tool outputs (code blocks between triple backticks are preserved). A matching `additionalContext` payload is emitted at `SessionStart` so the model adopts the same abbreviations in its own responses.
 
-Extend or override the built-in dictionary via `abbreviations_custom` in `~/.config/ecotokens/config.json`:
+Extend or override the built-in dictionary via a separate `~/.config/ecotokens/abbreviations.json` file:
 
 ```json
 {
-  "abbreviations_enabled": true,
-  "abbreviations_custom": {
-    "function": "func",
-    "repository": "repo"
-  }
+  "function": "func",
+  "repository": "repo"
+}
+```
+
+The feature flag stays in `~/.config/ecotokens/config.json`:
+
+```json
+{
+  "abbreviations_enabled": true
 }
 ```
 
@@ -452,64 +524,44 @@ Extend or override the built-in dictionary via `abbreviations_custom` in `~/.con
 
 > **Note:** Family detection uses the basename of the first token, so commands invoked via absolute path (`/usr/bin/git`), venv (`.venv/bin/pytest`), version managers (`~/.cargo/bin/cargo`), or wrappers (`poetry run`) are correctly matched to their family.
 
-## Embeddings (optional)
+## Embeddings
 
-When an embedding provider is configured, `ecotokens search` uses a hybrid BM25 + cosine similarity scoring (50/50) for more relevant results. Without a provider, pure BM25 is used.
+`ecotokens search` uses **dual BM25 + vector retrieval** with score fusion (`0.4 × BM25 + 0.6 × cosine`). The vector index is powered by [Candle](https://github.com/huggingface/candle) — a zero-config local embedding engine. No external service required.
 
-### Providers
+### Provider
 
-| Provider | Default URL | Default model |
-|----------|-------------|---------------|
-| `ollama` | `http://localhost:11434` | `nomic-embed-text` |
-| `lmstudio` | `http://localhost:1234` | `nomic-embed-text-v1.5` |
-
-### Configuration
+**Candle** (default) — runs `sentence-transformers/all-MiniLM-L6-v2` (384 dim) locally. The model is downloaded automatically from HuggingFace Hub on first use (~90 MB, cached in `~/.cache/huggingface/`).
 
 ```bash
-# Ollama with default model (nomic-embed-text)
-ecotokens config --embed-provider ollama --embed-url http://localhost:11434
-
-# Ollama with a custom model
-ecotokens config --embed-provider ollama --embed-url http://localhost:11434 --embed-model mxbai-embed-large
-
-# LM Studio with default model (nomic-embed-text-v1.5)
-ecotokens config --embed-provider lmstudio --embed-url http://localhost:1234
-
-# LM Studio with a custom model
-ecotokens config --embed-provider lmstudio --embed-url http://localhost:1234 --embed-model text-embedding-nomic-embed-text-v1.5
-
-# Change the model only (provider and URL are preserved)
-ecotokens config --embed-model all-minilm
-
-# View current configuration
-ecotokens config
-
-# Disable embeddings (fallback to BM25 only)
-ecotokens config --embed-provider none
+# Candle is active by default — nothing to configure
+ecotokens index --path /your/project
+ecotokens search "your query"
 ```
 
-### Model compatibility
+Each result includes a `retrieval_source` field (`bm25`, `vector`, or `both`) visible in JSON output.
 
-- **Ollama**: any model pulled via `ollama pull <model>` — e.g. `nomic-embed-text`, `mxbai-embed-large`, `all-minilm`, `bge-m3`
-- **LM Studio**: any embedding model loaded in LM Studio that exposes a `/v1/embeddings` endpoint (OpenAI-compatible)
+### Disable embeddings
 
-> **Note:** The embedding model must match the one used during indexing. If you change the model, re-run `ecotokens index` to regenerate the embeddings.
+```bash
+ecotokens config --embed-provider none    # fall back to pure BM25
+```
 
 ### Workflow
 
 ```bash
-# 1. Pull the model (Ollama example)
-ollama pull mxbai-embed-large
+# 1. Index your project (Candle embeddings computed automatically)
+ecotokens index --path /your/project
 
-# 2. Configure ecotokens
-ecotokens config --embed-provider ollama --embed-model mxbai-embed-large
-
-# 3. Re-index your project
-ecotokens index --path /your/project --reset
-
-# 4. Search with semantic scoring
+# 2. Search with hybrid scoring
 ecotokens search "your query"
+
+# 3. JSON output with retrieval_source
+ecotokens search "your query" --json
 ```
+
+### Model change detection
+
+When the configured embedding model changes, `ecotokens index` automatically rebuilds the vector index (`hnsw_index.bin`) without touching the BM25 index. Embeddings for unchanged files are reused between runs.
 
 ## AI summarization (optional)
 
@@ -562,7 +614,8 @@ Filtering is aggressive on noise, conservative on signal:
 
 - Rust ≥ 1.75 (stable)
 - One or more of: Claude Code (with hook support), Gemini CLI ≥ 0.1.0, Qwen Code, Pi ≥ 0.62.0
-- Ollama or LM Studio (optional, for semantic search embeddings and AI summarization)
+- Internet access on first use (Candle downloads `all-MiniLM-L6-v2` ~90 MB from HuggingFace Hub; cached locally after that)
+- Ollama (optional, for AI summarization only)
 
 ## Contributing
 

@@ -76,6 +76,52 @@ fn test_watcher_ignores_non_indexable_files() {
     let _ = handle.join();
 }
 
+/// Vérifie que les fichiers listés dans .gitignore retournent le statut "ignored".
+#[test]
+fn test_watcher_respects_gitignore() {
+    let dir = TempDir::new().unwrap();
+    let index_dir = TempDir::new().unwrap();
+
+    // Créer un .gitignore qui exclut target/ et *.log
+    std::fs::write(dir.path().join(".gitignore"), "target/\n*.log\n").unwrap();
+    std::fs::create_dir_all(dir.path().join("target")).unwrap();
+
+    let (event_tx, event_rx) = mpsc::channel::<WatchEvent>();
+    let (stop_tx, stop_rx) = mpsc::channel::<()>();
+
+    let watch_path = dir.path().to_path_buf();
+    let idx_dir = index_dir.path().to_path_buf();
+
+    let handle = std::thread::spawn(move || {
+        let _ = watch_directory(&watch_path, &idx_dir, event_tx, stop_rx);
+    });
+
+    std::thread::sleep(Duration::from_millis(200));
+
+    // Fichier dans target/ → doit être ignoré
+    std::fs::write(dir.path().join("target/build.rs"), "fn main() {}").unwrap();
+
+    let event = event_rx
+        .recv_timeout(Duration::from_secs(4))
+        .expect("aucun événement reçu");
+    assert_eq!(
+        event.status, "ignored",
+        "target/build.rs devrait être ignoré par .gitignore"
+    );
+
+    // Fichier .log → doit être ignoré
+    std::fs::write(dir.path().join("app.log"), "some log").unwrap();
+    if let Ok(ev) = event_rx.recv_timeout(Duration::from_secs(4)) {
+        assert_eq!(
+            ev.status, "ignored",
+            "app.log devrait être ignoré par .gitignore"
+        );
+    }
+
+    let _ = stop_tx.send(());
+    let _ = handle.join();
+}
+
 /// Vérifie que la modification d'un fichier existant déclenche un événement.
 #[test]
 fn test_watcher_detects_modification() {

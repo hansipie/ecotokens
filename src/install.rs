@@ -149,6 +149,22 @@ fn remove_ecotokens_mcp_server(v: &mut serde_json::Value) -> bool {
 // Claude Code - PreToolUse hook
 // ============================================================================
 
+/// Install the ecotokens MCP server entry into a settings JSON file (idempotent).
+pub fn install_mcp_server(settings_path: &Path) -> InstallResult {
+    let binary = std::env::current_exe()
+        .unwrap_or_else(|_| std::path::PathBuf::from("ecotokens"))
+        .to_string_lossy()
+        .into_owned();
+    let mut v = read_settings(settings_path);
+    if !has_ecotokens_mcp_server(&v) {
+        v["mcpServers"]["ecotokens"] = serde_json::json!({
+            "command": binary,
+            "args": ["mcp-server"]
+        });
+    }
+    write_settings(settings_path, &v)
+}
+
 /// Install the PreToolUse hook into ~/.claude/settings.json (idempotent).
 pub fn install_hook(settings_path: &Path, claude_json_path: &Path) -> InstallResult {
     let _ = claude_json_path; // kept for signature compatibility with uninstall callers
@@ -169,24 +185,39 @@ pub fn is_hook_installed(settings_path: &Path) -> bool {
     has_hook_command(&read_settings(settings_path), "PreToolUse", HOOK_COMMAND)
 }
 
+/// Check if the ecotokens PostToolUse hook is present in settings.json.
+pub fn is_post_hook_installed(settings_path: &Path) -> bool {
+    has_hook_command(
+        &read_settings(settings_path),
+        "PostToolUse",
+        POST_HOOK_COMMAND,
+    )
+}
+
 /// Check if the ecotokens MCP server is registered in ~/.claude.json.
 pub fn is_mcp_registered(claude_json_path: &Path) -> bool {
     has_ecotokens_mcp_server(&read_settings(claude_json_path))
 }
 
-/// Remove the ecotokens PreToolUse hook from ~/.claude/settings.json and
-/// the MCP server entry from ~/.claude.json (both idempotent).
+/// Remove all ecotokens hooks and MCP server entry from ~/.claude/settings.json.
+/// Also cleans up ~/.claude.json for backward compatibility with older installs.
 pub fn uninstall_hook(settings_path: &Path, claude_json_path: &Path) -> InstallResult {
     if settings_path.exists() {
         let mut v = read_settings(settings_path);
         remove_hook_generic(&mut v, "PreToolUse", HOOK_COMMAND);
+        remove_hook_generic(&mut v, "PostToolUse", POST_HOOK_COMMAND);
+        remove_hook_generic(&mut v, "SessionStart", SESSION_START_COMMAND);
+        remove_hook_generic(&mut v, "SessionEnd", SESSION_END_COMMAND);
+        remove_ecotokens_mcp_server(&mut v);
         write_settings(settings_path, &v)?;
     }
 
+    // Rétrocompatibilité : anciennes installs où le MCP était dans ~/.claude.json
     if claude_json_path.exists() {
         let mut cv = read_settings(claude_json_path);
-        remove_ecotokens_mcp_server(&mut cv);
-        write_settings(claude_json_path, &cv)?;
+        if remove_ecotokens_mcp_server(&mut cv) {
+            write_settings(claude_json_path, &cv)?;
+        }
     }
 
     Ok(())

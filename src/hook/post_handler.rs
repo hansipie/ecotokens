@@ -65,7 +65,7 @@ impl GeminiAfterToolOutput {
     }
 }
 
-#[derive(Debug, Clone, Deserialize)]
+#[derive(Debug, Clone, Deserialize, Serialize)]
 pub struct PostHookInput {
     pub tool_name: String,
     pub tool_input: serde_json::Value,
@@ -155,7 +155,7 @@ pub fn handle_post_input(input: &PostHookInput, depth: u32) -> (PostFilterResult
             (result, CommandFamily::Grep)
         }
         "Glob" => {
-            let filenames = extract_glob_filenames(&input.tool_response);
+            let filenames = format_glob_output(&input.tool_response);
             let result = handle_glob(&filenames);
             (result, CommandFamily::Fs)
         }
@@ -164,7 +164,7 @@ pub fn handle_post_input(input: &PostHookInput, depth: u32) -> (PostFilterResult
 }
 
 /// Extract filenames from a Glob tool_response (handles both array and newline-separated string).
-fn extract_glob_filenames(tool_response: &serde_json::Value) -> String {
+fn format_glob_output(tool_response: &serde_json::Value) -> String {
     // Try array form: { "filenames": ["a", "b", ...] }
     if let Some(arr) = tool_response.get("filenames").and_then(|v| v.as_array()) {
         return arr
@@ -251,28 +251,13 @@ fn record_post_metrics(
     }
 }
 
-/// AfterTool handler for Gemini CLI — replaces tool results with compressed output.
-/// Gemini uses `decision: "deny"` + `reason` to substitute the tool result.
-pub fn handle_post_gemini() {
-    let settings = Settings::load();
-    let depth = settings.post_hook_depth;
-
-    let input = match read_post_input() {
-        Some(mut i) => {
-            i.tool_name = normalize_gemini_tool_name(&i.tool_name).to_string();
-            i
-        }
-        None => {
-            if let Ok(s) = serde_json::to_string(&GeminiAfterToolOutput::allow()) {
-                print!("{s}");
-            }
-            return;
-        }
-    };
-
-    let (result, family) = handle_post_input(&input, depth);
-
-    let output = match &result {
+fn process_filter_result(
+    result: PostFilterResult,
+    input: &PostHookInput,
+    family: CommandFamily,
+    settings: &Settings,
+) -> Option<String> {
+    match result {
         PostFilterResult::Filtered {
             output,
             tokens_before,
@@ -280,130 +265,105 @@ pub fn handle_post_gemini() {
             content_before,
         } => {
             let (final_output, final_tokens_after) = if settings.abbreviations_enabled {
-                let abbreviated = crate::abbreviations::abbreviate(output, &settings).0;
+                let abbreviated = crate::abbreviations::abbreviate(&output, settings).0;
                 let recomputed = crate::tokens::count_tokens(&abbreviated) as u32;
-                (abbreviated, recomputed.min(*tokens_after))
+                if recomputed < tokens_after {
+                    (abbreviated, recomputed)
+                } else {
+                    (output, tokens_after)
+                }
             } else {
-                (output.clone(), *tokens_after)
+                (output, tokens_after)
             };
             record_post_metrics(
-                &input,
+                input,
                 family,
-                *tokens_before,
+                tokens_before,
                 final_tokens_after,
-                content_before,
+                &content_before,
                 &final_output,
             );
-            GeminiAfterToolOutput::deny(final_output)
+            Some(final_output)
         }
-        PostFilterResult::Passthrough => GeminiAfterToolOutput::allow(),
+        PostFilterResult::Passthrough => None,
+    }
+}
+
+fn run_post_handler<T: Serialize>(
+    normalize: Option<fn(&str) -> &str>,
+    make_output: impl Fn(Option<String>) -> T,
+    fallback: impl Fn(),
+) {
+    let settings = Settings::load();
+    let depth = settings.post_hook_depth;
+    let logger = crate::debuglog::DebugLogger::new(settings.debuglog);
+    let uid = crate::debuglog::gen_uid();
+
+    let input = match read_post_input() {
+        Some(mut i) => {
+            if let Some(norm) = normalize {
+                i.tool_name = norm(&i.tool_name).to_string();
+            }
+            i
+        }
+        None => {
+            fallback();
+            return;
+        }
     };
 
+    logger.log(
+        &uid,
+        "hook-post",
+        "input",
+        &serde_json::to_value(&input).unwrap_or(serde_json::Value::Null),
+    );
+
+    let (result, family) = handle_post_input(&input, depth);
+    let output = make_output(process_filter_result(result, &input, family, &settings));
+
     match serde_json::to_string(&output) {
-        Ok(json) => print!("{json}"),
-        Err(_) => {
+        Ok(json) => {
+            logger.log(
+                &uid,
+                "hook-post",
+                "output",
+                &serde_json::from_str(&json).unwrap_or(serde_json::Value::Null),
+            );
+            print!("{json}");
+        }
+        Err(_) => fallback(),
+    }
+}
+
+/// AfterTool handler for Gemini CLI — replaces tool results with compressed output.
+/// Gemini uses `decision: "deny"` + `reason` to substitute the tool result.
+pub fn handle_post_gemini() {
+    run_post_handler(
+        Some(normalize_gemini_tool_name),
+        |o| o.map_or_else(GeminiAfterToolOutput::allow, GeminiAfterToolOutput::deny),
+        || {
             if let Ok(s) = serde_json::to_string(&GeminiAfterToolOutput::allow()) {
                 print!("{s}");
             }
-        }
-    }
+        },
+    );
 }
 
 /// PostToolUse handler for Qwen Code — injects compressed output as additionalContext.
 /// Qwen's PostToolUse uses the same additionalContext mechanism as Claude Code.
 pub fn handle_post_qwen() {
-    let settings = Settings::load();
-    let depth = settings.post_hook_depth;
-
-    let input = match read_post_input() {
-        Some(mut i) => {
-            i.tool_name = normalize_qwen_tool_name(&i.tool_name).to_string();
-            i
-        }
-        None => {
-            print!("{{}}");
-            return;
-        }
-    };
-
-    let (result, family) = handle_post_input(&input, depth);
-
-    let output = match &result {
-        PostFilterResult::Filtered {
-            output,
-            tokens_before,
-            tokens_after,
-            content_before,
-        } => {
-            let (final_output, final_tokens_after) = if settings.abbreviations_enabled {
-                let abbreviated = crate::abbreviations::abbreviate(output, &settings).0;
-                let recomputed = crate::tokens::count_tokens(&abbreviated) as u32;
-                (abbreviated, recomputed.min(*tokens_after))
-            } else {
-                (output.clone(), *tokens_after)
-            };
-            record_post_metrics(
-                &input,
-                family,
-                *tokens_before,
-                final_tokens_after,
-                content_before,
-                &final_output,
-            );
-            PostHookOutput::with_context(final_output)
-        }
-        PostFilterResult::Passthrough => PostHookOutput::passthrough(),
-    };
-
-    match serde_json::to_string(&output) {
-        Ok(json) => print!("{json}"),
-        Err(_) => print!("{{}}"),
-    }
+    run_post_handler(
+        Some(normalize_qwen_tool_name),
+        |o| o.map_or_else(PostHookOutput::passthrough, PostHookOutput::with_context),
+        || print!("{{}}"),
+    );
 }
 
 pub fn handle_post() {
-    let settings = Settings::load();
-    let depth = settings.post_hook_depth;
-
-    let input = match read_post_input() {
-        Some(i) => i,
-        None => {
-            print!("{{}}");
-            return;
-        }
-    };
-
-    let (result, family) = handle_post_input(&input, depth);
-
-    let output = match &result {
-        PostFilterResult::Filtered {
-            output,
-            tokens_before,
-            tokens_after,
-            content_before,
-        } => {
-            let (final_output, final_tokens_after) = if settings.abbreviations_enabled {
-                let abbreviated = crate::abbreviations::abbreviate(output, &settings).0;
-                let recomputed = crate::tokens::count_tokens(&abbreviated) as u32;
-                (abbreviated, recomputed.min(*tokens_after))
-            } else {
-                (output.clone(), *tokens_after)
-            };
-            record_post_metrics(
-                &input,
-                family,
-                *tokens_before,
-                final_tokens_after,
-                content_before,
-                &final_output,
-            );
-            PostHookOutput::with_context(final_output)
-        }
-        PostFilterResult::Passthrough => PostHookOutput::passthrough(),
-    };
-
-    match serde_json::to_string(&output) {
-        Ok(json) => print!("{json}"),
-        Err(_) => print!("{{}}"),
-    }
+    run_post_handler(
+        None,
+        |o| o.map_or_else(PostHookOutput::passthrough, PostHookOutput::with_context),
+        || print!("{{}}"),
+    );
 }
