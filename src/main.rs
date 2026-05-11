@@ -2231,6 +2231,7 @@ fn cmd_clear(
     println!("Deleted {delete_count} interception(s).");
 }
 
+#[allow(dead_code)]
 fn stable_hash(s: &str) -> u64 {
     let mut h: u64 = 14695981039346656037;
     for b in s.bytes() {
@@ -2242,6 +2243,7 @@ fn stable_hash(s: &str) -> u64 {
 
 /// Derive a per-path log filename from the watched directory.
 /// `/home/user/my-project` → `~/.config/ecotokens/watch_home_user_my-project.log`
+#[allow(dead_code)]
 fn watch_log_path(watch_path: &std::path::Path) -> PathBuf {
     let sanitized: String = watch_path
         .to_string_lossy()
@@ -2306,11 +2308,11 @@ fn cmd_session_end() {
     let cwd_str = cwd.to_string_lossy().to_string();
 
     let mut store = config::SessionStore::load();
-    if let Some(pid) = store.decrement_for_session(&cwd_str) {
+    if let Some(_pid) = store.decrement_for_session(&cwd_str) {
         let _ = store.save();
         #[cfg(unix)]
         let _ = std::process::Command::new("kill")
-            .args(["-TERM", &pid.to_string()])
+            .args(["-TERM", &_pid.to_string()])
             .status();
     } else {
         let _ = store.save();

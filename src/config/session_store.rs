@@ -123,6 +123,7 @@ impl SessionStore {
     }
 
     /// Called from inside the daemon after `daemonize().start()` succeeds.
+    #[allow(dead_code)]
     pub fn register_watcher(&mut self, path: &str, pid: u32, log_file: Option<String>) {
         let entry = self.0.entry(path.to_string()).or_default();
         entry.watcher_pid = Some(pid);
