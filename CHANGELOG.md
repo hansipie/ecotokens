@@ -5,6 +5,14 @@ All notable changes to this project will be documented in this file.
 The format is based on [Keep a Changelog](https://keepachangelog.com/en/1.0.0/),
 and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0.html).
 
+## [0.20.1] - 2026-05-11
+
+### Fixed
+
+- **Pi extension** : `spawnSync` utilisait le répertoire courant du processus au lieu du répertoire du projet surveillé — `ctx.cwd` est désormais passé correctement aux hooks `session-start` et `session-end`
+- **`auto-watch`** : le message de confirmation mentionne désormais Pi aux côtés de Claude Code et Qwen Code
+- Silencieux : quatre avertissements de compilation préexistants supprimés (champs et imports inutilisés)
+
 ## [0.20.0] - 2026-05-08
 
 ### Added
