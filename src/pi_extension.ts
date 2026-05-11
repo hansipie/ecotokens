@@ -112,14 +112,14 @@ export default function (pi: ExtensionAPI) {
   });
 
   // ── 3. Session lifecycle : auto-watch ────────────────────────────────────
-  pi.on("session_start", async (event, _ctx) => {
+  pi.on("session_start", async (event, ctx) => {
     if (event.reason === "startup") {
-      spawnSync("ecotokens", ["session-start"], { stdio: "ignore" });
+      spawnSync("ecotokens", ["session-start"], { stdio: "ignore", cwd: ctx.cwd });
     }
   });
 
-  pi.on("session_shutdown", async (_event, _ctx) => {
-    spawnSync("ecotokens", ["session-end"], { stdio: "ignore" });
+  pi.on("session_shutdown", async (_event, ctx) => {
+    spawnSync("ecotokens", ["session-end"], { stdio: "ignore", cwd: ctx.cwd });
   });
 
   // ── 4. Commandes slash ────────────────────────────────────────────────────

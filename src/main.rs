@@ -2344,7 +2344,7 @@ fn cmd_auto_watch_enable() {
         }
     }
 
-    println!("✓ auto-watch enabled — ecotokens watch will start automatically with Claude Code and Qwen Code");
+    println!("✓ auto-watch enabled — ecotokens watch will start automatically with Claude Code, Qwen Code and Pi");
 }
 
 fn cmd_auto_watch_disable() {
