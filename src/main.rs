@@ -15,6 +15,7 @@ mod abbreviations;
 mod config;
 mod daemon;
 mod debuglog;
+mod doctor;
 mod duplicates;
 mod embed;
 mod filter;
@@ -118,6 +119,11 @@ enum Commands {
         /// Model name for the embeddings provider (e.g. sentence-transformers/all-MiniLM-L6-v2)
         #[arg(long)]
         embed_model: Option<String>,
+    },
+    /// Diagnose common ecotokens setup issues without changing files
+    Doctor {
+        #[arg(long)]
+        json: bool,
     },
     /// Index a directory for BM25 + symbolic search
     Index {
@@ -709,6 +715,32 @@ fn sorted_projects_from(report: &metrics::report::Report) -> Vec<(String, f32)> 
         .collect();
     projects.sort_by(|a, b| b.1.partial_cmp(&a.1).unwrap_or(std::cmp::Ordering::Equal));
     projects
+}
+
+fn cmd_doctor(json: bool) {
+    let report = doctor::run();
+    if json {
+        println!(
+            "{}",
+            serde_json::to_string_pretty(&report).expect("doctor report should serialize")
+        );
+    } else {
+        println!("ecotokens doctor");
+        for check in &report.checks {
+            let status = match check.status {
+                doctor::DoctorStatus::Ok => "OK",
+                doctor::DoctorStatus::Warning => "WARN",
+                doctor::DoctorStatus::Error => "ERROR",
+            };
+            match &check.path {
+                Some(path) => println!("{status:<5} {:<18} {} ({path})", check.name, check.message),
+                None => println!("{status:<5} {:<18} {}", check.name, check.message),
+            }
+        }
+    }
+    if report.has_errors() {
+        std::process::exit(1);
+    }
 }
 
 fn cmd_install(target: String, ai_summary: bool, ai_summary_model: Option<String>) {
@@ -2514,6 +2546,7 @@ fn main() {
             embed_provider,
             embed_model,
         } => cmd_config(json, debug, debuglog, model, embed_provider, embed_model),
+        Commands::Doctor { json } => cmd_doctor(json),
         Commands::Index {
             path,
             index_dir,

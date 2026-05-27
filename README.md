@@ -207,6 +207,7 @@ ecotokens uninstall --target all       # all targets
 | `ecotokens gain --history` | Print a savings summary table for 24h / 7 days / 30 days |
 | `ecotokens gain --json` | JSON report |
 | `ecotokens config [--debug true\|false]` | Show or update global configuration (including debug mode) |
+| `ecotokens doctor [--json]` | Diagnose PATH, config, hook, MCP, and metrics setup without mutating files |
 | `ecotokens config --model MODEL` | Set the default model used for cost calculations (empty or unknown value lists available models) |
 | `ecotokens index [--path DIR]` | Index a codebase for BM25 + symbolic search |
 | `ecotokens search QUERY [--context N] [--include GLOB] [--exclude GLOB] [--no-trace]` | Search the indexed codebase with line numbers, context, and optional trace augmentation |
