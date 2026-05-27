@@ -1,0 +1,62 @@
+name: Bug report
+description: Report a reproducible problem in ecotokens
+title: "bug: "
+labels: ["bug"]
+body:
+  - type: markdown
+    attributes:
+      value: |
+        Thanks for reporting a bug. Please include enough context to reproduce it.
+  - type: input
+    id: version
+    attributes:
+      label: ecotokens version
+      description: Run `ecotokens --version`.
+      placeholder: "ecotokens 0.20.1"
+    validations:
+      required: true
+  - type: dropdown
+    id: integration
+    attributes:
+      label: Integration
+      options:
+        - Claude Code
+        - Gemini CLI
+        - Qwen Code
+        - Pi
+        - MCP server
+        - Direct CLI
+        - Other
+    validations:
+      required: true
+  - type: textarea
+    id: description
+    attributes:
+      label: What happened?
+      description: Describe the problem and the expected behavior.
+    validations:
+      required: true
+  - type: textarea
+    id: reproduce
+    attributes:
+      label: Steps to reproduce
+      placeholder: |
+        1. Run ...
+        2. Observe ...
+    validations:
+      required: true
+  - type: textarea
+    id: logs
+    attributes:
+      label: Relevant output or logs
+      description: Remove secrets before posting. ecotokens masks known secret patterns, but please double-check.
+      render: shell
+  - type: textarea
+    id: environment
+    attributes:
+      label: Environment
+      placeholder: |
+        OS:
+        Shell:
+        Agent version:
+        Rust version, if built from source:

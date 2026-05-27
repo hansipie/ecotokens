@@ -1,0 +1,43 @@
+name: Feature request
+description: Suggest an improvement or new integration for ecotokens
+title: "feature: "
+labels: ["enhancement"]
+body:
+  - type: markdown
+    attributes:
+      value: |
+        Thanks for suggesting an improvement. Small, focused requests are easier to discuss and ship.
+  - type: textarea
+    id: problem
+    attributes:
+      label: Problem
+      description: What workflow pain or missing capability should this solve?
+    validations:
+      required: true
+  - type: textarea
+    id: proposal
+    attributes:
+      label: Proposed solution
+      description: Describe the user-facing behavior you would like.
+    validations:
+      required: true
+  - type: dropdown
+    id: area
+    attributes:
+      label: Area
+      options:
+        - Hook integration
+        - MCP server
+        - Code intelligence
+        - Filtering / compression
+        - Metrics / dashboard
+        - Documentation
+        - Packaging
+        - Other
+    validations:
+      required: true
+  - type: textarea
+    id: alternatives
+    attributes:
+      label: Alternatives considered
+      description: Optional. Mention workarounds or comparable tools.

@@ -1,0 +1,5 @@
+blank_issues_enabled: true
+contact_links:
+  - name: Questions and roadmap discussion
+    url: https://github.com/hansipie/ecotokens/discussions
+    about: Ask questions, propose broad roadmap ideas, or discuss integrations before opening a focused issue.
