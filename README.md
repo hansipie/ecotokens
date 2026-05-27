@@ -8,12 +8,24 @@
   <a href="LICENSE"><img src="https://img.shields.io/badge/license-MIT-blue.svg" alt="MIT License"></a>
 </p>
 
-<p align="right">
-  <a href="https://www.producthunt.com/products/ecotokens?embed=true&amp;utm_source=badge-featured&amp;utm_medium=badge&amp;utm_campaign=badge-ecotokens" target="_blank" rel="noopener noreferrer"><img alt="EcoTokens - Save 90% of your AI coding tokens — automatically | Product Hunt" width="250" height="54" src="https://api.producthunt.com/widgets/embed-image/v1/featured.svg?post_id=1105858&amp;theme=light&amp;t=1774341425433"></a>
-</p>
-<br>
 
-Token-saving companion for [Claude Code](https://claude.ai/code), [Gemini CLI](https://github.com/google-gemini/gemini-cli), [Qwen Code](https://github.com/QwenLM/qwen-code), and [Pi](https://pi.dev). Built on a *"set it and forget it!"* philosophy: one install command, zero configuration, and ecotokens works automatically from there — intercepting tool outputs before they reach the model, filtering the noise, and recording how many tokens you saved.
+# ecotokens saves real AI coding context
+
+On one developer workstation, ecotokens recorded **19 928 hook executions** between **2026-03-06 and 2026-05-27**. The result: **94 282 087 tokens before filtering**, **5 874 896 tokens after filtering**, and **88 407 191 tokens saved**. That is a **93.8% overall reduction** across real shell commands and native tool results.
+
+| Real-world metric | Value |
+|-------------------|------:|
+| Hook executions measured | 19 928 |
+| Tokens saved | **88 407 191** |
+| Overall reduction | **93.8%** |
+| Commands with savings | 5 735 / 19 928, or 28.8% |
+| Biggest command family | `grep`, with 55 383 168 tokens saved |
+
+[Claude Code](https://claude.ai/code), [Gemini CLI](https://github.com/google-gemini/gemini-cli), [Qwen Code](https://github.com/QwenLM/qwen-code), and [Pi](https://pi.dev) can all dump massive command outputs and native tool results into your context window. ecotokens sits in front of those outputs, removes the noise, preserves the important bits, and records the before/after savings locally.
+
+Built on a *"set it and forget it!"* philosophy: one install command, zero configuration, then automatic compression for shell commands, file reads, grep/search results, directory listings, and code-intelligence workflows.
+
+Full methodology and per-family breakdown: [`docs/BENCHMARKS.md`](docs/BENCHMARKS.md).
 
 <p align="center">
   <img src="assets/demo.0.10.0.gif" alt="ecotokens demo" width="800">
@@ -23,22 +35,22 @@ Token-saving companion for [Claude Code](https://claude.ai/code), [Gemini CLI](h
 
 | Feature | Details |
 |---------|---------|
-| **PreToolUse hook** | Intercepts every shell (`Bash`) command before its output reaches the model — filters, compresses, and records savings |
-| **PostToolUse hook** *(Claude Code, Gemini CLI, Qwen Code)* | Intercepts native tool results (`Read`/`read_file`, `Grep`/`search_file_content`, `Glob`/`list_directory`) — outline-based compression for source files, grep trimming, glob denoising |
-| **Gain dashboard** | Interactive TUI — token savings by command family or project, sparkline, diff view, history log |
+| **PreToolUse hook** | Intercepts every shell (`Bash`) command before its output reaches the model - filters, compresses, and records savings |
+| **PostToolUse hook** *(Claude Code, Gemini CLI, Qwen Code)* | Intercepts native tool results (`Read`/`read_file`, `Grep`/`search_file_content`, `Glob`/`list_directory`) - outline-based compression for source files, grep trimming, glob denoising |
+| **Gain dashboard** | Interactive TUI - token savings by command family or project, sparkline, diff view, history log |
 | **Multi-agent support** | Works with Claude Code, Gemini CLI, Qwen Code, and Pi out of the box |
 | **Precision guarantees** | Errors, failures, and stack traces are never removed; secrets are redacted before filtering |
 | **Code intelligence** | BM25 + vector search (Candle, zero-config), symbol lookup, call graph tracing, near-duplicate detection |
 | **MCP server** *(Claude Code, Gemini CLI, Qwen Code)* | Exposes code-intelligence tools over stdio (`ecotokens mcp-server`) and auto-registers in agent settings on install |
 | **AI summarization** *(optional)* | Large outputs compressed by a local Ollama model instead of being truncated |
 | **Word abbreviations** *(optional)* | Replace common words with shorter forms (`function`→`fn`, `configuration`→`config`, …) in narrative text, and nudge the model to do the same via a SessionStart instruction |
-| **Zero config** | One `ecotokens install` command — works automatically from there |
+| **Zero config** | One `ecotokens install` command - works automatically from there |
 
 ## How it works
 
 ecotokens installs hooks that intercept tool outputs before they reach the model. Two interception points are supported:
 
-**PreToolUse / BeforeTool** — fires before every shell (`Bash`) command:
+**PreToolUse / BeforeTool** - fires before every shell (`Bash`) command:
 
 1. Runs the command and captures its output
 2. Applies a family-specific filter (git, cargo, python, …)
@@ -46,7 +58,7 @@ ecotokens installs hooks that intercept tool outputs before they reach the model
 4. Returns the compressed output to the model
 5. Records the before/after token counts in a local metrics store
 
-**PostToolUse / AfterTool** *(Claude Code, Gemini CLI, Qwen Code)* — fires after native file-tool calls:
+**PostToolUse / AfterTool** *(Claude Code, Gemini CLI, Qwen Code)* - fires after native file-tool calls:
 
 1. Intercepts the tool result before it enters the context window
 2. Applies a specialized filter (outline for source files, grep result trimming, glob path denoising)
@@ -57,7 +69,7 @@ Claude Code uses the `PreToolUse` + `PostToolUse` hooks (`~/.claude/settings.jso
 
 For a focused view of the runtime path, see [`docs/hook-filter-metrics-flow.md`](docs/hook-filter-metrics-flow.md).
 
-The result: the model sees clean, concise output — and you keep your context window.
+The result: the model sees clean, concise output - and you keep your context window.
 
 ## Quick install
 
@@ -91,7 +103,7 @@ With exact token counting enabled via [tiktoken](https://github.com/openai/tikto
 ```bash
 cargo install --path . --features exact-tokens
 ```
-By default, token counts use a fast character heuristic (`chars × 0.25`, ~80-85% accuracy). This has no effect on filtering behavior — only the token counts recorded in metrics are more precise.
+By default, token counts use a fast character heuristic (`chars × 0.25`, ~80-85% accuracy). This has no effect on filtering behavior - only the token counts recorded in metrics are more precise.
 
 ## Installation
 
@@ -189,8 +201,8 @@ ecotokens uninstall --target all       # all targets
 | `ecotokens uninstall` | Remove all hooks (PreToolUse, PostToolUse, SessionStart, SessionEnd) and the MCP server entry |
 | `ecotokens filter -- CMD [ARGS]` | Run a command, filter its output, record metrics |
 | `ecotokens filter --cwd DIR -- CMD [ARGS]` | Same, with an explicit working directory |
-| `ecotokens hook-post` | PostToolUse handler — intercept native tool results (Read, Grep, Glob) |
-| `ecotokens gain` | Interactive TUI dashboard — savings by family or project |
+| `ecotokens hook-post` | PostToolUse handler - intercept native tool results (Read, Grep, Glob) |
+| `ecotokens gain` | Interactive TUI dashboard - savings by family or project |
 | `ecotokens gain --period PERIOD` | Filter TUI to a time window (`all`, `today`, `week`, `month`) |
 | `ecotokens gain --history` | Print a savings summary table for 24h / 7 days / 30 days |
 | `ecotokens gain --json` | JSON report |
@@ -260,7 +272,7 @@ Interactive TUI showing token savings per command family and per project, with a
 | `L` / `O` | Scroll SplitRaw AFTER panel down / up |
 | `p` | Switch to project view (from family view) |
 | `f` | Switch to family view (from project view) |
-| `d` | Cycle detail mode (details → diff → split raw) — family view only |
+| `d` | Cycle detail mode (details → diff → split raw) - family view only |
 | `s` | Cycle sparkline scale (linear / log / capped) |
 | `q` / `Esc` | Quit |
 
@@ -346,12 +358,12 @@ ecotokens mcp-server --index-dir ~/.config/ecotokens/index
 
 Exposed tools:
 
-- `ecotokens_search` — BM25 + semantic search
-- `ecotokens_outline` — symbol outline for file/directory
-- `ecotokens_symbol` — fetch full symbol source by stable ID
-- `ecotokens_trace_callers` — find callers of a symbol
-- `ecotokens_trace_callees` — find callees (with depth)
-- `ecotokens_duplicates` — detect near-duplicate code blocks
+- `ecotokens_search` - BM25 + semantic search
+- `ecotokens_outline` - symbol outline for file/directory
+- `ecotokens_symbol` - fetch full symbol source by stable ID
+- `ecotokens_trace_callers` - find callers of a symbol
+- `ecotokens_trace_callees` - find callees (with depth)
+- `ecotokens_duplicates` - detect near-duplicate code blocks
 
 For Claude Code, Gemini CLI, and Qwen Code, `ecotokens install` registers this server automatically in each target's settings file.
 
@@ -383,11 +395,11 @@ src/search/query.rs:29 (score: 11.068)
 When the query matches a symbol name, callers are automatically appended:
 
 ```
-# Symbol match — call sites via trace
+# Symbol match - call sites via trace
   src/main.rs:1301 [caller]  cmd_search
 ```
 
-Results are automatically scoped to the current git project when using the global index — files from other indexed projects are silently filtered out.
+Results are automatically scoped to the current git project when using the global index - files from other indexed projects are silently filtered out.
 
 ### Duplicates command
 
@@ -453,7 +465,7 @@ When enabled, every hook invocation appends a JSONL entry to `~/.config/ecotoken
 {"ts":"2026-05-08T12:00:00Z","uid":"a1b2c3d4","cmd":"git status","phase":"output","data":{...}}
 ```
 
-Each entry contains a short `uid` to correlate the input and output phases of the same invocation. Distinct from `--debug` (which prints to stderr) — `--debuglog` writes silently to disk and survives across sessions.
+Each entry contains a short `uid` to correlate the input and output phases of the same invocation. Distinct from `--debug` (which prints to stderr) - `--debuglog` writes silently to disk and survives across sessions.
 
 ### Default model for cost calculations
 
@@ -526,14 +538,14 @@ The feature flag stays in `~/.config/ecotokens/config.json`:
 
 ## Embeddings
 
-`ecotokens search` uses **dual BM25 + vector retrieval** with score fusion (`0.4 × BM25 + 0.6 × cosine`). The vector index is powered by [Candle](https://github.com/huggingface/candle) — a zero-config local embedding engine. No external service required.
+`ecotokens search` uses **dual BM25 + vector retrieval** with score fusion (`0.4 × BM25 + 0.6 × cosine`). The vector index is powered by [Candle](https://github.com/huggingface/candle) - a zero-config local embedding engine. No external service required.
 
 ### Provider
 
-**Candle** (default) — runs `sentence-transformers/all-MiniLM-L6-v2` (384 dim) locally. The model is downloaded automatically from HuggingFace Hub on first use (~90 MB, cached in `~/.cache/huggingface/`).
+**Candle** (default) - runs `sentence-transformers/all-MiniLM-L6-v2` (384 dim) locally. The model is downloaded automatically from HuggingFace Hub on first use (~90 MB, cached in `~/.cache/huggingface/`).
 
 ```bash
-# Candle is active by default — nothing to configure
+# Candle is active by default - nothing to configure
 ecotokens index --path /your/project
 ecotokens search "your query"
 ```
@@ -586,29 +598,31 @@ Ollama must be running locally. The model is called with a 3-second timeout to a
 
 ## Benchmarks
 
-Measured over 13 days on a real developer workstation (4 129 hook executions):
+Measured on a real developer workstation from 2026-03-06 to 2026-05-27 (19 928 hook executions):
 
 | Metric | Value |
-|--------|-------|
-| Tokens saved | **6 714 085** |
-| Overall reduction | **89.6 %** |
-| Git commands | 96.6 % reduction |
-| Cargo commands | 75.4 % reduction |
-| Best single run | `git diff --staged` — 1.68M → 782 tokens (**99.97 %**) |
+|--------|------:|
+| Tokens before filtering | 94 282 087 |
+| Tokens after filtering | 5 874 896 |
+| Tokens saved | **88 407 191** |
+| Overall reduction | **93.8 %** |
+| Commands with savings | 5 735 / 19 928, or 28.8 % |
+| Biggest family | `grep`, 55 383 168 tokens saved |
+| Best single run | 11 323 890 tokens saved from one `grep` scan |
 
-→ [Full benchmark report](docs/BENCHMARKS.md)
+[Full benchmark report](docs/BENCHMARKS.md)
 
 ## Precision Guarantees
 
 Filtering is aggressive on noise, conservative on signal:
 
-- **Short outputs are never modified** — outputs under 200 lines or 50 KB pass through unchanged
-- **Errors are always preserved** — `error[`, `FAILED`, `E   ` (pytest), `--- FAIL:` (Go), stack traces and panic messages are never removed
-- **Failure sections are fully kept** — structured blocks (`=== FAILURES ===`, `failures:`, failure diffs) are always passed through in their entirety
-- **Conservative fallback** — if a family filter doesn't improve the output (filtered ≥ original), the original is returned as-is
-- **Secrets are redacted before filtering** — 33 patterns covering cloud keys, AI APIs, VCS tokens, payment secrets and more are detected and replaced before any content reaches the model. See [`docs/secret-patterns.md`](docs/secret-patterns.md) for the full list.
-- **UTF-8 safe truncation** — truncation always happens at character boundaries, never mid-codepoint
-- **Head + tail preservation** — when generic truncation applies, the first and last 20 lines are always kept (start context + end result)
+- **Short outputs are never modified** - outputs under 200 lines or 50 KB pass through unchanged
+- **Errors are always preserved** - `error[`, `FAILED`, `E   ` (pytest), `--- FAIL:` (Go), stack traces and panic messages are never removed
+- **Failure sections are fully kept** - structured blocks (`=== FAILURES ===`, `failures:`, failure diffs) are always passed through in their entirety
+- **Conservative fallback** - if a family filter doesn't improve the output (filtered ≥ original), the original is returned as-is
+- **Secrets are redacted before filtering** - 33 patterns covering cloud keys, AI APIs, VCS tokens, payment secrets and more are detected and replaced before any content reaches the model. See [`docs/secret-patterns.md`](docs/secret-patterns.md) for the full list.
+- **UTF-8 safe truncation** - truncation always happens at character boundaries, never mid-codepoint
+- **Head + tail preservation** - when generic truncation applies, the first and last 20 lines are always kept (start context + end result)
 
 ## Requirements
 

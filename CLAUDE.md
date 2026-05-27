@@ -48,4 +48,20 @@ Rust stable (≥ 1.75, no nightly): Follow standard conventions
 
 
 <!-- MANUAL ADDITIONS START -->
+## Test plan: mode opératoire condensé
+1. Avant toute PR, exécuter `cargo fmt --check`, `cargo clippy -- -D warnings`, puis `cargo test`.
+2. Si la modification touche `src/filter/*`, appliquer le TEST-PLAN sections B et G.
+3. Si la modification touche `src/hook/*` ou `src/install/*`, appliquer les sections C, D et G.
+4. Si la modification touche `src/metrics/*` ou `src/tui/gain.rs`, appliquer les sections E et H.
+5. Si la modification touche `src/search/*`, `src/trace/*`, `src/daemon/*` ou `src/mcp/*`, appliquer les sections F et I.
+6. Si la modification touche `src/masking/*`, traiter la section G comme bloquante.
+7. Vérifier que les sorties courtes restent lisibles et que les grosses sorties sont réellement réduites.
+8. Vérifier que les erreurs, échecs de tests, tracebacks et identifiants utiles restent visibles après filtrage.
+9. Vérifier qu'aucun secret n'apparaît en clair dans les sorties testées.
+10. Vérifier que les installs et uninstalls restent idempotents et ne cassent pas les entrées tierces.
+11. Vérifier que `ecotokens gain` et `ecotokens gain --json` restent cohérents après des runs filtrés.
+12. Si le changement touche l'indexation ou la recherche, valider `index`, `search`, `outline`, `trace`, `watch` et `mcp-server`.
+13. Si le changement touche le TUI, vérifier le rendu sur données vides et le comportement de navigation de base.
+14. Avant une release, exécuter tous les tests P0 du fichier `docs/TEST-PLAN.md` puis la QA manuelle ciblée.
+15. Ne livrer que si les critères de sortie du `docs/TEST-PLAN.md` sont satisfaits et sans régression connue.
 <!-- MANUAL ADDITIONS END -->
