@@ -11,6 +11,7 @@ Thank you for taking the time to contribute. This guide explains how to set up y
 - [Project structure](#project-structure)
 - [Development workflow](#development-workflow)
 - [Writing tests](#writing-tests)
+- [Test plan](#test-plan)
 - [Code quality checklist](#code-quality-checklist)
 - [Submitting a pull request](#submitting-a-pull-request)
 - [Commit message format](#commit-message-format)
@@ -136,6 +137,11 @@ cargo fmt --check && cargo clippy -- -D warnings && cargo test
 4. **Integration tests must be hermetic** — use `tempfile::tempdir()` for any filesystem work, never write to `$HOME`.
 5. **No `unwrap()` in test setup** — use `expect("context message")` so failures are readable.
 6. **Test both the happy path and edge cases**: empty input, single item, maximum size, invalid data.
+
+## Test plan
+
+For release-oriented coverage, manual QA scope, priority levels, and exit criteria, see [`docs/TEST-PLAN.md`](TEST-PLAN.md).
+Use it to decide which additional checks are required when a change touches filters, hooks, install flow, metrics, search, TUI, masking, or performance-sensitive paths.
 
 ### TUI test pattern
 
