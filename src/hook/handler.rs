@@ -43,7 +43,12 @@ struct ShellHookSpecificOutput {
 }
 
 /// Determine hook action for a given command and exclusion list.
-pub fn handle_hook_input(input: &HookInput, exclusions: &[String], _debug: bool) -> HookOutput {
+pub fn handle_hook_input(
+    input: &HookInput,
+    exclusions: &[String],
+    _debug: bool,
+    agent: &str,
+) -> HookOutput {
     let cmd = input.command.trim();
 
     // Check exclusion list (prefix match)
@@ -56,11 +61,16 @@ pub fn handle_hook_input(input: &HookInput, exclusions: &[String], _debug: bool)
     // Rewrite to ecotokens filter
     let rewritten = match &input.cwd {
         Some(cwd) => format!(
-            "ecotokens filter --cwd {} -- bash -c {}",
+            "ecotokens filter --agent {} --cwd {} -- bash -c {}",
+            agent,
             shell_single_quote(cwd),
             shell_single_quote(cmd)
         ),
-        None => format!("ecotokens filter -- bash -c {}", shell_single_quote(cmd)),
+        None => format!(
+            "ecotokens filter --agent {} -- bash -c {}",
+            agent,
+            shell_single_quote(cmd)
+        ),
     };
     HookOutput::Rewrite(rewritten)
 }
@@ -98,7 +108,7 @@ pub fn handle() {
     let settings = crate::config::Settings::load();
     let input = HookInput { command, cwd };
     let debug = settings.debug;
-    let output = handle_hook_input(&input, &settings.exclusions, debug);
+    let output = handle_hook_input(&input, &settings.exclusions, debug, "claude");
 
     let response = match output {
         HookOutput::Passthrough => serde_json::json!({
@@ -192,7 +202,7 @@ fn handle_shell_tool_hook(hook_event_name: &str, label: &str) {
         cwd: payload.cwd,
     };
     let debug = settings.debug;
-    let output = handle_hook_input(&input, &settings.exclusions, debug);
+    let output = handle_hook_input(&input, &settings.exclusions, debug, label);
 
     match output {
         HookOutput::Passthrough => emit_allow(hook_event_name, None),

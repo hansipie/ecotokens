@@ -208,3 +208,78 @@ fn unknown_stays_generic() {
     assert_eq!(detect_family("bundle exec rspec"), CommandFamily::Generic);
     assert_eq!(detect_family("./myscript.sh"), CommandFamily::Generic);
 }
+
+// --- Hermes Agent tool labels (hermes-tool:<name>) ---
+
+#[test]
+fn hermes_tool_read_file_is_fs() {
+    assert_eq!(detect_family("hermes-tool:read_file"), CommandFamily::Fs);
+    assert_eq!(
+        detect_family("hermes-tool:list_directory"),
+        CommandFamily::Fs
+    );
+    assert_eq!(detect_family("hermes-tool:create_file"), CommandFamily::Fs);
+    assert_eq!(detect_family("hermes-tool:edit_file"), CommandFamily::Fs);
+    assert_eq!(detect_family("hermes-tool:delete_file"), CommandFamily::Fs);
+}
+
+#[test]
+fn hermes_tool_search_files_is_grep() {
+    assert_eq!(
+        detect_family("hermes-tool:search_files"),
+        CommandFamily::Grep
+    );
+    assert_eq!(detect_family("hermes-tool:find_files"), CommandFamily::Grep);
+    assert_eq!(
+        detect_family("hermes-tool:search_in_file"),
+        CommandFamily::Grep
+    );
+}
+
+#[test]
+fn hermes_tool_browser_is_network() {
+    assert_eq!(
+        detect_family("hermes-tool:browser_snapshot"),
+        CommandFamily::Network
+    );
+    assert_eq!(
+        detect_family("hermes-tool:browser_navigate"),
+        CommandFamily::Network
+    );
+    assert_eq!(
+        detect_family("hermes-tool:web_fetch"),
+        CommandFamily::Network
+    );
+    assert_eq!(
+        detect_family("hermes-tool:web_search"),
+        CommandFamily::Network
+    );
+}
+
+#[test]
+fn hermes_tool_python_is_python() {
+    assert_eq!(
+        detect_family("hermes-tool:run_python_code"),
+        CommandFamily::Python
+    );
+    assert_eq!(
+        detect_family("hermes-tool:execute_python"),
+        CommandFamily::Python
+    );
+}
+
+#[test]
+fn hermes_tool_unknown_is_generic() {
+    assert_eq!(
+        detect_family("hermes-tool:delegate_task"),
+        CommandFamily::Generic
+    );
+    assert_eq!(
+        detect_family("hermes-tool:custom_mcp_tool"),
+        CommandFamily::Generic
+    );
+    assert_eq!(
+        detect_family("hermes-tool:run_shell_command"),
+        CommandFamily::Generic
+    );
+}

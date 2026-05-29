@@ -3,11 +3,12 @@ mod helpers;
 use helpers::ecotokens_bin;
 
 use ecotokens::install::{
-    are_session_hooks_installed, install_gemini_hook, install_hermes_plugin, install_hook,
-    install_mcp_server, install_post_hook, install_qwen_hook, install_session_hooks,
-    is_gemini_hook_installed, is_gemini_mcp_registered, is_hermes_plugin_installed,
-    is_mcp_registered, is_post_hook_installed, is_qwen_hook_installed, is_qwen_mcp_registered,
-    uninstall_gemini, uninstall_hermes_plugin, uninstall_hook, uninstall_qwen,
+    are_session_hooks_installed, enable_hermes_plugin_in_config, install_gemini_hook,
+    install_hermes_plugin, install_hook, install_mcp_server, install_post_hook, install_qwen_hook,
+    install_session_hooks, is_gemini_hook_installed, is_gemini_mcp_registered,
+    is_hermes_plugin_enabled_in_config, is_hermes_plugin_installed, is_mcp_registered,
+    is_post_hook_installed, is_qwen_hook_installed, is_qwen_mcp_registered, uninstall_gemini,
+    uninstall_hermes_plugin, uninstall_hook, uninstall_qwen,
 };
 use std::process::Command;
 use tempfile::TempDir;
@@ -784,4 +785,249 @@ fn hermes_plugin_python_syntax_is_valid() {
         }
         Err(e) => panic!("failed to run python3: {e}"),
     }
+}
+
+#[test]
+fn hermes_uninstall_when_plugin_absent_is_ok() {
+    let dir = TempDir::new().unwrap();
+    let plugin_dir = dir.path().join(".hermes").join("plugins").join("ecotokens");
+    // Le dossier n'existe pas — uninstall doit être idempotent
+    assert!(uninstall_hermes_plugin(&plugin_dir).is_ok());
+}
+
+#[test]
+fn hermes_default_plugin_dir_respects_hermes_home() {
+    use ecotokens::install::default_hermes_plugin_dir;
+
+    let dir = TempDir::new().unwrap();
+    // SAFETY: les tests Rust sont mono-thread par défaut dans ce module.
+    // On isole la variable d'env avec un scope explicite.
+    let plugin_dir = {
+        // HERMES_HOME défini → le chemin doit l'utiliser
+        std::env::set_var("HERMES_HOME", dir.path());
+        let p = default_hermes_plugin_dir();
+        std::env::remove_var("HERMES_HOME");
+        p
+    };
+
+    let expected = dir.path().join("plugins").join("ecotokens");
+    assert_eq!(
+        plugin_dir.as_deref(),
+        Some(expected.as_path()),
+        "HERMES_HOME doit être utilisé comme base du chemin plugin"
+    );
+}
+
+// ── Phase 2 : enable_hermes_plugin_in_config ────────────────────────────────
+
+#[test]
+fn hermes_enable_plugin_creates_config_with_enabled_entry() {
+    let dir = TempDir::new().unwrap();
+    let config = dir.path().join(".hermes").join("config.yaml");
+
+    assert!(!is_hermes_plugin_enabled_in_config(&config));
+    enable_hermes_plugin_in_config(&config).expect("enable should succeed");
+
+    assert!(config.exists(), "config.yaml doit être créé");
+    assert!(
+        is_hermes_plugin_enabled_in_config(&config),
+        "ecotokens doit apparaître dans plugins.enabled"
+    );
+    let content = std::fs::read_to_string(&config).unwrap();
+    assert!(content.contains("plugins:"), "doit contenir plugins:");
+    assert!(content.contains("enabled:"), "doit contenir enabled:");
+    assert!(content.contains("- ecotokens"), "doit contenir - ecotokens");
+}
+
+#[test]
+fn hermes_enable_plugin_is_idempotent() {
+    let dir = TempDir::new().unwrap();
+    let config = dir.path().join("config.yaml");
+
+    enable_hermes_plugin_in_config(&config).unwrap();
+    let first = std::fs::read_to_string(&config).unwrap();
+
+    enable_hermes_plugin_in_config(&config).unwrap();
+    let second = std::fs::read_to_string(&config).unwrap();
+
+    assert_eq!(first, second, "double appel ne doit pas dupliquer l'entrée");
+    assert_eq!(
+        first.matches("- ecotokens").count(),
+        1,
+        "ecotokens ne doit apparaître qu'une fois"
+    );
+}
+
+#[test]
+fn hermes_enable_plugin_preserves_existing_keys() {
+    let dir = TempDir::new().unwrap();
+    let config = dir.path().join("config.yaml");
+
+    let initial = "model: claude-opus\nother_key: value\n";
+    std::fs::write(&config, initial).unwrap();
+
+    enable_hermes_plugin_in_config(&config).unwrap();
+
+    let content = std::fs::read_to_string(&config).unwrap();
+    assert!(
+        content.contains("model: claude-opus"),
+        "clé model préservée"
+    );
+    assert!(
+        content.contains("other_key: value"),
+        "clé other_key préservée"
+    );
+    assert!(content.contains("- ecotokens"), "ecotokens ajouté");
+}
+
+#[test]
+fn hermes_enable_plugin_appends_to_existing_enabled_list() {
+    let dir = TempDir::new().unwrap();
+    let config = dir.path().join("config.yaml");
+
+    let initial = "plugins:\n  enabled:\n    - other-plugin\n";
+    std::fs::write(&config, initial).unwrap();
+
+    enable_hermes_plugin_in_config(&config).unwrap();
+
+    let content = std::fs::read_to_string(&config).unwrap();
+    assert!(
+        content.contains("- other-plugin"),
+        "plugin existant préservé"
+    );
+    assert!(content.contains("- ecotokens"), "ecotokens ajouté");
+    assert_eq!(
+        content.matches("plugins:").count(),
+        1,
+        "pas de doublon de la section plugins:"
+    );
+}
+
+#[test]
+fn hermes_enable_plugin_adds_enabled_when_plugins_key_exists_without_it() {
+    let dir = TempDir::new().unwrap();
+    let config = dir.path().join("config.yaml");
+
+    let initial = "plugins:\n  disabled:\n    - legacy\n";
+    std::fs::write(&config, initial).unwrap();
+
+    enable_hermes_plugin_in_config(&config).unwrap();
+
+    let content = std::fs::read_to_string(&config).unwrap();
+    assert!(content.contains("  enabled:"), "enabled: doit être ajouté");
+    assert!(
+        content.contains("- ecotokens"),
+        "ecotokens doit être ajouté"
+    );
+    assert!(content.contains("- legacy"), "disabled: préservé");
+}
+
+// ── Phase 5 : test d'intégration end-to-end install Hermes ──────────────────
+
+#[test]
+fn hermes_install_end_to_end_with_hermes_home() {
+    let dir = TempDir::new().unwrap();
+    let hermes_home = dir.path().to_str().unwrap();
+
+    // Lancer ecotokens install --target hermes avec HERMES_HOME temporaire.
+    let out = Command::new(ecotokens_bin())
+        .args(["install", "--target", "hermes"])
+        .env("HERMES_HOME", hermes_home)
+        .output()
+        .expect("failed to run ecotokens install");
+
+    assert!(
+        out.status.success(),
+        "install --target hermes doit réussir, stderr: {}",
+        String::from_utf8_lossy(&out.stderr)
+    );
+
+    let plugin_dir = dir.path().join("plugins").join("ecotokens");
+    assert!(
+        plugin_dir.join("plugin.yaml").exists(),
+        "plugin.yaml doit être créé"
+    );
+    assert!(
+        plugin_dir.join("__init__.py").exists(),
+        "__init__.py doit être créé"
+    );
+
+    // Vérifier que plugin.yaml contient les hooks attendus.
+    let manifest = std::fs::read_to_string(plugin_dir.join("plugin.yaml")).unwrap();
+    assert!(manifest.contains("transform_terminal_output"));
+    assert!(manifest.contains("transform_tool_result"));
+}
+
+#[test]
+fn hermes_install_enable_plugin_flag_updates_config_yaml() {
+    let dir = TempDir::new().unwrap();
+    let hermes_home = dir.path().to_str().unwrap();
+
+    let out = Command::new(ecotokens_bin())
+        .args(["install", "--target", "hermes", "--enable-plugin"])
+        .env("HERMES_HOME", hermes_home)
+        .output()
+        .expect("failed to run ecotokens install --enable-plugin");
+
+    assert!(
+        out.status.success(),
+        "install --enable-plugin doit réussir, stderr: {}",
+        String::from_utf8_lossy(&out.stderr)
+    );
+
+    let config = dir.path().join("config.yaml");
+    assert!(
+        config.exists(),
+        "config.yaml doit être créé par --enable-plugin"
+    );
+    assert!(
+        is_hermes_plugin_enabled_in_config(&config),
+        "ecotokens doit apparaître dans plugins.enabled"
+    );
+
+    // Idempotence : un second appel ne doit pas dupliquer l'entrée.
+    Command::new(ecotokens_bin())
+        .args(["install", "--target", "hermes", "--enable-plugin"])
+        .env("HERMES_HOME", hermes_home)
+        .output()
+        .unwrap();
+
+    let content = std::fs::read_to_string(&config).unwrap();
+    assert_eq!(
+        content.matches("- ecotokens").count(),
+        1,
+        "ecotokens ne doit apparaître qu'une seule fois après deux installs"
+    );
+}
+
+#[test]
+fn hermes_uninstall_end_to_end_with_hermes_home() {
+    let dir = TempDir::new().unwrap();
+    let hermes_home = dir.path().to_str().unwrap();
+
+    // Installer puis désinstaller.
+    Command::new(ecotokens_bin())
+        .args(["install", "--target", "hermes"])
+        .env("HERMES_HOME", hermes_home)
+        .output()
+        .unwrap();
+
+    let plugin_dir = dir.path().join("plugins").join("ecotokens");
+    assert!(plugin_dir.exists(), "plugin installé");
+
+    let out = Command::new(ecotokens_bin())
+        .args(["uninstall", "--target", "hermes"])
+        .env("HERMES_HOME", hermes_home)
+        .output()
+        .expect("failed to run ecotokens uninstall");
+
+    assert!(
+        out.status.success(),
+        "uninstall doit réussir, stderr: {}",
+        String::from_utf8_lossy(&out.stderr)
+    );
+    assert!(
+        !plugin_dir.exists(),
+        "le dossier plugin doit être supprimé après uninstall"
+    );
 }

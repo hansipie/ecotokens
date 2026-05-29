@@ -49,7 +49,11 @@ enum Commands {
     /// Intercept a Qwen Code tool call via PreToolUse hook (reads JSON from stdin)
     HookQwen,
     /// Intercept a native Claude Code tool result via PostToolUse hook (reads JSON from stdin)
-    HookPost,
+    HookPost {
+        /// Harness that triggered this hook (claude, pi). Default: claude
+        #[arg(long, default_value = "claude")]
+        agent: String,
+    },
     /// Intercept a Gemini CLI tool result via AfterTool hook (reads JSON from stdin)
     HookPostGemini,
     /// Intercept a Qwen Code tool result via PostToolUse hook (reads JSON from stdin)
@@ -63,6 +67,9 @@ enum Commands {
         /// Working directory for git root detection (used by Pi extension)
         #[arg(long)]
         cwd: Option<PathBuf>,
+        /// Harness that triggered this filter (claude, gemini, qwen, pi, cli). Default: cli
+        #[arg(long, default_value = "cli")]
+        agent: String,
     },
     /// Filter an already captured tool output from stdin, record metrics
     FilterOutput {
@@ -77,6 +84,9 @@ enum Commands {
         /// Working directory for git root detection
         #[arg(long)]
         cwd: Option<PathBuf>,
+        /// Hermes hook type for metrics: transform-terminal-output (default) or transform-tool-result
+        #[arg(long, default_value = "transform-terminal-output")]
+        hook_type: String,
     },
     /// Show token savings report
     Gain {
@@ -107,6 +117,9 @@ enum Commands {
         /// Ollama model to use for AI summary (implies --ai-summary)
         #[arg(long)]
         ai_summary_model: Option<String>,
+        /// (Hermes) Add ecotokens to plugins.enabled in ~/.hermes/config.yaml directly, without calling hermes CLI
+        #[arg(long)]
+        enable_plugin: bool,
     },
     /// Remove ecotokens hook from ~/.claude/settings.json, ~/.gemini/settings.json, ~/.qwen/settings.json, ~/.pi/agent/extensions/, or ~/.hermes/plugins/
     Uninstall {
@@ -345,7 +358,7 @@ fn default_claude_json_path() -> PathBuf {
         .join(".claude.json")
 }
 
-fn cmd_filter(args: Vec<String>, debug: bool, cwd: Option<PathBuf>) {
+fn cmd_filter(args: Vec<String>, debug: bool, cwd: Option<PathBuf>, agent: String) {
     if args.is_empty() {
         eprintln!("ecotokens filter: no command given");
         std::process::exit(1);
@@ -385,12 +398,13 @@ fn cmd_filter(args: Vec<String>, debug: bool, cwd: Option<PathBuf>) {
     };
 
     let duration_ms = start.elapsed().as_millis() as u32;
+    let hook_type = metrics::store::agent_to_hook_type_pre(&agent);
     let (filtered, tokens_before, tokens_after) = filter::run_filter_pipeline_with_cwd(
         &command,
         &raw,
         duration_ms,
         cwd.as_deref(),
-        metrics::store::HookType::default(),
+        hook_type,
     );
 
     if debug || settings.debug {
@@ -409,7 +423,13 @@ fn cmd_filter(args: Vec<String>, debug: bool, cwd: Option<PathBuf>) {
     }
 }
 
-fn cmd_filter_output(command: String, exit_code: i32, debug: bool, cwd: Option<PathBuf>) {
+fn cmd_filter_output(
+    command: String,
+    exit_code: i32,
+    debug: bool,
+    cwd: Option<PathBuf>,
+    hook_type: String,
+) {
     let settings = config::Settings::load();
     let logger = debuglog::DebugLogger::new(settings.debuglog);
     let uid = debuglog::gen_uid();
@@ -424,15 +444,21 @@ fn cmd_filter_output(command: String, exit_code: i32, debug: bool, cwd: Option<P
         &uid,
         "filter-output",
         "input",
-        &serde_json::json!({"cmd": command, "exit_code": exit_code, "cwd": cwd.as_ref().map(|p| p.display().to_string())}),
+        &serde_json::json!({"cmd": command, "exit_code": exit_code, "cwd": cwd.as_ref().map(|p| p.display().to_string()), "hook_type": hook_type}),
     );
+
+    let resolved_hook_type = if hook_type == "transform-tool-result" {
+        metrics::store::HookType::HermesTransformToolResult
+    } else {
+        metrics::store::HookType::HermesTransformTerminalOutput
+    };
 
     let (filtered, tokens_before, tokens_after) = filter::run_filter_pipeline_with_cwd(
         &command,
         &raw,
         0u32,
         cwd.as_deref(),
-        metrics::store::HookType::HermesTransformTerminalOutput,
+        resolved_hook_type,
     );
 
     if debug || settings.debug {
@@ -781,7 +807,12 @@ fn sorted_projects_from(report: &metrics::report::Report) -> Vec<(String, f32)> 
     projects
 }
 
-fn cmd_install(target: String, ai_summary: bool, ai_summary_model: Option<String>) {
+fn cmd_install(
+    target: String,
+    ai_summary: bool,
+    ai_summary_model: Option<String>,
+    enable_plugin: bool,
+) {
     let claude_path = default_settings_path();
     let claude_json = default_claude_json_path();
     let gemini_path = install::default_gemini_settings_path();
@@ -953,22 +984,60 @@ fn cmd_install(target: String, ai_summary: bool, ai_summary_model: Option<String
                         "ecotokens plugin installed (Hermes Agent) → {}",
                         p.display()
                     );
-                    let enabled = std::process::Command::new("hermes")
-                        .args(["plugins", "enable", "ecotokens"])
-                        .output();
-                    match enabled {
-                        Ok(out) => {
-                            let msg = String::from_utf8_lossy(&out.stdout);
-                            if msg.contains("already enabled") {
-                                println!("  Plugin already enabled in Hermes (plugins.enabled).");
-                            } else if out.status.success() {
-                                println!("  Plugin enabled in Hermes (plugins.enabled).");
-                            } else {
+                    if enable_plugin {
+                        // Edit config.yaml directly — no Hermes CLI required.
+                        match install::default_hermes_config_path() {
+                            Some(ref cfg) => {
+                                let already = install::is_hermes_plugin_enabled_in_config(cfg);
+                                match install::enable_hermes_plugin_in_config(cfg) {
+                                    Ok(()) => {
+                                        if already {
+                                            println!(
+                                                "  Plugin already in plugins.enabled ({}).",
+                                                cfg.display()
+                                            );
+                                        } else {
+                                            println!(
+                                                "  Plugin added to plugins.enabled → {}",
+                                                cfg.display()
+                                            );
+                                            println!("  Restart Hermes to load the plugin.");
+                                        }
+                                    }
+                                    Err(e) => {
+                                        eprintln!("  Warning: could not update config.yaml: {e}");
+                                        println!(
+                                            "  Enable manually: hermes plugins enable ecotokens"
+                                        );
+                                    }
+                                }
+                            }
+                            None => {
+                                eprintln!("  Warning: cannot determine Hermes config path.");
                                 println!("  Enable manually: hermes plugins enable ecotokens");
                             }
                         }
-                        Err(_) => {
-                            println!("  Enable manually: hermes plugins enable ecotokens");
+                    } else {
+                        // Try via the Hermes CLI (fail-open).
+                        let result = std::process::Command::new("hermes")
+                            .args(["plugins", "enable", "ecotokens"])
+                            .output();
+                        match result {
+                            Ok(out) => {
+                                let msg = String::from_utf8_lossy(&out.stdout);
+                                if msg.contains("already enabled") {
+                                    println!(
+                                        "  Plugin already enabled in Hermes (plugins.enabled)."
+                                    );
+                                } else if out.status.success() {
+                                    println!("  Plugin enabled in Hermes (plugins.enabled).");
+                                } else {
+                                    println!("  Enable manually: hermes plugins enable ecotokens");
+                                }
+                            }
+                            Err(_) => {
+                                println!("  Enable manually: hermes plugins enable ecotokens");
+                            }
                         }
                     }
                 }
@@ -2642,16 +2711,24 @@ fn main() {
         Commands::Hook => hook::handle(),
         Commands::HookGemini => hook::handle_gemini(),
         Commands::HookQwen => hook::handle_qwen(),
-        Commands::HookPost => hook::handle_post(),
+        Commands::HookPost { agent } => {
+            hook::handle_post(metrics::store::agent_to_hook_type_post(&agent))
+        }
         Commands::HookPostGemini => hook::handle_post_gemini(),
         Commands::HookPostQwen => hook::handle_post_qwen(),
-        Commands::Filter { args, debug, cwd } => cmd_filter(args, debug, cwd),
+        Commands::Filter {
+            args,
+            debug,
+            cwd,
+            agent,
+        } => cmd_filter(args, debug, cwd, agent),
         Commands::FilterOutput {
             command,
             exit_code,
             debug,
             cwd,
-        } => cmd_filter_output(command, exit_code, debug, cwd),
+            hook_type,
+        } => cmd_filter_output(command, exit_code, debug, cwd, hook_type),
         Commands::Gain {
             period,
             json,
@@ -2662,7 +2739,8 @@ fn main() {
             target,
             ai_summary,
             ai_summary_model,
-        } => cmd_install(target, ai_summary, ai_summary_model),
+            enable_plugin,
+        } => cmd_install(target, ai_summary, ai_summary_model, enable_plugin),
         Commands::Uninstall { target } => cmd_uninstall(target),
         Commands::Config {
             json,

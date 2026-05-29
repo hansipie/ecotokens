@@ -422,19 +422,24 @@ def _should_filter(text: Any) -> bool:
     return isinstance(text, str) and len(text) >= MIN_CHARS
 
 
-def _filter_existing_output(command: str, output: str, exit_code: int = 0) -> str | None:
+def _filter_existing_output(command: str, output: str, exit_code: int = 0, cwd: str | None = None, hook_type: str = "transform-terminal-output") -> str | None:
     if not _should_filter(output):
         return None
+    args = [
+        ECOTOKENS_BIN,
+        "filter-output",
+        "--command",
+        command or "hermes-tool",
+        "--exit-code",
+        str(exit_code),
+        "--hook-type",
+        hook_type,
+    ]
+    if cwd:
+        args.extend(["--cwd", cwd])
     try:
         completed = subprocess.run(
-            [
-                ECOTOKENS_BIN,
-                "filter-output",
-                "--command",
-                command or "hermes-tool",
-                "--exit-code",
-                str(exit_code),
-            ],
+            args,
             input=output,
             text=True,
             capture_output=True,
@@ -451,19 +456,19 @@ def _filter_existing_output(command: str, output: str, exit_code: int = 0) -> st
     return completed.stdout
 
 
-def transform_terminal_output(command: str = "", output: str = "", exit_code: int = 0, **_: Any) -> str | None:
+def transform_terminal_output(command: str = "", output: str = "", exit_code: int = 0, cwd: str | None = None, **_: Any) -> str | None:
     first_token = (command.split() or [""])[0]
     if first_token in (ECOTOKENS_BIN, "ecotokens"):
         return None
-    return _filter_existing_output(command, output, exit_code)
+    return _filter_existing_output(command, output, exit_code, cwd, "transform-terminal-output")
 
 
-def transform_tool_result(tool_name: str = "", result: str = "", **_: Any) -> str | None:
+def transform_tool_result(tool_name: str = "", result: str = "", cwd: str | None = None, **_: Any) -> str | None:
     # The terminal tool has a more precise hook above that sees raw stdout
     # before Hermes builds its JSON wrapper. Avoid double filtering it here.
     if tool_name == "terminal":
         return None
-    return _filter_existing_output(f"hermes-tool:{{tool_name}}", result, 0)
+    return _filter_existing_output(f"hermes-tool:{{tool_name}}", result, 0, cwd, "transform-tool-result")
 
 
 def register(ctx):
@@ -479,6 +484,99 @@ pub fn default_hermes_plugin_dir() -> Option<std::path::PathBuf> {
         .map(std::path::PathBuf::from)
         .or_else(|| dirs::home_dir().map(|d| d.join(".hermes")))
         .map(|d| d.join("plugins").join("ecotokens"))
+}
+
+/// Get the default Hermes Agent config file: ~/.hermes/config.yaml
+pub fn default_hermes_config_path() -> Option<std::path::PathBuf> {
+    std::env::var_os("HERMES_HOME")
+        .map(std::path::PathBuf::from)
+        .or_else(|| dirs::home_dir().map(|d| d.join(".hermes")))
+        .map(|d| d.join("config.yaml"))
+}
+
+/// Add `plugin` to the `plugins.enabled` list in YAML content.
+/// Preserves all existing content and indentation. Idempotent.
+fn yaml_add_to_plugins_enabled(content: &str, plugin: &str) -> String {
+    let plugin_item = format!("- {}", plugin);
+
+    // Already present — no-op.
+    if content.lines().any(|l| l.trim() == plugin_item) {
+        return content.to_string();
+    }
+
+    let mut lines: Vec<String> = content.lines().map(|l| l.to_string()).collect();
+
+    // Locate the top-level `plugins:` key.
+    let plugins_idx = lines.iter().position(|l| {
+        let t = l.trim();
+        t == "plugins:" || t.starts_with("plugins: ")
+    });
+
+    if let Some(pi) = plugins_idx {
+        // Look for `  enabled:` inside the plugins block.
+        let enabled_rel = lines[pi + 1..].iter().position(|l| {
+            l.starts_with("  ") && {
+                let t = l.trim();
+                t == "enabled:" || t.starts_with("enabled:") && t.contains(':')
+            }
+        });
+
+        if let Some(ei_rel) = enabled_rel {
+            let ei = pi + 1 + ei_rel;
+            // Skip existing list items to find the insertion point.
+            let skip = lines[ei + 1..]
+                .iter()
+                .take_while(|l| l.starts_with("    -"))
+                .count();
+            lines.insert(ei + 1 + skip, format!("    - {}", plugin));
+        } else {
+            // `plugins:` exists but has no `enabled:` key — add it.
+            lines.insert(pi + 1, "  enabled:".to_string());
+            lines.insert(pi + 2, format!("    - {}", plugin));
+        }
+    } else {
+        // No `plugins:` section at all — append one.
+        if !lines.is_empty() && !lines.last().map(|l| l.is_empty()).unwrap_or(true) {
+            lines.push(String::new());
+        }
+        lines.push("plugins:".to_string());
+        lines.push("  enabled:".to_string());
+        lines.push(format!("    - {}", plugin));
+    }
+
+    let mut result = lines.join("\n");
+    if content.ends_with('\n') || content.is_empty() {
+        result.push('\n');
+    }
+    result
+}
+
+/// Add `ecotokens` to `plugins.enabled` in the Hermes config file.
+/// Creates the file and any missing structure if needed. Idempotent.
+pub fn enable_hermes_plugin_in_config(config_path: &Path) -> InstallResult {
+    let content = if config_path.exists() {
+        std::fs::read_to_string(config_path)?
+    } else {
+        String::new()
+    };
+    let new_content = yaml_add_to_plugins_enabled(&content, "ecotokens");
+    if new_content == content {
+        return Ok(());
+    }
+    if let Some(parent) = config_path.parent() {
+        std::fs::create_dir_all(parent)?;
+    }
+    std::fs::write(config_path, new_content)
+}
+
+/// Return true if `ecotokens` appears in `plugins.enabled` in the Hermes config.
+pub fn is_hermes_plugin_enabled_in_config(config_path: &Path) -> bool {
+    if !config_path.exists() {
+        return false;
+    }
+    std::fs::read_to_string(config_path)
+        .map(|c| c.lines().any(|l| l.trim() == "- ecotokens"))
+        .unwrap_or(false)
 }
 
 /// Install the ecotokens Hermes Agent plugin (idempotent).

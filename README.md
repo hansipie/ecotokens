@@ -173,7 +173,44 @@ cargo install --path .
 ecotokens install --target hermes
 ```
 
-This installs an ecotokens plugin in `~/.hermes/plugins/`. The plugin routes terminal outputs and tool results through `filter-output` via the `HermesTransformTerminalOutput` and `HermesTransformToolResult` hook types. Enable the plugin manually if needed: `hermes plugins enable ecotokens`.
+This installs an ecotokens plugin in `~/.hermes/plugins/`. The plugin intercepts two Hermes hooks:
+
+- `transform_terminal_output` — filters raw terminal output before Hermes truncates it
+- `transform_tool_result` — filters non-terminal tool results (`read_file`, `search_files`, `browser_snapshot`, MCP tools, etc.)
+
+Each hook calls `ecotokens filter-output` as a subprocess with the appropriate `--hook-type`, so savings are tracked separately in `ecotokens gain`.
+
+**Enabling the plugin** — Hermes requires explicit activation. Two options:
+
+```bash
+# Option A: via Hermes CLI (requires hermes to be installed and in PATH)
+hermes plugins enable ecotokens
+
+# Option B: write directly to ~/.hermes/config.yaml (no hermes CLI needed)
+ecotokens install --target hermes --enable-plugin
+```
+
+`--enable-plugin` adds `ecotokens` to `plugins.enabled` in `~/.hermes/config.yaml`, creating the file if it does not exist and preserving all existing keys. Restart Hermes after enabling.
+
+**Per-tool filtering** — tool result labels (`hermes-tool:<name>`) are mapped to the appropriate filter family automatically:
+
+| Tool | Family | Filter applied |
+|------|--------|---------------|
+| `read_file`, `list_directory`, `create_file` | `fs` | file listing compaction |
+| `search_files`, `find_files`, `search_in_file` | `grep` | match deduplication |
+| `browser_snapshot`, `web_fetch`, `web_search` | `network` | HTML/JSON reduction |
+| `run_python_code`, `execute_python` | `python` | traceback extraction |
+| `delegate_task`, MCP tools, others | `generic` | 200-line / 50 KB cap |
+
+**Runtime variables** — the generated plugin reads these from the environment:
+
+| Variable | Default | Effect |
+|----------|---------|--------|
+| `ECOTOKENS_BIN` | path at install time | Override the ecotokens binary called by the plugin |
+| `ECOTOKENS_HERMES_MIN_CHARS` | `2000` | Skip filtering outputs shorter than this |
+| `ECOTOKENS_HERMES_TIMEOUT` | `10` | Subprocess timeout in seconds |
+
+The plugin is fail-open: any error, timeout, or empty output returns the original content unchanged.
 
 ### All targets at once
 
@@ -210,11 +247,13 @@ ecotokens uninstall --target all       # all targets
 | Command | Description |
 |---------|-------------|
 | `ecotokens install` | Install the PreToolUse + PostToolUse hooks and register the MCP server entry in `~/.claude/settings.json` |
-| `ecotokens install --target hermes` | Install the Hermes plugin |
+| `ecotokens install --target hermes` | Install the Hermes plugin in `~/.hermes/plugins/` |
+| `ecotokens install --target hermes --enable-plugin` | Install and add to `plugins.enabled` in `~/.hermes/config.yaml` directly |
 | `ecotokens uninstall` | Remove all hooks (PreToolUse, PostToolUse, SessionStart, SessionEnd) and the MCP server entry |
 | `ecotokens filter -- CMD [ARGS]` | Run a command, filter its output, record metrics |
 | `ecotokens filter --cwd DIR -- CMD [ARGS]` | Same, with an explicit working directory |
 | `ecotokens filter-output --command LABEL --exit-code N` | Filter captured output read from stdin and record metrics (used by Hermes hooks) |
+| `ecotokens filter-output ... --hook-type transform-tool-result` | Same, attributed to the `transform_tool_result` hook in metrics |
 | `ecotokens hook-post` | PostToolUse handler - intercept native tool results (Read, Grep, Glob) |
 | `ecotokens gain` | Interactive TUI dashboard - savings by family or project |
 | `ecotokens gain --period PERIOD` | Filter TUI to a time window (`all`, `today`, `week`, `month`) |
@@ -547,6 +586,8 @@ The feature flag stays in `~/.config/ecotokens/config.json`:
 | `native_read` | Claude Code `Read` tool results (PostToolUse, outline-based compression) |
 
 > **Note:** Family detection uses the basename of the first token, so commands invoked via absolute path (`/usr/bin/git`), venv (`.venv/bin/pytest`), version managers (`~/.cargo/bin/cargo`), or wrappers (`poetry run`) are correctly matched to their family.
+
+Hermes tool result labels (`hermes-tool:<name>`) are mapped to the same families: `read_file` → `fs`, `search_files` → `grep`, `browser_snapshot` → `network`, `run_python_code` → `python`, everything else → `generic`.
 
 ## Embeddings
 

@@ -27,18 +27,46 @@ pub enum HookType {
     #[default]
     PreToolUse,
     PostToolUse,
+    GeminiPreToolUse,
+    GeminiPostToolUse,
+    QwenPreToolUse,
+    QwenPostToolUse,
+    Pi,
+    Cli,
     HermesTransformTerminalOutput,
     HermesTransformToolResult,
 }
 
 impl HookType {
-    pub fn agent_label(&self) -> Option<&'static str> {
+    pub fn agent_label(&self) -> &'static str {
         match self {
+            HookType::PreToolUse | HookType::PostToolUse => "claude",
+            HookType::GeminiPreToolUse | HookType::GeminiPostToolUse => "gemini",
+            HookType::QwenPreToolUse | HookType::QwenPostToolUse => "qwen",
+            HookType::Pi => "pi",
+            HookType::Cli => "cli",
             HookType::HermesTransformTerminalOutput | HookType::HermesTransformToolResult => {
-                Some("hermes")
+                "hermes"
             }
-            _ => None,
         }
+    }
+}
+
+pub fn agent_to_hook_type_pre(s: &str) -> HookType {
+    match s {
+        "claude" => HookType::PreToolUse,
+        "gemini" => HookType::GeminiPreToolUse,
+        "qwen" => HookType::QwenPreToolUse,
+        "pi" => HookType::Pi,
+        _ => HookType::Cli,
+    }
+}
+
+pub fn agent_to_hook_type_post(s: &str) -> HookType {
+    match s {
+        "claude" => HookType::PostToolUse,
+        "pi" => HookType::Pi,
+        _ => HookType::PostToolUse,
     }
 }
 

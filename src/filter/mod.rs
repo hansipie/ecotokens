@@ -57,6 +57,21 @@ fn extract_shell_c_inner(cmd: &str) -> Option<&str> {
 pub fn detect_family(command: &str) -> CommandFamily {
     let cmd = command.trim();
 
+    // Hermes Agent tool result labels: "hermes-tool:<tool_name>"
+    if let Some(tool) = cmd.strip_prefix("hermes-tool:") {
+        return match tool {
+            "read_file" | "list_directory" | "create_file" | "edit_file" | "delete_file" => {
+                CommandFamily::Fs
+            }
+            "search_files" | "find_files" | "search_in_file" => CommandFamily::Grep,
+            "browser_snapshot" | "browser_navigate" | "browser_click" | "browser_type"
+            | "web_fetch" | "web_search" => CommandFamily::Network,
+            "run_python_code" | "execute_python" => CommandFamily::Python,
+            "run_shell_command" | "execute_bash" => CommandFamily::Generic,
+            _ => CommandFamily::Generic,
+        };
+    }
+
     // Normalize the first token to its basename so that absolute paths
     // (/usr/bin/git), venv paths (.venv/bin/pytest) and version managers
     // (~/.cargo/bin/cargo) are all matched by their bare command name.
