@@ -21,7 +21,7 @@ On one developer workstation, ecotokens recorded **19 928 hook executions** betw
 | Commands with savings | 5 735 / 19 928, or 28.8% |
 | Biggest command family | `grep`, with 55 383 168 tokens saved |
 
-[Claude Code](https://claude.ai/code), [Gemini CLI](https://github.com/google-gemini/gemini-cli), [Qwen Code](https://github.com/QwenLM/qwen-code), and [Pi](https://pi.dev) can all dump massive command outputs and native tool results into your context window. ecotokens sits in front of those outputs, removes the noise, preserves the important bits, and records the before/after savings locally.
+[Claude Code](https://claude.ai/code), [Gemini CLI](https://github.com/google-gemini/gemini-cli), [Qwen Code](https://github.com/QwenLM/qwen-code), [Pi](https://pi.dev), and [Hermes](https://hermes.dev) can all dump massive command outputs and native tool results into your context window. ecotokens sits in front of those outputs, removes the noise, preserves the important bits, and records the before/after savings locally.
 
 Built on a *"set it and forget it!"* philosophy: one install command, zero configuration, then automatic compression for shell commands, file reads, grep/search results, directory listings, and code-intelligence workflows.
 
@@ -38,7 +38,7 @@ Full methodology and per-family breakdown: [`docs/BENCHMARKS.md`](docs/BENCHMARK
 | **PreToolUse hook** | Intercepts every shell (`Bash`) command before its output reaches the model - filters, compresses, and records savings |
 | **PostToolUse hook** *(Claude Code, Gemini CLI, Qwen Code)* | Intercepts native tool results (`Read`/`read_file`, `Grep`/`search_file_content`, `Glob`/`list_directory`) - outline-based compression for source files, grep trimming, glob denoising |
 | **Gain dashboard** | Interactive TUI - token savings by command family or project, sparkline, diff view, history log |
-| **Multi-agent support** | Works with Claude Code, Gemini CLI, Qwen Code, and Pi out of the box |
+| **Multi-agent support** | Works with Claude Code, Gemini CLI, Qwen Code, Pi, and Hermes out of the box |
 | **Precision guarantees** | Errors, failures, and stack traces are never removed; secrets are redacted before filtering |
 | **Code intelligence** | BM25 + vector search (Candle, zero-config), symbol lookup, call graph tracing, near-duplicate detection |
 | **MCP server** *(Claude Code, Gemini CLI, Qwen Code)* | Exposes code-intelligence tools over stdio (`ecotokens mcp-server`) and auto-registers in agent settings on install |
@@ -65,7 +65,7 @@ ecotokens installs hooks that intercept tool outputs before they reach the model
 3. Returns the compressed result to the model
 4. Records the savings under the `native_read`, `grep`, or `fs` family
 
-Claude Code uses the `PreToolUse` + `PostToolUse` hooks (`~/.claude/settings.json`). Gemini CLI uses the `BeforeTool` + `AfterTool` hooks (`~/.gemini/settings.json`). Qwen Code uses the `PreToolUse` + `PostToolUse` hooks (`~/.qwen/settings.json`). Pi uses a TypeScript extension (`~/.pi/agent/extensions/ecotokens.ts`) that intercepts `tool_call` (bash pre-exec) and `tool_result` (read/grep/find/ls post-exec) events in-process.
+Claude Code uses the `PreToolUse` + `PostToolUse` hooks (`~/.claude/settings.json`). Gemini CLI uses the `BeforeTool` + `AfterTool` hooks (`~/.gemini/settings.json`). Qwen Code uses the `PreToolUse` + `PostToolUse` hooks (`~/.qwen/settings.json`). Pi uses a TypeScript extension (`~/.pi/agent/extensions/ecotokens.ts`) that intercepts `tool_call` (bash pre-exec) and `tool_result` (read/grep/find/ls post-exec) events in-process. Hermes uses a plugin that sends outputs through `filter-output` via `HermesTransformTerminalOutput` and `HermesTransformToolResult` hook types.
 
 For a focused view of the runtime path, see [`docs/hook-filter-metrics-flow.md`](docs/hook-filter-metrics-flow.md).
 
@@ -164,13 +164,24 @@ ecotokens install --target pi
 
 This writes a TypeScript extension to `~/.pi/agent/extensions/ecotokens.ts`. Pi auto-discovers it on next startup (or `/reload` inside an active session). The extension intercepts bash commands before execution and filters native tool results (`read`, `grep`, `find`, `ls`) after execution.
 
+### Hermes
+
+Requires [Hermes](https://hermes.dev).
+
+```bash
+cargo install --path .
+ecotokens install --target hermes
+```
+
+This installs an ecotokens plugin in `~/.hermes/plugins/`. The plugin routes terminal outputs and tool results through `filter-output` via the `HermesTransformTerminalOutput` and `HermesTransformToolResult` hook types. Enable the plugin manually if needed: `hermes plugins enable ecotokens`.
+
 ### All targets at once
 
 ```bash
 ecotokens install --target all
 ```
 
-`--target all` covers Claude Code, Gemini CLI, Qwen Code, and Pi in a single command.
+`--target all` covers Claude Code, Gemini CLI, Qwen Code, Pi, and Hermes in a single command.
 
 ### With AI summarization
 
@@ -190,6 +201,7 @@ ecotokens uninstall                    # Claude Code
 ecotokens uninstall --target gemini    # Gemini CLI
 ecotokens uninstall --target qwen      # Qwen Code
 ecotokens uninstall --target pi        # Pi
+ecotokens uninstall --target hermes    # Hermes
 ecotokens uninstall --target all       # all targets
 ```
 
@@ -198,9 +210,11 @@ ecotokens uninstall --target all       # all targets
 | Command | Description |
 |---------|-------------|
 | `ecotokens install` | Install the PreToolUse + PostToolUse hooks and register the MCP server entry in `~/.claude/settings.json` |
+| `ecotokens install --target hermes` | Install the Hermes plugin |
 | `ecotokens uninstall` | Remove all hooks (PreToolUse, PostToolUse, SessionStart, SessionEnd) and the MCP server entry |
 | `ecotokens filter -- CMD [ARGS]` | Run a command, filter its output, record metrics |
 | `ecotokens filter --cwd DIR -- CMD [ARGS]` | Same, with an explicit working directory |
+| `ecotokens filter-output --command LABEL --exit-code N` | Filter captured output read from stdin and record metrics (used by Hermes hooks) |
 | `ecotokens hook-post` | PostToolUse handler - intercept native tool results (Read, Grep, Glob) |
 | `ecotokens gain` | Interactive TUI dashboard - savings by family or project |
 | `ecotokens gain --period PERIOD` | Filter TUI to a time window (`all`, `today`, `week`, `month`) |
