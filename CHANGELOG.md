@@ -13,6 +13,10 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 - **Support Hermes** : nouveaux types de hooks `HermesTransformTerminalOutput` et `HermesTransformToolResult` pour intercepter les sorties de l'agent Hermes
 - **Métriques par agent** : nouveau champ `by_agent` dans `Report` — les métriques sont désormais agrégées par agent en plus du total global
 
+### Changed
+
+- **`model_pricing` externalisé dans `pricing.json`** : les tarifs ne sont plus sérialisés dans `config.json`. Seuls les overrides utilisateur (entrées absentes ou modifiées par rapport au catalogue intégré) sont persistés dans `~/.config/ecotokens/pricing.json`. Migration transparente : les overrides présents dans un ancien `config.json` sont repris automatiquement au prochain `save()`.
+
 ### Fixed
 
 - **`HnswIndex::search`** : remplacement de `parallel_insert` (non-déterministe, threads parallèles) par des insertions séquentielles — corrige le test `hnsw_build_search_cosine` qui échouait de manière intermittente sur `x86_64-unknown-linux-musl`

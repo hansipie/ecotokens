@@ -491,17 +491,15 @@ ecotokens config --model ""                 # list available models
 ecotokens config --model unknown-model      # unknown model → lists available models
 ```
 
-The model name must be present in the built-in pricing table (or overridden via `model_pricing` in `~/.config/ecotokens/config.json`). Passing an empty value or an unrecognised name prints the full list and exits.
+The model name must be present in the built-in pricing table (or added via `~/.config/ecotokens/pricing.json`). Passing an empty value or an unrecognised name prints the full list and exits.
 
 See the full list of built-in models and prices in [docs/models.md](docs/models.md).
 
-Override any entry or add a new model via `model_pricing` in `~/.config/ecotokens/config.json`:
+Override any entry or add a new model by creating `~/.config/ecotokens/pricing.json`:
 
 ```json
 {
-  "model_pricing": {
-    "my-custom-model": { "input_usd_per_1m": 0.50, "output_usd_per_1m": 2.00 }
-  }
+  "my-custom-model": { "input_usd_per_1m": 0.50, "output_usd_per_1m": 2.00 }
 }
 ```
 
