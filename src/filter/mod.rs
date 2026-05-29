@@ -156,6 +156,7 @@ pub fn run_filter_pipeline_with_cwd(
     raw: &str,
     duration_ms: u32,
     cwd: Option<&std::path::Path>,
+    hook_type: crate::metrics::store::HookType,
 ) -> (String, u32, u32) {
     let settings = crate::config::Settings::load();
     let (masked, redacted) = crate::masking::mask(raw);
@@ -236,7 +237,8 @@ pub fn run_filter_pipeline_with_cwd(
             duration_ms,
             Some(masked),
             Some(filtered.clone()),
-        );
+        )
+        .with_hook_type(hook_type);
         let _ = crate::metrics::store::append_to(&path, &rec);
     }
 

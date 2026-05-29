@@ -7,6 +7,7 @@ use ratatui::crossterm::terminal::{
 };
 use ratatui::crossterm::ExecutableCommand;
 use ratatui::Terminal;
+use std::io::Read;
 use std::path::PathBuf;
 
 use crate::config::default_index_dir;
@@ -63,6 +64,20 @@ enum Commands {
         #[arg(long)]
         cwd: Option<PathBuf>,
     },
+    /// Filter an already captured tool output from stdin, record metrics
+    FilterOutput {
+        /// Original command or tool label associated with the captured output
+        #[arg(long)]
+        command: String,
+        /// Original exit code associated with the captured output
+        #[arg(long, default_value_t = 0)]
+        exit_code: i32,
+        #[arg(long)]
+        debug: bool,
+        /// Working directory for git root detection
+        #[arg(long)]
+        cwd: Option<PathBuf>,
+    },
     /// Show token savings report
     Gain {
         #[arg(
@@ -81,9 +96,9 @@ enum Commands {
         #[arg(long)]
         history: bool,
     },
-    /// Install ecotokens hook in ~/.claude/settings.json, ~/.gemini/settings.json, ~/.qwen/settings.json, or ~/.pi/agent/extensions/
+    /// Install ecotokens hook in ~/.claude/settings.json, ~/.gemini/settings.json, ~/.qwen/settings.json, ~/.pi/agent/extensions/, or ~/.hermes/plugins/
     Install {
-        /// Target AI tool to install for: claude, gemini, qwen, pi, or all (default: claude)
+        /// Target AI tool to install for: claude, gemini, qwen, pi, hermes, or all (default: claude)
         #[arg(long, default_value = "claude")]
         target: String,
         /// Enable AI-powered output summarization via Ollama
@@ -93,9 +108,9 @@ enum Commands {
         #[arg(long)]
         ai_summary_model: Option<String>,
     },
-    /// Remove ecotokens hook from ~/.claude/settings.json, ~/.gemini/settings.json, ~/.qwen/settings.json, or ~/.pi/agent/extensions/
+    /// Remove ecotokens hook from ~/.claude/settings.json, ~/.gemini/settings.json, ~/.qwen/settings.json, ~/.pi/agent/extensions/, or ~/.hermes/plugins/
     Uninstall {
-        /// Target to uninstall from: claude, gemini, qwen, pi, or all (default: claude)
+        /// Target to uninstall from: claude, gemini, qwen, pi, hermes, or all (default: claude)
         #[arg(long, default_value = "claude")]
         target: String,
     },
@@ -370,8 +385,13 @@ fn cmd_filter(args: Vec<String>, debug: bool, cwd: Option<PathBuf>) {
     };
 
     let duration_ms = start.elapsed().as_millis() as u32;
-    let (filtered, tokens_before, tokens_after) =
-        filter::run_filter_pipeline_with_cwd(&command, &raw, duration_ms, cwd.as_deref());
+    let (filtered, tokens_before, tokens_after) = filter::run_filter_pipeline_with_cwd(
+        &command,
+        &raw,
+        duration_ms,
+        cwd.as_deref(),
+        metrics::store::HookType::default(),
+    );
 
     if debug || settings.debug {
         eprintln!("[ecotokens debug] command={command} tokens_before={tokens_before} tokens_after={tokens_after}");
@@ -387,6 +407,45 @@ fn cmd_filter(args: Vec<String>, debug: bool, cwd: Option<PathBuf>) {
     if exit_code != 0 {
         std::process::exit(exit_code);
     }
+}
+
+fn cmd_filter_output(command: String, exit_code: i32, debug: bool, cwd: Option<PathBuf>) {
+    let settings = config::Settings::load();
+    let logger = debuglog::DebugLogger::new(settings.debuglog);
+    let uid = debuglog::gen_uid();
+
+    let mut raw = String::new();
+    if let Err(e) = std::io::stdin().read_to_string(&mut raw) {
+        eprintln!("ecotokens filter-output: failed to read stdin: {e}");
+        std::process::exit(1);
+    }
+
+    logger.log(
+        &uid,
+        "filter-output",
+        "input",
+        &serde_json::json!({"cmd": command, "exit_code": exit_code, "cwd": cwd.as_ref().map(|p| p.display().to_string())}),
+    );
+
+    let (filtered, tokens_before, tokens_after) = filter::run_filter_pipeline_with_cwd(
+        &command,
+        &raw,
+        0u32,
+        cwd.as_deref(),
+        metrics::store::HookType::HermesTransformTerminalOutput,
+    );
+
+    if debug || settings.debug {
+        eprintln!("[ecotokens debug] command={command} exit_code={exit_code} tokens_before={tokens_before} tokens_after={tokens_after}");
+    }
+    logger.log(
+        &uid,
+        "filter-output",
+        "output",
+        &serde_json::json!({"filtered": filtered, "tokens_before": tokens_before, "tokens_after": tokens_after}),
+    );
+
+    print!("{filtered}");
 }
 
 fn format_thousands(n: u64) -> String {
@@ -690,6 +749,17 @@ fn cmd_gain(period: String, json: bool, model: Option<String>, history: bool) {
         if report.cost_avoided_usd > 0.0 {
             println!("Cost avoided   : ${:.4} USD", report.cost_avoided_usd);
         }
+        if !report.by_agent.is_empty() {
+            println!("By agent       :");
+            let mut agents: Vec<_> = report.by_agent.iter().collect();
+            agents.sort_by_key(|(k, _)| k.as_str());
+            for (agent, stats) in agents {
+                println!(
+                    "  {:<12} {:>6} runs  {:.1}% savings",
+                    agent, stats.count, stats.savings_pct
+                );
+            }
+        }
     }
 }
 
@@ -716,15 +786,17 @@ fn cmd_install(target: String, ai_summary: bool, ai_summary_model: Option<String
     let claude_json = default_claude_json_path();
     let gemini_path = install::default_gemini_settings_path();
     let qwen_path = install::default_qwen_settings_path();
+    let hermes_plugin_dir = install::default_hermes_plugin_dir();
 
     let install_claude = matches!(target.as_str(), "claude" | "all");
     let install_gemini = matches!(target.as_str(), "gemini" | "all");
     let install_qwen = matches!(target.as_str(), "qwen" | "all");
     let install_pi = matches!(target.as_str(), "pi" | "all");
+    let install_hermes = matches!(target.as_str(), "hermes" | "all");
 
-    if !install_claude && !install_gemini && !install_qwen && !install_pi {
+    if !install_claude && !install_gemini && !install_qwen && !install_pi && !install_hermes {
         eprintln!(
-            "unknown target '{}'. Valid values: claude, gemini, qwen, pi, all",
+            "unknown target '{}'. Valid values: claude, gemini, qwen, pi, hermes, all",
             target
         );
         std::process::exit(1);
@@ -873,6 +945,45 @@ fn cmd_install(target: String, ai_summary: bool, ai_summary_model: Option<String
         }
     }
 
+    if install_hermes {
+        match hermes_plugin_dir {
+            Some(ref p) => match install::install_hermes_plugin(p) {
+                Ok(()) => {
+                    println!(
+                        "ecotokens plugin installed (Hermes Agent) → {}",
+                        p.display()
+                    );
+                    let enabled = std::process::Command::new("hermes")
+                        .args(["plugins", "enable", "ecotokens"])
+                        .output();
+                    match enabled {
+                        Ok(out) => {
+                            let msg = String::from_utf8_lossy(&out.stdout);
+                            if msg.contains("already enabled") {
+                                println!("  Plugin already enabled in Hermes (plugins.enabled).");
+                            } else if out.status.success() {
+                                println!("  Plugin enabled in Hermes (plugins.enabled).");
+                            } else {
+                                println!("  Enable manually: hermes plugins enable ecotokens");
+                            }
+                        }
+                        Err(_) => {
+                            println!("  Enable manually: hermes plugins enable ecotokens");
+                        }
+                    }
+                }
+                Err(e) => {
+                    eprintln!("install error (hermes): {e}");
+                    std::process::exit(1);
+                }
+            },
+            None => {
+                eprintln!("cannot determine Hermes plugin path on this system");
+                std::process::exit(1);
+            }
+        }
+    }
+
     let enable_ai = ai_summary || ai_summary_model.is_some();
     if enable_ai {
         let mut settings = config::Settings::load();
@@ -893,15 +1004,22 @@ fn cmd_uninstall(target: String) {
     let claude_json = default_claude_json_path();
     let gemini_path = install::default_gemini_settings_path();
     let qwen_path = install::default_qwen_settings_path();
+    let hermes_plugin_dir = install::default_hermes_plugin_dir();
 
     let uninstall_claude = matches!(target.as_str(), "claude" | "all");
     let uninstall_gemini = matches!(target.as_str(), "gemini" | "all");
     let uninstall_qwen = matches!(target.as_str(), "qwen" | "all");
     let uninstall_pi = matches!(target.as_str(), "pi" | "all");
+    let uninstall_hermes = matches!(target.as_str(), "hermes" | "all");
 
-    if !uninstall_claude && !uninstall_gemini && !uninstall_qwen && !uninstall_pi {
+    if !uninstall_claude
+        && !uninstall_gemini
+        && !uninstall_qwen
+        && !uninstall_pi
+        && !uninstall_hermes
+    {
         eprintln!(
-            "unknown target '{}'. Valid values: claude, gemini, qwen, pi, all",
+            "unknown target '{}'. Valid values: claude, gemini, qwen, pi, hermes, all",
             target
         );
         std::process::exit(1);
@@ -1052,6 +1170,40 @@ fn cmd_uninstall(target: String) {
             }
             None => {
                 eprintln!("cannot determine Pi extension path on this system");
+                std::process::exit(1);
+            }
+        }
+    }
+
+    if uninstall_hermes {
+        match hermes_plugin_dir {
+            Some(ref p) => {
+                let had = install::is_hermes_plugin_installed(p);
+                match install::uninstall_hermes_plugin(p) {
+                    Ok(()) => {
+                        if had {
+                            println!("ecotokens plugin removed (Hermes Agent) ← {}", p.display());
+                            let disabled = std::process::Command::new("hermes")
+                                .args(["plugins", "disable", "ecotokens"])
+                                .output();
+                            match disabled {
+                                Ok(out) if out.status.success() => {
+                                    println!("  Plugin disabled in Hermes (plugins.enabled).");
+                                }
+                                _ => {}
+                            }
+                        } else {
+                            println!("ecotokens: nothing to uninstall (hermes)");
+                        }
+                    }
+                    Err(e) => {
+                        eprintln!("uninstall error (hermes): {e}");
+                        std::process::exit(1);
+                    }
+                }
+            }
+            None => {
+                eprintln!("cannot determine Hermes plugin path on this system");
                 std::process::exit(1);
             }
         }
@@ -2494,6 +2646,12 @@ fn main() {
         Commands::HookPostGemini => hook::handle_post_gemini(),
         Commands::HookPostQwen => hook::handle_post_qwen(),
         Commands::Filter { args, debug, cwd } => cmd_filter(args, debug, cwd),
+        Commands::FilterOutput {
+            command,
+            exit_code,
+            debug,
+            cwd,
+        } => cmd_filter_output(command, exit_code, debug, cwd),
         Commands::Gain {
             period,
             json,

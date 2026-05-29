@@ -184,6 +184,10 @@ name = "install_test"
 path = "tests/integration/install_test.rs"
 
 [[test]]
+name = "filter_output_test"
+path = "tests/integration/filter_output_test.rs"
+
+[[test]]
 name = "index_test"
 path = "tests/search/index_test.rs"
 

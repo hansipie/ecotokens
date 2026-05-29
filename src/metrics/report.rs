@@ -49,6 +49,7 @@ pub struct Report {
     pub model_ref: String,
     pub by_family: HashMap<String, FamilyStats>,
     pub by_project: HashMap<String, ProjectStats>,
+    pub by_agent: HashMap<String, FamilyStats>,
 }
 
 fn pricing_usd_per_1m(model: &str, settings: &Settings) -> f64 {
@@ -171,6 +172,29 @@ pub fn aggregate(items: &[Interception], period: Period, model: &str) -> Report 
         };
     }
 
+    // by_agent
+    let mut by_agent: HashMap<String, FamilyStats> = HashMap::new();
+    for item in &filtered {
+        if let Some(agent) = item.hook_type.agent_label() {
+            let entry = by_agent.entry(agent.to_string()).or_insert(FamilyStats {
+                count: 0,
+                tokens_before: 0,
+                tokens_after: 0,
+                savings_pct: 0.0,
+            });
+            entry.count += 1;
+            entry.tokens_before += item.tokens_before as u64;
+            entry.tokens_after += item.tokens_after as u64;
+        }
+    }
+    for stats in by_agent.values_mut() {
+        stats.savings_pct = if stats.tokens_before == 0 {
+            0.0
+        } else {
+            ((1.0 - stats.tokens_after as f64 / stats.tokens_before as f64) * 100.0) as f32
+        };
+    }
+
     // by_project
     let mut by_project: HashMap<String, ProjectStats> = HashMap::new();
     for item in &filtered {
@@ -205,5 +229,6 @@ pub fn aggregate(items: &[Interception], period: Period, model: &str) -> Report 
         model_ref: model.to_string(),
         by_family,
         by_project,
+        by_agent,
     }
 }

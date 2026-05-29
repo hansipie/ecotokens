@@ -27,6 +27,19 @@ pub enum HookType {
     #[default]
     PreToolUse,
     PostToolUse,
+    HermesTransformTerminalOutput,
+    HermesTransformToolResult,
+}
+
+impl HookType {
+    pub fn agent_label(&self) -> Option<&'static str> {
+        match self {
+            HookType::HermesTransformTerminalOutput | HookType::HermesTransformToolResult => {
+                Some("hermes")
+            }
+            _ => None,
+        }
+    }
 }
 
 #[derive(Debug, Clone, Serialize, Deserialize, PartialEq)]

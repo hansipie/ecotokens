@@ -3,10 +3,11 @@ mod helpers;
 use helpers::ecotokens_bin;
 
 use ecotokens::install::{
-    are_session_hooks_installed, install_gemini_hook, install_hook, install_mcp_server,
-    install_post_hook, install_qwen_hook, install_session_hooks, is_gemini_hook_installed,
-    is_gemini_mcp_registered, is_mcp_registered, is_post_hook_installed, is_qwen_hook_installed,
-    is_qwen_mcp_registered, uninstall_gemini, uninstall_hook, uninstall_qwen,
+    are_session_hooks_installed, install_gemini_hook, install_hermes_plugin, install_hook,
+    install_mcp_server, install_post_hook, install_qwen_hook, install_session_hooks,
+    is_gemini_hook_installed, is_gemini_mcp_registered, is_hermes_plugin_installed,
+    is_mcp_registered, is_post_hook_installed, is_qwen_hook_installed, is_qwen_mcp_registered,
+    uninstall_gemini, uninstall_hermes_plugin, uninstall_hook, uninstall_qwen,
 };
 use std::process::Command;
 use tempfile::TempDir;
@@ -711,4 +712,76 @@ fn uninstall_session_hooks_absent_is_ok() {
         result.is_ok(),
         "uninstall without session hooks should be Ok"
     );
+}
+
+#[test]
+fn hermes_install_writes_plugin_manifest_and_hooks() {
+    let dir = TempDir::new().unwrap();
+    let plugin_dir = dir.path().join(".hermes").join("plugins").join("ecotokens");
+
+    install_hermes_plugin(&plugin_dir).expect("install_hermes_plugin should succeed");
+
+    assert!(is_hermes_plugin_installed(&plugin_dir));
+    let manifest = std::fs::read_to_string(plugin_dir.join("plugin.yaml")).unwrap();
+    assert!(manifest.contains("name: ecotokens"));
+    assert!(manifest.contains("transform_terminal_output"));
+    assert!(manifest.contains("transform_tool_result"));
+
+    let init = std::fs::read_to_string(plugin_dir.join("__init__.py")).unwrap();
+    assert!(init.contains("ctx.register_hook(\"transform_terminal_output\""));
+    assert!(init.contains("ctx.register_hook(\"transform_tool_result\""));
+    assert!(init.contains("filter-output"));
+}
+
+#[test]
+fn hermes_install_is_idempotent() {
+    let dir = TempDir::new().unwrap();
+    let plugin_dir = dir.path().join(".hermes").join("plugins").join("ecotokens");
+
+    install_hermes_plugin(&plugin_dir).unwrap();
+    let first = std::fs::read_to_string(plugin_dir.join("__init__.py")).unwrap();
+    install_hermes_plugin(&plugin_dir).unwrap();
+    let second = std::fs::read_to_string(plugin_dir.join("__init__.py")).unwrap();
+
+    assert_eq!(first, second, "Hermes plugin install should be stable");
+}
+
+#[test]
+fn hermes_uninstall_removes_plugin_directory() {
+    let dir = TempDir::new().unwrap();
+    let plugin_dir = dir.path().join(".hermes").join("plugins").join("ecotokens");
+
+    install_hermes_plugin(&plugin_dir).unwrap();
+    assert!(is_hermes_plugin_installed(&plugin_dir));
+
+    uninstall_hermes_plugin(&plugin_dir).expect("uninstall_hermes_plugin should succeed");
+
+    assert!(!plugin_dir.exists(), "Hermes plugin dir should be removed");
+}
+
+#[test]
+fn hermes_plugin_python_syntax_is_valid() {
+    let dir = TempDir::new().unwrap();
+    let plugin_dir = dir.path().join(".hermes").join("plugins").join("ecotokens");
+
+    install_hermes_plugin(&plugin_dir).unwrap();
+
+    let init_py = plugin_dir.join("__init__.py");
+    let out = Command::new("python3")
+        .args(["-m", "py_compile", init_py.to_str().unwrap()])
+        .output();
+
+    match out {
+        Ok(result) => {
+            assert!(
+                result.status.success(),
+                "python3 -m py_compile failed:\n{}",
+                String::from_utf8_lossy(&result.stderr)
+            );
+        }
+        Err(e) if e.kind() == std::io::ErrorKind::NotFound => {
+            eprintln!("python3 not found, skipping syntax check");
+        }
+        Err(e) => panic!("failed to run python3: {e}"),
+    }
 }
