@@ -399,6 +399,8 @@ kind: standalone
 provides_hooks:
   - transform_terminal_output
   - transform_tool_result
+  - on_session_start
+  - on_session_end
 "#;
 
 fn hermes_plugin_init_content(binary: &str) -> String {
@@ -471,9 +473,42 @@ def transform_tool_result(tool_name: str = "", result: str = "", cwd: str | None
     return _filter_existing_output(f"hermes-tool:{{tool_name}}", result, 0, cwd, "transform-tool-result")
 
 
+def on_session_start(session_id: str = "", model: str = "", platform: str = "", **_: Any) -> None:
+    # Start ecotokens watch in background if auto-watch is enabled in config.
+    # Fail-open: any error is silently ignored so Hermes is never blocked.
+    try:
+        import subprocess as _sp
+        _sp.Popen(
+            [ECOTOKENS_BIN, "session-start"],
+            stdout=_sp.DEVNULL,
+            stderr=_sp.DEVNULL,
+            close_fds=True,
+        )
+    except Exception:
+        pass
+
+
+def on_session_end(session_id: str = "", completed: bool = False, interrupted: bool = False, model: str = "", platform: str = "", **_: Any) -> None:
+    # Stop the background watcher started by on_session_start.
+    # Use a short timeout so Hermes can exit even if ecotokens hangs.
+    try:
+        import subprocess as _sp
+        _sp.run(
+            [ECOTOKENS_BIN, "session-end"],
+            stdout=_sp.DEVNULL,
+            stderr=_sp.DEVNULL,
+            timeout=5,
+            check=False,
+        )
+    except Exception:
+        pass
+
+
 def register(ctx):
     ctx.register_hook("transform_terminal_output", transform_terminal_output)
     ctx.register_hook("transform_tool_result", transform_tool_result)
+    ctx.register_hook("on_session_start", on_session_start)
+    ctx.register_hook("on_session_end", on_session_end)
 "#
     )
 }

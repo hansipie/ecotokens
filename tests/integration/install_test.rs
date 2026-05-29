@@ -724,6 +724,14 @@ fn hermes_install_writes_plugin_manifest_and_hooks() {
 
     assert!(is_hermes_plugin_installed(&plugin_dir));
     let manifest = std::fs::read_to_string(plugin_dir.join("plugin.yaml")).unwrap();
+    assert!(
+        manifest.contains("on_session_start"),
+        "manifest doit déclarer on_session_start"
+    );
+    assert!(
+        manifest.contains("on_session_end"),
+        "manifest doit déclarer on_session_end"
+    );
     assert!(manifest.contains("name: ecotokens"));
     assert!(manifest.contains("transform_terminal_output"));
     assert!(manifest.contains("transform_tool_result"));
@@ -731,7 +739,57 @@ fn hermes_install_writes_plugin_manifest_and_hooks() {
     let init = std::fs::read_to_string(plugin_dir.join("__init__.py")).unwrap();
     assert!(init.contains("ctx.register_hook(\"transform_terminal_output\""));
     assert!(init.contains("ctx.register_hook(\"transform_tool_result\""));
+    assert!(init.contains("ctx.register_hook(\"on_session_start\""));
+    assert!(init.contains("ctx.register_hook(\"on_session_end\""));
     assert!(init.contains("filter-output"));
+}
+
+#[test]
+fn hermes_plugin_registers_session_hooks_for_auto_watch() {
+    let dir = TempDir::new().unwrap();
+    let plugin_dir = dir.path().join(".hermes").join("plugins").join("ecotokens");
+
+    install_hermes_plugin(&plugin_dir).unwrap();
+
+    let init = std::fs::read_to_string(plugin_dir.join("__init__.py")).unwrap();
+
+    // Les hooks session doivent appeler ecotokens session-start / session-end.
+    assert!(
+        init.contains("session-start"),
+        "__init__.py doit appeler ecotokens session-start"
+    );
+    assert!(
+        init.contains("session-end"),
+        "__init__.py doit appeler ecotokens session-end"
+    );
+    // Les deux doivent être fail-open.
+    assert!(
+        init.contains("on_session_start"),
+        "on_session_start doit être défini"
+    );
+    assert!(
+        init.contains("on_session_end"),
+        "on_session_end doit être défini"
+    );
+    // Syntaxe Python valide après ajout des hooks session.
+    let out = std::process::Command::new("python3")
+        .args([
+            "-m",
+            "py_compile",
+            plugin_dir.join("__init__.py").to_str().unwrap(),
+        ])
+        .output();
+    match out {
+        Ok(r) => assert!(
+            r.status.success(),
+            "py_compile doit réussir après ajout des hooks session:\n{}",
+            String::from_utf8_lossy(&r.stderr)
+        ),
+        Err(e) if e.kind() == std::io::ErrorKind::NotFound => {
+            eprintln!("python3 non disponible, test de syntaxe ignoré");
+        }
+        Err(e) => panic!("impossible de lancer python3: {e}"),
+    }
 }
 
 #[test]

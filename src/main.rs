@@ -229,9 +229,9 @@ enum Commands {
         #[arg(long)]
         json: bool,
     },
-    /// Called by Claude Code SessionStart hook — starts watch if auto-watch is enabled
+    /// Called by SessionStart hook (Claude Code, Qwen Code) or Hermes on_session_start — starts watch if auto-watch is enabled
     SessionStart,
-    /// Called by Claude Code SessionEnd hook — stops watch if auto-watch is enabled
+    /// Called by SessionEnd hook (Claude Code, Qwen Code) or Hermes on_session_end — stops watch if auto-watch is enabled
     SessionEnd,
     /// Enable or disable automatic watch on Claude Code session start/end
     AutoWatch {
@@ -2567,7 +2567,7 @@ fn cmd_auto_watch_enable() {
         }
     }
 
-    println!("✓ auto-watch enabled — ecotokens watch will start automatically with Claude Code, Qwen Code and Pi");
+    println!("✓ auto-watch enabled — ecotokens watch will start automatically with Claude Code, Qwen Code, Pi and Hermes");
 }
 
 fn cmd_auto_watch_disable() {
