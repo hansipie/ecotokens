@@ -269,7 +269,7 @@ ecotokens uninstall --target all       # all targets
 | `ecotokens trace callees SYMBOL` | Find callees of a symbol |
 | `ecotokens watch [--path DIR]` | Watch a directory and keep the index up to date |
 | `ecotokens mcp-server [--index-dir DIR]` | Start the stdio MCP server exposing search/outline/symbol/trace/duplicates tools |
-| `ecotokens auto-watch enable` | Start watch automatically on each Claude Code session |
+| `ecotokens auto-watch enable` | Start watch automatically on each Claude Code, Qwen Code, Pi or Hermes session |
 | `ecotokens auto-watch disable` | Disable automatic watch |
 | `ecotokens abbreviations enable` | Replace common words with abbreviations in filtered outputs + inject a matching instruction at SessionStart |
 | `ecotokens abbreviations disable` | Turn abbreviations off (default) |
@@ -356,18 +356,26 @@ ecotokens watch --stop             # stop the background process
 
 > **Note:** Background logs are only written if global `debug` is enabled (`ecotokens config --debug true`).
 
-### Auto-watch *(Claude Code <del>& Qwen Code</del>)*
+### Auto-watch *(Claude Code, Qwen Code, Pi, Hermes)*
 
-`ecotokens auto-watch` integrates with Claude Code <del>and Qwen Code</del>'s session lifecycle to start and stop the watcher automatically.
+`ecotokens auto-watch` integrates with agent session lifecycles to start and stop the watcher automatically.
 
 ```bash
-ecotokens auto-watch enable    # enable auto-watch, install SessionStart/SessionEnd hooks
+ecotokens auto-watch enable    # enable auto-watch
 ecotokens auto-watch disable   # disable (hooks remain installed but are no-ops)
 ```
 
 When enabled, `ecotokens watch --background` starts automatically when a session opens, and stops when it closes. The setting is stored in `~/.config/ecotokens/config.json` (`auto_watch: true/false`).
 
-> **Note:** Auto-watch relies on `SessionStart` / `SessionEnd` hooks. <del>For Qwen Code, session hooks are installed automatically if ecotokens is already installed for Qwen (`ecotokens install --target qwen`).</del> Gemini CLI does not expose session lifecycle hooks.
+Support by agent:
+
+| Agent | Mechanism | Notes |
+|-------|-----------|-------|
+| Claude Code | `SessionStart` / `SessionEnd` shell hooks in `~/.claude/settings.json` | Installed by `auto-watch enable` |
+| Qwen Code | `SessionStart` / `SessionEnd` shell hooks in `~/.qwen/settings.json` | Installed automatically if Qwen hook is present |
+| Pi | `session_start` / `session_end` events in the TypeScript extension | Built into the Pi extension |
+| Hermes | `on_session_start` / `on_session_end` plugin hooks | Built into the Hermes plugin; install first with `ecotokens install --target hermes` |
+| Gemini CLI | — | Gemini does not expose session lifecycle hooks |
 
 ## Word abbreviations
 

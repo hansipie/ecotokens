@@ -16,6 +16,7 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 - **Métriques par agent** : nouveau champ `by_agent` dans `Report` — les métriques sont agrégées par agent (`claude`, `gemini`, `qwen`, `pi`, `hermes`, `cli`) en plus du total global
 - **Filtrage par famille pour les outils Hermes** : les labels `hermes-tool:<name>` sont automatiquement mappés à la famille de filtre appropriée — `read_file`/`list_directory` → `fs`, `search_files`/`find_files` → `grep`, `browser_snapshot`/`web_fetch` → `network`, `run_python_code` → `python`, autres → `generic`
 - **Variables d'environnement du plugin Hermes** : `ECOTOKENS_BIN`, `ECOTOKENS_HERMES_MIN_CHARS` (seuil minimal, défaut 2000 car.), `ECOTOKENS_HERMES_TIMEOUT` (timeout subprocess, défaut 10 s)
+- **Auto-watch Hermes** : les hooks `on_session_start` et `on_session_end` du plugin démarrent et arrêtent automatiquement `ecotokens watch --background` à chaque session Hermes — même comportement que Claude Code et Qwen Code ; activer avec `ecotokens auto-watch enable`
 
 ### Changed
 
