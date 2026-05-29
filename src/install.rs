@@ -451,11 +451,11 @@ def _filter_existing_output(command: str, output: str, exit_code: int = 0) -> st
     return completed.stdout
 
 
-def transform_terminal_output(command: str = "", output: str = "", returncode: int = 0, **_: Any) -> str | None:
+def transform_terminal_output(command: str = "", output: str = "", exit_code: int = 0, **_: Any) -> str | None:
     first_token = (command.split() or [""])[0]
     if first_token in (ECOTOKENS_BIN, "ecotokens"):
         return None
-    return _filter_existing_output(command, output, returncode)
+    return _filter_existing_output(command, output, exit_code)
 
 
 def transform_tool_result(tool_name: str = "", result: str = "", **_: Any) -> str | None:
