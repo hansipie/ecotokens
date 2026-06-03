@@ -2506,7 +2506,8 @@ fn cmd_session_start() {
                 );
             }
         } else if decision.needs_watcher {
-            let _ = std::process::Command::new("ecotokens")
+            let bin = std::env::current_exe().unwrap_or_else(|_| PathBuf::from("ecotokens"));
+            let _ = std::process::Command::new(bin)
                 .args(["watch", "--background", "--path", &decision.watch_path])
                 .spawn();
         }
