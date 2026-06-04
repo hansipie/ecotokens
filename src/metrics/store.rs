@@ -31,6 +31,8 @@ pub enum HookType {
     GeminiPostToolUse,
     QwenPreToolUse,
     QwenPostToolUse,
+    CodexPreToolUse,
+    CodexPostToolUse,
     Pi,
     Cli,
     HermesTransformTerminalOutput,
@@ -43,6 +45,7 @@ impl HookType {
             HookType::PreToolUse | HookType::PostToolUse => "claude",
             HookType::GeminiPreToolUse | HookType::GeminiPostToolUse => "gemini",
             HookType::QwenPreToolUse | HookType::QwenPostToolUse => "qwen",
+            HookType::CodexPreToolUse | HookType::CodexPostToolUse => "codex",
             HookType::Pi => "pi",
             HookType::Cli => "cli",
             HookType::HermesTransformTerminalOutput | HookType::HermesTransformToolResult => {
@@ -57,6 +60,7 @@ pub fn agent_to_hook_type_pre(s: &str) -> HookType {
         "claude" => HookType::PreToolUse,
         "gemini" => HookType::GeminiPreToolUse,
         "qwen" => HookType::QwenPreToolUse,
+        "codex" => HookType::CodexPreToolUse,
         "pi" => HookType::Pi,
         _ => HookType::Cli,
     }

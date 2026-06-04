@@ -642,8 +642,154 @@ pub fn uninstall_hermes_plugin(plugin_dir: &Path) -> InstallResult {
 }
 
 // ============================================================================
-// Codex Support (plugin in ~/.codex/plugins/ecotokens/)
+// Codex Support (plugin in ~/.codex/plugins/ecotokens/ + hooks in ~/.codex/hooks.json)
 // ============================================================================
+
+const CODEX_HOOK_COMMAND: &str = "ecotokens hook-codex";
+const CODEX_POST_HOOK_COMMAND: &str = "ecotokens hook-post-codex";
+const CODEX_HOOK_MATCHER: &str = "Bash";
+const CODEX_POST_HOOK_MATCHER: &str = "Bash";
+
+/// Get the default Codex hooks path: ~/.codex/hooks.json
+pub fn default_codex_hooks_path() -> Option<std::path::PathBuf> {
+    std::env::var_os("CODEX_HOME")
+        .map(std::path::PathBuf::from)
+        .or_else(|| dirs::home_dir().map(|d| d.join(".codex")))
+        .map(|d| d.join("hooks.json"))
+}
+
+/// Install the PreToolUse/Bash hook into ~/.codex/hooks.json (idempotent).
+pub fn install_codex_hook(hooks_path: &Path) -> InstallResult {
+    let mut v = read_settings(hooks_path);
+    let _ = install_hook_generic(&mut v, "PreToolUse", CODEX_HOOK_MATCHER, CODEX_HOOK_COMMAND);
+    write_settings(hooks_path, &v)
+}
+
+/// Install the PostToolUse/Bash hook into ~/.codex/hooks.json (idempotent).
+pub fn install_codex_post_hook(hooks_path: &Path) -> InstallResult {
+    let mut v = read_settings(hooks_path);
+    let _ = install_hook_generic(
+        &mut v,
+        "PostToolUse",
+        CODEX_POST_HOOK_MATCHER,
+        CODEX_POST_HOOK_COMMAND,
+    );
+    write_settings(hooks_path, &v)
+}
+
+/// Check if the ecotokens Codex PreToolUse hook is installed in hooks.json.
+pub fn is_codex_hook_installed(hooks_path: &Path) -> bool {
+    has_hook_command(&read_settings(hooks_path), "PreToolUse", CODEX_HOOK_COMMAND)
+}
+
+/// Check if the ecotokens Codex PostToolUse hook is installed in hooks.json.
+pub fn is_codex_post_hook_installed(hooks_path: &Path) -> bool {
+    has_hook_command(
+        &read_settings(hooks_path),
+        "PostToolUse",
+        CODEX_POST_HOOK_COMMAND,
+    )
+}
+
+/// Remove ecotokens PreToolUse and PostToolUse hooks from ~/.codex/hooks.json.
+pub fn uninstall_codex_hooks(hooks_path: &Path) -> InstallResult {
+    if !hooks_path.exists() {
+        return Ok(());
+    }
+    let mut v = read_settings(hooks_path);
+    remove_hook_generic(&mut v, "PreToolUse", CODEX_HOOK_COMMAND);
+    remove_hook_generic(&mut v, "PostToolUse", CODEX_POST_HOOK_COMMAND);
+    write_settings(hooks_path, &v)
+}
+
+// ── Codex MCP server (config.toml) ──────────────────────────────────────────
+
+/// Get the default Codex config path: ~/.codex/config.toml
+pub fn default_codex_config_path() -> Option<std::path::PathBuf> {
+    std::env::var_os("CODEX_HOME")
+        .map(std::path::PathBuf::from)
+        .or_else(|| dirs::home_dir().map(|d| d.join(".codex")))
+        .map(|d| d.join("config.toml"))
+}
+
+fn read_codex_config(path: &Path) -> toml::Value {
+    if path.exists() {
+        let s = std::fs::read_to_string(path).unwrap_or_default();
+        match toml::from_str(&s) {
+            Ok(v) => v,
+            Err(_) => toml::Value::Table(Default::default()),
+        }
+    } else {
+        toml::Value::Table(Default::default())
+    }
+}
+
+fn has_codex_mcp_server_in_config(v: &toml::Value) -> bool {
+    v.get("mcp_servers")
+        .and_then(|s| s.get("ecotokens"))
+        .is_some()
+}
+
+/// Install the ecotokens MCP server entry into ~/.codex/config.toml (idempotent).
+pub fn install_codex_mcp_server(config_path: &Path) -> InstallResult {
+    let binary = std::env::current_exe()
+        .unwrap_or_else(|_| std::path::PathBuf::from("ecotokens"))
+        .to_string_lossy()
+        .into_owned();
+    let mut v = read_codex_config(config_path);
+    if !has_codex_mcp_server_in_config(&v) {
+        let table = v.as_table_mut().expect("toml root is always a table");
+        let mcp_servers = table
+            .entry("mcp_servers")
+            .or_insert_with(|| toml::Value::Table(Default::default()));
+        let servers = mcp_servers
+            .as_table_mut()
+            .expect("mcp_servers is always a table");
+        let mut entry = toml::value::Table::new();
+        entry.insert("command".to_string(), toml::Value::String(binary));
+        entry.insert(
+            "args".to_string(),
+            toml::Value::Array(vec![toml::Value::String("mcp-server".to_string())]),
+        );
+        servers.insert("ecotokens".to_string(), toml::Value::Table(entry));
+    }
+    if let Some(parent) = config_path.parent() {
+        std::fs::create_dir_all(parent)?;
+    }
+    std::fs::write(
+        config_path,
+        toml::to_string_pretty(&v).expect("toml serialisation impossible"),
+    )
+}
+
+/// Check if the ecotokens MCP server is registered in ~/.codex/config.toml.
+pub fn is_codex_mcp_registered(config_path: &Path) -> bool {
+    has_codex_mcp_server_in_config(&read_codex_config(config_path))
+}
+
+/// Remove the ecotokens MCP server entry from ~/.codex/config.toml.
+pub fn uninstall_codex_mcp_server(config_path: &Path) -> InstallResult {
+    if !config_path.exists() {
+        return Ok(());
+    }
+    let mut v = read_codex_config(config_path);
+    let changed = if let Some(servers) = v
+        .as_table_mut()
+        .and_then(|t| t.get_mut("mcp_servers"))
+        .and_then(|s| s.as_table_mut())
+    {
+        servers.remove("ecotokens").is_some()
+    } else {
+        false
+    };
+    if changed {
+        std::fs::write(
+            config_path,
+            toml::to_string_pretty(&v).expect("toml serialisation impossible"),
+        )?;
+    }
+    Ok(())
+}
 
 const CODEX_PLUGIN_MANIFEST: &str = r#"{
   "name": "ecotokens",

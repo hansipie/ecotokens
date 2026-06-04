@@ -75,8 +75,8 @@ pub fn handle_hook_input(
     HookOutput::Rewrite(rewritten)
 }
 
-/// Top-level hook stdin→stdout handler (reads Claude Code PreToolUse JSON).
-pub fn handle() {
+/// Inner handler shared by Claude Code and Codex PreToolUse hooks (same JSON format).
+fn handle_with_agent(agent: &str) {
     use super::MAX_STDIN_BYTES;
     use std::io::Read;
 
@@ -94,7 +94,6 @@ pub fn handle() {
     let v: serde_json::Value = match serde_json::from_str(&stdin) {
         Ok(v) => v,
         Err(_) => {
-            // Cannot parse — passthrough
             print!("{stdin}");
             return;
         }
@@ -108,7 +107,7 @@ pub fn handle() {
     let settings = crate::config::Settings::load();
     let input = HookInput { command, cwd };
     let debug = settings.debug;
-    let output = handle_hook_input(&input, &settings.exclusions, debug, "claude");
+    let output = handle_hook_input(&input, &settings.exclusions, debug, agent);
 
     let response = match output {
         HookOutput::Passthrough => serde_json::json!({
@@ -120,7 +119,7 @@ pub fn handle() {
         HookOutput::Rewrite(new_cmd) => {
             if debug {
                 eprintln!(
-                    "[ecotokens debug] rewriting: {} → {}",
+                    "[ecotokens debug] rewriting ({agent}): {} → {}",
                     input.command, new_cmd
                 );
             }
@@ -140,6 +139,16 @@ pub fn handle() {
         Ok(s) => println!("{s}"),
         Err(e) => eprintln!("ecotokens hook: failed to serialize response: {e}"),
     }
+}
+
+/// Top-level hook stdin→stdout handler (reads Claude Code PreToolUse JSON).
+pub fn handle() {
+    handle_with_agent("claude");
+}
+
+/// Top-level hook stdin→stdout handler for Codex PreToolUse events.
+pub fn handle_codex() {
+    handle_with_agent("codex");
 }
 
 /// Emit a shell-tool allow response (Gemini or Qwen format).

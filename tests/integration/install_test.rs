@@ -3,12 +3,13 @@ mod helpers;
 use helpers::ecotokens_bin;
 
 use ecotokens::install::{
-    are_session_hooks_installed, enable_hermes_plugin_in_config, install_codex_plugin,
-    install_gemini_hook, install_hermes_plugin, install_hook, install_mcp_server,
-    install_post_hook, install_qwen_hook, install_session_hooks, is_codex_plugin_installed,
-    is_gemini_hook_installed, is_gemini_mcp_registered, is_hermes_plugin_enabled_in_config,
-    is_hermes_plugin_installed, is_mcp_registered, is_post_hook_installed, is_qwen_hook_installed,
-    is_qwen_mcp_registered, uninstall_codex_plugin, uninstall_gemini, uninstall_hermes_plugin,
+    are_session_hooks_installed, enable_hermes_plugin_in_config, install_codex_mcp_server,
+    install_codex_plugin, install_gemini_hook, install_hermes_plugin, install_hook,
+    install_mcp_server, install_post_hook, install_qwen_hook, install_session_hooks,
+    is_codex_mcp_registered, is_codex_plugin_installed, is_gemini_hook_installed,
+    is_gemini_mcp_registered, is_hermes_plugin_enabled_in_config, is_hermes_plugin_installed,
+    is_mcp_registered, is_post_hook_installed, is_qwen_hook_installed, is_qwen_mcp_registered,
+    uninstall_codex_mcp_server, uninstall_codex_plugin, uninstall_gemini, uninstall_hermes_plugin,
     uninstall_hook, uninstall_qwen,
 };
 use std::process::Command;
@@ -934,6 +935,58 @@ fn codex_plugin_install_no_hooks_file() {
         !plugin_dir.join("hooks").join("hooks.json").exists(),
         "pas de hooks/hooks.json"
     );
+}
+
+#[test]
+fn codex_mcp_install_writes_config_toml() {
+    let dir = TempDir::new().unwrap();
+    let config_path = dir.path().join(".codex").join("config.toml");
+
+    assert!(!is_codex_mcp_registered(&config_path));
+    install_codex_mcp_server(&config_path).expect("install_codex_mcp_server should succeed");
+    assert!(is_codex_mcp_registered(&config_path));
+
+    let content = std::fs::read_to_string(&config_path).unwrap();
+    assert!(content.contains("[mcp_servers.ecotokens]"));
+    assert!(content.contains("command ="));
+    assert!(content.contains("mcp-server"));
+}
+
+#[test]
+fn codex_mcp_install_is_idempotent() {
+    let dir = TempDir::new().unwrap();
+    let config_path = dir.path().join(".codex").join("config.toml");
+
+    install_codex_mcp_server(&config_path).unwrap();
+    let first = std::fs::read_to_string(&config_path).unwrap();
+    install_codex_mcp_server(&config_path).unwrap();
+    let second = std::fs::read_to_string(&config_path).unwrap();
+
+    assert_eq!(first, second, "Codex MCP install should be stable");
+    assert_eq!(
+        first.matches("[mcp_servers.ecotokens]").count(),
+        1,
+        "doit apparaître une seule fois"
+    );
+}
+
+#[test]
+fn codex_mcp_uninstall_removes_entry() {
+    let dir = TempDir::new().unwrap();
+    let config_path = dir.path().join(".codex").join("config.toml");
+
+    install_codex_mcp_server(&config_path).unwrap();
+    assert!(is_codex_mcp_registered(&config_path));
+
+    uninstall_codex_mcp_server(&config_path).expect("uninstall_codex_mcp_server should succeed");
+    assert!(!is_codex_mcp_registered(&config_path));
+}
+
+#[test]
+fn codex_mcp_uninstall_when_absent_is_ok() {
+    let dir = TempDir::new().unwrap();
+    let config_path = dir.path().join(".codex").join("config.toml");
+    assert!(uninstall_codex_mcp_server(&config_path).is_ok());
 }
 
 #[test]

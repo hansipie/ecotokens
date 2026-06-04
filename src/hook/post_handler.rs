@@ -376,3 +376,55 @@ pub fn handle_post(hook_type: HookType) {
         || print!("{{}}"),
     );
 }
+
+/// PostToolUse handler for Codex — filters Bash tool output and injects it as additionalContext.
+/// Codex has no native Read/Grep/Glob tools; all shell work goes through the Bash tool.
+/// Pre-tool already rewrites most commands; this acts as a fallback for excluded commands.
+pub fn handle_post_codex() {
+    let input = match read_post_input() {
+        Some(i) => i,
+        None => {
+            print!("{{}}");
+            return;
+        }
+    };
+
+    if input.tool_name != "Bash" {
+        print!("{{}}");
+        return;
+    }
+
+    let command = input
+        .tool_input
+        .get("command")
+        .and_then(|v| v.as_str())
+        .unwrap_or("")
+        .to_string();
+
+    let output_text = input
+        .tool_response
+        .get("output")
+        .or_else(|| input.tool_response.get("stdout"))
+        .and_then(|v| v.as_str())
+        .unwrap_or("");
+
+    let cwd = input.cwd.as_deref().map(std::path::Path::new);
+    let (filtered, tokens_before, tokens_after) = crate::filter::run_filter_pipeline_with_cwd(
+        &command,
+        output_text,
+        0,
+        cwd,
+        HookType::CodexPostToolUse,
+    );
+
+    let out = if tokens_after < tokens_before {
+        PostHookOutput::with_context(filtered)
+    } else {
+        PostHookOutput::passthrough()
+    };
+
+    match serde_json::to_string(&out) {
+        Ok(s) => print!("{s}"),
+        Err(_) => print!("{{}}"),
+    }
+}

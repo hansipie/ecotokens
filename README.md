@@ -65,7 +65,7 @@ ecotokens installs hooks that intercept tool outputs before they reach the model
 3. Returns the compressed result to the model
 4. Records the savings under the `native_read`, `grep`, or `fs` family
 
-Claude Code uses the `PreToolUse` + `PostToolUse` hooks (`~/.claude/settings.json`). Gemini CLI uses the `BeforeTool` + `AfterTool` hooks (`~/.gemini/settings.json`). Qwen Code uses the `PreToolUse` + `PostToolUse` hooks (`~/.qwen/settings.json`). Pi uses a TypeScript extension (`~/.pi/agent/extensions/ecotokens.ts`) that intercepts `tool_call` (bash pre-exec) and `tool_result` (read/grep/find/ls post-exec) events in-process. Hermes uses a plugin that sends outputs through `filter-output` via `HermesTransformTerminalOutput` and `HermesTransformToolResult` hook types. Codex uses a plugin (`~/.codex/plugins/ecotokens/`) for session lifecycle hooks used by auto-watch.
+Claude Code uses the `PreToolUse` + `PostToolUse` hooks (`~/.claude/settings.json`). Gemini CLI uses the `BeforeTool` + `AfterTool` hooks (`~/.gemini/settings.json`). Qwen Code uses the `PreToolUse` + `PostToolUse` hooks (`~/.qwen/settings.json`). Pi uses a TypeScript extension (`~/.pi/agent/extensions/ecotokens.ts`) that intercepts `tool_call` (bash pre-exec) and `tool_result` (read/grep/find/ls post-exec) events in-process. Hermes uses a plugin that sends outputs through `filter-output` via `HermesTransformTerminalOutput` and `HermesTransformToolResult` hook types. Codex uses `PreToolUse` + `PostToolUse` hooks in `~/.codex/hooks.json` and registers the MCP server in `~/.codex/config.toml`.
 
 For a focused view of the runtime path, see [`docs/hook-filter-metrics-flow.md`](docs/hook-filter-metrics-flow.md).
 
@@ -214,14 +214,16 @@ The plugin is fail-open: any error, timeout, or empty output returns the origina
 
 ### Codex
 
-Requires Codex with plugin hook support.
-
 ```bash
 cargo install --path .
 ecotokens install --target codex
 ```
 
-This installs an ecotokens plugin in `~/.codex/plugins/ecotokens/` and adds it to the personal Codex marketplace at `~/.agents/plugins/marketplace.json`. The plugin registers a `SessionStart` hook that calls `ecotokens session-start`, enabling `auto-watch` for Codex sessions. Open `/plugins` in Codex, install/enable `ecotokens`, review the hook with `/hooks`, then restart Codex.
+This installs three things:
+
+- **Plugin** (`~/.codex/plugins/ecotokens/.codex-plugin/plugin.json`) — identifies ecotokens to Codex
+- **Hooks** (`~/.codex/hooks.json`) — `PreToolUse` (bash pre-exec filtering) and `PostToolUse` (bash post-exec filtering)
+- **MCP server** (`~/.codex/config.toml`) — registers `ecotokens mcp-server` under `[mcp_servers.ecotokens]`
 
 ### All targets at once
 
@@ -261,7 +263,7 @@ ecotokens uninstall --target all       # all targets
 | `ecotokens install` | Install the PreToolUse + PostToolUse hooks and register the MCP server entry in `~/.claude/settings.json` |
 | `ecotokens install --target hermes` | Install the Hermes plugin in `~/.hermes/plugins/` |
 | `ecotokens install --target hermes --enable-plugin` | Install and add to `plugins.enabled` in `~/.hermes/config.yaml` directly |
-| `ecotokens install --target codex` | Install the Codex plugin in `~/.codex/plugins/ecotokens/` |
+| `ecotokens install --target codex` | Install the Codex plugin, `PreToolUse`/`PostToolUse` hooks in `~/.codex/hooks.json`, and MCP server in `~/.codex/config.toml` |
 | `ecotokens uninstall` | Remove all hooks (PreToolUse, PostToolUse, SessionStart, SessionEnd where supported) and the MCP server entry |
 | `ecotokens filter -- CMD [ARGS]` | Run a command, filter its output, record metrics |
 | `ecotokens filter --cwd DIR -- CMD [ARGS]` | Same, with an explicit working directory |
@@ -378,7 +380,7 @@ ecotokens auto-watch enable    # enable auto-watch
 ecotokens auto-watch disable   # disable (hooks remain installed but are no-ops)
 ```
 
-When enabled, `ecotokens watch --background` starts automatically when a session opens, and stops when it closes on agents that expose an end-of-session event. Codex currently uses `SessionStart` for startup/resume and does not expose a documented `SessionEnd` event. The setting is stored in `~/.config/ecotokens/config.json` (`auto_watch: true/false`).
+When enabled, `ecotokens watch --background` starts automatically when a session opens, and stops when it closes on agents that expose an end-of-session event. The setting is stored in `~/.config/ecotokens/config.json` (`auto_watch: true/false`).
 
 Support by agent:
 
@@ -388,7 +390,7 @@ Support by agent:
 | Qwen Code | `SessionStart` / `SessionEnd` shell hooks in `~/.qwen/settings.json` | Installed automatically if Qwen hook is present |
 | Pi | `session_start` / `session_end` events in the TypeScript extension | Built into the Pi extension |
 | Hermes | `on_session_start` / `on_session_end` plugin hooks | Built into the Hermes plugin; install first with `ecotokens install --target hermes` |
-| Codex | `SessionStart` plugin hook (`startup|resume`) | Built into the Codex plugin; install first with `ecotokens install --target codex`, then install/enable it in `/plugins` and trust it in `/hooks` |
+| Codex | — | Session hooks not yet supported; auto-watch not available for Codex |
 | Gemini CLI | — | Gemini does not expose session lifecycle hooks |
 
 ## Word abbreviations
@@ -422,7 +424,7 @@ Keep the feature flag in `~/.config/ecotokens/config.json`
 
 ## Bonus Tools
 
-### MCP server (Claude Code, Gemini CLI, Qwen Code)
+### MCP server (Claude Code, Gemini CLI, Qwen Code, Codex)
 
 `ecotokens mcp-server` starts a stdio MCP server backed by the ecotokens index and trace engines.
 
@@ -440,7 +442,7 @@ Exposed tools:
 - `ecotokens_trace_callees` - find callees (with depth)
 - `ecotokens_duplicates` - detect near-duplicate code blocks
 
-For Claude Code, Gemini CLI, and Qwen Code, `ecotokens install` registers this server automatically in each target's settings file.
+For Claude Code, Gemini CLI, Qwen Code, and Codex, `ecotokens install` registers this server automatically in each target's settings file (`mcpServers` in JSON settings, `[mcp_servers.ecotokens]` in Codex's `config.toml`).
 
 ### Search command
 

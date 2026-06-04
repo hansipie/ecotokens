@@ -58,6 +58,10 @@ enum Commands {
     HookPostGemini,
     /// Intercept a Qwen Code tool result via PostToolUse hook (reads JSON from stdin)
     HookPostQwen,
+    /// Intercept a Codex Bash tool call via PreToolUse hook (reads JSON from stdin)
+    HookCodex,
+    /// Intercept a Codex Bash tool result via PostToolUse hook (reads JSON from stdin)
+    HookPostCodex,
     /// Execute a command, filter its output, record metrics
     Filter {
         #[arg(last = true)]
@@ -1069,7 +1073,6 @@ fn cmd_install(
             Some(ref p) => match install::install_codex_plugin(p) {
                 Ok(()) => {
                     println!("ecotokens plugin installed (Codex) → {}", p.display());
-                    println!("  Restart Codex to activate the SessionStart hook.");
                 }
                 Err(e) => {
                     eprintln!("install error (codex): {e}");
@@ -1078,6 +1081,45 @@ fn cmd_install(
             },
             None => {
                 eprintln!("cannot determine Codex plugin path on this system");
+                std::process::exit(1);
+            }
+        }
+        match install::default_codex_hooks_path() {
+            Some(ref h) => {
+                match install::install_codex_hook(h) {
+                    Ok(()) => println!("ecotokens hook installed (Codex) → {}", h.display()),
+                    Err(e) => {
+                        eprintln!("install error (codex hook): {e}");
+                        std::process::exit(1);
+                    }
+                }
+                match install::install_codex_post_hook(h) {
+                    Ok(()) => {
+                        println!("ecotokens post-hook installed (Codex) → {}", h.display())
+                    }
+                    Err(e) => {
+                        eprintln!("install error (codex post-hook): {e}");
+                        std::process::exit(1);
+                    }
+                }
+            }
+            None => {
+                eprintln!("cannot determine Codex hooks path on this system");
+                std::process::exit(1);
+            }
+        }
+        match install::default_codex_config_path() {
+            Some(ref c) => match install::install_codex_mcp_server(c) {
+                Ok(()) => {
+                    println!("ecotokens MCP server registered (Codex) → {}", c.display())
+                }
+                Err(e) => {
+                    eprintln!("install error (codex mcp server): {e}");
+                    std::process::exit(1);
+                }
+            },
+            None => {
+                eprintln!("cannot determine Codex config path on this system");
                 std::process::exit(1);
             }
         }
@@ -1312,27 +1354,85 @@ fn cmd_uninstall(target: String) {
     }
 
     if uninstall_codex {
+        let codex_hooks_path = install::default_codex_hooks_path();
+        let codex_config_path = install::default_codex_config_path();
+
+        let had_plugin = codex_plugin_dir
+            .as_ref()
+            .map(|p| install::is_codex_plugin_installed(p))
+            .unwrap_or(false);
+        let had_hook = codex_hooks_path
+            .as_deref()
+            .map(install::is_codex_hook_installed)
+            .unwrap_or(false);
+        let had_post = codex_hooks_path
+            .as_deref()
+            .map(install::is_codex_post_hook_installed)
+            .unwrap_or(false);
+        let had_mcp = codex_config_path
+            .as_deref()
+            .map(install::is_codex_mcp_registered)
+            .unwrap_or(false);
+
         match codex_plugin_dir {
-            Some(ref p) => {
-                let had = install::is_codex_plugin_installed(p);
-                match install::uninstall_codex_plugin(p) {
-                    Ok(()) => {
-                        if had {
-                            println!("ecotokens plugin removed (Codex) ← {}", p.display());
-                        } else {
-                            println!("ecotokens: nothing to uninstall (codex)");
-                        }
-                    }
-                    Err(e) => {
-                        eprintln!("uninstall error (codex): {e}");
-                        std::process::exit(1);
+            Some(ref p) => match install::uninstall_codex_plugin(p) {
+                Ok(()) => {
+                    if had_plugin {
+                        println!("ecotokens plugin removed (Codex) ← {}", p.display());
                     }
                 }
-            }
+                Err(e) => {
+                    eprintln!("uninstall error (codex): {e}");
+                    std::process::exit(1);
+                }
+            },
             None => {
                 eprintln!("cannot determine Codex plugin path on this system");
                 std::process::exit(1);
             }
+        }
+        match codex_hooks_path {
+            Some(ref h) => match install::uninstall_codex_hooks(h) {
+                Ok(()) => {
+                    if had_hook {
+                        println!("ecotokens hook removed (Codex) ← {}", h.display());
+                    }
+                    if had_post {
+                        println!("ecotokens post-hook removed (Codex) ← {}", h.display());
+                    }
+                }
+                Err(e) => {
+                    eprintln!("uninstall error (codex hooks): {e}");
+                    std::process::exit(1);
+                }
+            },
+            None => {
+                eprintln!("cannot determine Codex hooks path on this system");
+                std::process::exit(1);
+            }
+        }
+        match codex_config_path {
+            Some(ref c) => match install::uninstall_codex_mcp_server(c) {
+                Ok(()) => {
+                    if had_mcp {
+                        println!(
+                            "ecotokens MCP server unregistered (Codex) ← {}",
+                            c.display()
+                        );
+                    }
+                }
+                Err(e) => {
+                    eprintln!("uninstall error (codex mcp server): {e}");
+                    std::process::exit(1);
+                }
+            },
+            None => {
+                eprintln!("cannot determine Codex config path on this system");
+                std::process::exit(1);
+            }
+        }
+        if !had_plugin && !had_hook && !had_post && !had_mcp {
+            println!("ecotokens: nothing to uninstall (codex)");
         }
     }
 }
@@ -2839,6 +2939,8 @@ fn main() {
         }
         Commands::HookPostGemini => hook::handle_post_gemini(),
         Commands::HookPostQwen => hook::handle_post_qwen(),
+        Commands::HookCodex => hook::handle_codex(),
+        Commands::HookPostCodex => hook::handle_post_codex(),
         Commands::Filter {
             args,
             debug,
