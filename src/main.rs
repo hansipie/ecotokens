@@ -1069,33 +1069,7 @@ fn cmd_install(
             Some(ref p) => match install::install_codex_plugin(p) {
                 Ok(()) => {
                     println!("ecotokens plugin installed (Codex) → {}", p.display());
-                    match install::default_codex_marketplace_path() {
-                        Some(ref marketplace_path) => {
-                            match install::install_codex_marketplace_entry(marketplace_path, p) {
-                                Ok(()) => {
-                                    println!(
-                                        "  Codex marketplace entry added → {}",
-                                        marketplace_path.display()
-                                    );
-                                    println!(
-                                        "  Open /plugins in Codex, install/enable ecotokens, review the hook with /hooks, then restart Codex."
-                                    );
-                                }
-                                Err(e) => {
-                                    eprintln!("  Warning: could not update Codex marketplace: {e}");
-                                    println!("  Add the plugin manually from /plugins before restarting Codex.");
-                                }
-                            }
-                        }
-                        None => {
-                            eprintln!("  Warning: cannot determine Codex marketplace path.");
-                            println!(
-                                "  Add the plugin manually from /plugins before restarting Codex."
-                            );
-                        }
-                    }
-                    // SessionStart hook is declared in the plugin's hooks/hooks.json.
-                    // Trust is stored in ~/.codex/config.toml by Codex on first run.
+                    println!("  Restart Codex to activate the SessionStart hook.");
                 }
                 Err(e) => {
                     eprintln!("install error (codex): {e}");

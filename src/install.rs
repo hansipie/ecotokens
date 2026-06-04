@@ -1,4 +1,4 @@
-use std::path::{Path, PathBuf};
+use std::path::Path;
 
 pub type InstallResult = std::io::Result<()>;
 
@@ -35,16 +35,6 @@ fn read_settings(path: &Path) -> serde_json::Value {
 }
 
 fn write_settings(path: &Path, v: &serde_json::Value) -> InstallResult {
-    if let Some(parent) = path.parent() {
-        std::fs::create_dir_all(parent)?;
-    }
-    std::fs::write(
-        path,
-        serde_json::to_string_pretty(v).expect("serde_json: impossible (non-string key)"),
-    )
-}
-
-fn write_json(path: &Path, v: &serde_json::Value) -> InstallResult {
     if let Some(parent) = path.parent() {
         std::fs::create_dir_all(parent)?;
     }
@@ -688,68 +678,6 @@ pub fn default_codex_plugin_dir() -> Option<std::path::PathBuf> {
         .map(std::path::PathBuf::from)
         .or_else(|| dirs::home_dir().map(|d| d.join(".codex")))
         .map(|d| d.join("plugins").join("ecotokens"))
-}
-
-/// Get the default personal Codex marketplace path: ~/.agents/plugins/marketplace.json
-pub fn default_codex_marketplace_path() -> Option<PathBuf> {
-    dirs::home_dir().map(|d| d.join(".agents").join("plugins").join("marketplace.json"))
-}
-
-fn marketplace_source_path(plugin_dir: &Path) -> String {
-    if let Some(home) = dirs::home_dir() {
-        if let Ok(rel) = plugin_dir.strip_prefix(&home) {
-            return format!("./{}", rel.to_string_lossy());
-        }
-    }
-    plugin_dir.to_string_lossy().into_owned()
-}
-
-/// Add or update the ecotokens entry in a Codex personal marketplace.
-pub fn install_codex_marketplace_entry(
-    marketplace_path: &Path,
-    plugin_dir: &Path,
-) -> InstallResult {
-    let mut marketplace = read_settings(marketplace_path);
-    if !marketplace.is_object() {
-        marketplace = serde_json::json!({});
-    }
-
-    if marketplace.get("name").is_none() {
-        marketplace["name"] = serde_json::json!("personal");
-    }
-    if marketplace.get("interface").is_none() {
-        marketplace["interface"] = serde_json::json!({ "displayName": "Personal" });
-    } else if marketplace["interface"].get("displayName").is_none() {
-        marketplace["interface"]["displayName"] = serde_json::json!("Personal");
-    }
-
-    let entry = serde_json::json!({
-        "name": "ecotokens",
-        "source": {
-            "source": "local",
-            "path": marketplace_source_path(plugin_dir)
-        },
-        "policy": {
-            "installation": "AVAILABLE",
-            "authentication": "ON_INSTALL"
-        },
-        "category": "Developer Tools"
-    });
-
-    let mut plugins = marketplace["plugins"]
-        .as_array()
-        .cloned()
-        .unwrap_or_default();
-    if let Some(existing) = plugins
-        .iter_mut()
-        .find(|p| p["name"].as_str() == Some("ecotokens"))
-    {
-        *existing = entry;
-    } else {
-        plugins.push(entry);
-    }
-    marketplace["plugins"] = serde_json::Value::Array(plugins);
-    write_json(marketplace_path, &marketplace)
 }
 
 /// Install the ecotokens Codex plugin (idempotent).

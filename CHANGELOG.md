@@ -9,7 +9,7 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ### Added
 
-- **Support Codex** : nouveau `ecotokens install --target codex` qui installe le plugin et gère la marketplace personnelle (premières étapes vers le support de codex)
+- **Support Codex** : nouveau `ecotokens install --target codex` qui génère un plugin dans `~/.codex/plugins/ecotokens/` — première étape vers l'intégration Codex (hook auto-watch non encore implémenté)
 - **`filter-output` subcommand** : nouvelle sous-commande qui lit la sortie capturée d'un outil depuis stdin, applique le filtrage et enregistre les métriques — permet le traitement post-hoc des sorties d'agents comme Hermes
 - **Support Hermes Agent** : plugin Python généré dans `~/.hermes/plugins/ecotokens/` via `ecotokens install --target hermes` — intercepte les hooks `transform_terminal_output` et `transform_tool_result` et appelle `filter-output` en sous-processus
 - **`--enable-plugin`** : flag d'install Hermes qui ajoute `ecotokens` à `plugins.enabled` dans `~/.hermes/config.yaml` directement (sans dépendance à la CLI `hermes`) — crée le fichier si absent, préserve les clés existantes, idempotent

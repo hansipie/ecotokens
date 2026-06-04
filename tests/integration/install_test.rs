@@ -883,48 +883,6 @@ fn codex_install_writes_plugin_manifest() {
 }
 
 #[test]
-fn codex_install_writes_personal_marketplace_entry() {
-    use ecotokens::install::install_codex_marketplace_entry;
-
-    let dir = TempDir::new().unwrap();
-    let plugin_dir = dir.path().join(".codex").join("plugins").join("ecotokens");
-    let marketplace_path = dir
-        .path()
-        .join(".agents")
-        .join("plugins")
-        .join("marketplace.json");
-
-    install_codex_plugin(&plugin_dir).unwrap();
-    install_codex_marketplace_entry(&marketplace_path, &plugin_dir).unwrap();
-    install_codex_marketplace_entry(&marketplace_path, &plugin_dir).unwrap();
-
-    let marketplace: serde_json::Value =
-        serde_json::from_str(&std::fs::read_to_string(marketplace_path).unwrap()).unwrap();
-    assert_eq!(marketplace["name"], "personal");
-    assert_eq!(marketplace["interface"]["displayName"], "Personal");
-    let plugins = marketplace["plugins"].as_array().unwrap();
-    assert_eq!(
-        plugins
-            .iter()
-            .filter(|p| p["name"].as_str() == Some("ecotokens"))
-            .count(),
-        1,
-        "marketplace entry should be idempotent"
-    );
-    let ecotokens = plugins
-        .iter()
-        .find(|p| p["name"].as_str() == Some("ecotokens"))
-        .unwrap();
-    assert_eq!(ecotokens["source"]["source"], "local");
-    assert_eq!(
-        ecotokens["source"]["path"],
-        plugin_dir.to_string_lossy().as_ref()
-    );
-    assert_eq!(ecotokens["policy"]["installation"], "AVAILABLE");
-    assert_eq!(ecotokens["policy"]["authentication"], "ON_INSTALL");
-}
-
-#[test]
 fn codex_install_is_idempotent() {
     let dir = TempDir::new().unwrap();
     let plugin_dir = dir.path().join(".codex").join("plugins").join("ecotokens");
@@ -1131,15 +1089,6 @@ fn codex_install_end_to_end_with_codex_home() {
             .exists(),
         "plugin.json doit être créé"
     );
-    assert!(
-        dir.path()
-            .join(".agents")
-            .join("plugins")
-            .join("marketplace.json")
-            .exists(),
-        "marketplace.json doit être créé"
-    );
-    // Le hook SessionStart n'est pas géré pour l'instant : aucun fichier hooks.
     assert!(!plugin_dir.join("hooks").join("hooks.json").exists());
     let manifest: serde_json::Value = serde_json::from_str(
         &std::fs::read_to_string(plugin_dir.join(".codex-plugin").join("plugin.json")).unwrap(),
