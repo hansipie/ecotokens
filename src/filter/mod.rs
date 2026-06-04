@@ -57,6 +57,21 @@ fn extract_shell_c_inner(cmd: &str) -> Option<&str> {
 pub fn detect_family(command: &str) -> CommandFamily {
     let cmd = command.trim();
 
+    // Hermes Agent tool result labels: "hermes-tool:<tool_name>"
+    if let Some(tool) = cmd.strip_prefix("hermes-tool:") {
+        return match tool {
+            "read_file" | "list_directory" | "create_file" | "edit_file" | "delete_file" => {
+                CommandFamily::Fs
+            }
+            "search_files" | "find_files" | "search_in_file" => CommandFamily::Grep,
+            "browser_snapshot" | "browser_navigate" | "browser_click" | "browser_type"
+            | "web_fetch" | "web_search" => CommandFamily::Network,
+            "run_python_code" | "execute_python" => CommandFamily::Python,
+            "run_shell_command" | "execute_bash" => CommandFamily::Generic,
+            _ => CommandFamily::Generic,
+        };
+    }
+
     // Normalize the first token to its basename so that absolute paths
     // (/usr/bin/git), venv paths (.venv/bin/pytest) and version managers
     // (~/.cargo/bin/cargo) are all matched by their bare command name.
@@ -148,6 +163,40 @@ pub fn apply_filter(command: &str, output: &str) -> String {
     }
 }
 
+fn is_temporary_path(path: &std::path::Path) -> bool {
+    let temp_dir = std::env::temp_dir();
+    if path.starts_with(&temp_dir) {
+        return true;
+    }
+
+    match (path.canonicalize(), temp_dir.canonicalize()) {
+        (Ok(path), Ok(temp_dir)) => path.starts_with(temp_dir),
+        _ => false,
+    }
+}
+
+pub fn project_root_for_cwd(dir: &std::path::Path) -> Option<String> {
+    let git_root = std::process::Command::new("git")
+        .args(["rev-parse", "--show-toplevel"])
+        .current_dir(dir)
+        .output()
+        .ok()
+        .and_then(|o| {
+            let s = String::from_utf8_lossy(&o.stdout).trim().to_string();
+            if s.is_empty() {
+                None
+            } else {
+                Some(s)
+            }
+        });
+
+    match git_root {
+        Some(root) => Some(root),
+        None if is_temporary_path(dir) => None,
+        None => Some(dir.to_string_lossy().to_string()),
+    }
+}
+
 /// Run the full filter pipeline with an optional working directory for git_root detection.
 /// Returns `(filtered_output, tokens_before, tokens_after)`.
 #[cfg_attr(test, allow(unused_variables))]
@@ -156,6 +205,7 @@ pub fn run_filter_pipeline_with_cwd(
     raw: &str,
     duration_ms: u32,
     cwd: Option<&std::path::Path>,
+    hook_type: crate::metrics::store::HookType,
 ) -> (String, u32, u32) {
     let settings = crate::config::Settings::load();
     let (masked, redacted) = crate::masking::mask(raw);
@@ -209,22 +259,7 @@ pub fn run_filter_pipeline_with_cwd(
         let effective_cwd = cwd
             .map(|p| p.to_path_buf())
             .or_else(|| std::env::current_dir().ok());
-        let git_root = effective_cwd.as_deref().map(|dir| {
-            std::process::Command::new("git")
-                .args(["rev-parse", "--show-toplevel"])
-                .current_dir(dir)
-                .output()
-                .ok()
-                .and_then(|o| {
-                    let s = String::from_utf8_lossy(&o.stdout).trim().to_string();
-                    if s.is_empty() {
-                        None
-                    } else {
-                        Some(s)
-                    }
-                })
-                .unwrap_or_else(|| dir.to_string_lossy().to_string())
-        });
+        let git_root = effective_cwd.as_deref().and_then(project_root_for_cwd);
         let rec = crate::metrics::store::Interception::new(
             command.to_string(),
             family,
@@ -236,7 +271,8 @@ pub fn run_filter_pipeline_with_cwd(
             duration_ms,
             Some(masked),
             Some(filtered.clone()),
-        );
+        )
+        .with_hook_type(hook_type);
         let _ = crate::metrics::store::append_to(&path, &rec);
     }
 

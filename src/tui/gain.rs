@@ -797,14 +797,14 @@ fn is_binary(s: &str) -> bool {
     s.contains('\x00')
 }
 
-/// Truncate a command string to `max` chars, showing `…` + tail when longer.
+/// Truncate a command string to `max` chars, showing head + `…` when longer.
 fn truncate_cmd(s: &str, max: usize) -> String {
     let chars: Vec<char> = s.chars().collect();
     if chars.len() <= max {
         chars.into_iter().collect()
     } else {
-        let tail: String = chars[chars.len() - (max - 1)..].iter().collect();
-        format!("\u{2026}{tail}")
+        let head: String = chars[..max - 1].iter().collect();
+        format!("{}\u{2026}", head)
     }
 }
 
@@ -892,6 +892,10 @@ fn render_details_panel(
             crate::metrics::store::FilterMode::Summarized => "summarized",
         }),
         Span::raw(format!("  Duration: {} ms", item.duration_ms)),
+    ]));
+    lines.push(Line::from(vec![
+        Span::styled("Agent:", Style::default().fg(Color::Cyan)),
+        Span::raw(item.hook_type.agent_label()),
     ]));
 
     let max_scroll = lines.len().saturating_sub(visible);
