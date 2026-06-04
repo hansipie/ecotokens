@@ -33,7 +33,7 @@ mod tui;
 #[command(
     name = "ecotokens",
     version,
-    about = "Token-saving companion for Claude Code and Gemini CLI"
+    about = "Token-saving companion for AI coding agents"
 )]
 struct Cli {
     #[command(subcommand)]
@@ -106,9 +106,9 @@ enum Commands {
         #[arg(long)]
         history: bool,
     },
-    /// Install ecotokens hook in ~/.claude/settings.json, ~/.gemini/settings.json, ~/.qwen/settings.json, ~/.pi/agent/extensions/, or ~/.hermes/plugins/
+    /// Install ecotokens hook in ~/.claude/settings.json, ~/.gemini/settings.json, ~/.qwen/settings.json, ~/.pi/agent/extensions/, ~/.hermes/plugins/, or ~/.codex/plugins/
     Install {
-        /// Target AI tool to install for: claude, gemini, qwen, pi, hermes, or all (default: claude)
+        /// Target AI tool to install for: claude, gemini, qwen, pi, hermes, codex, or all (default: claude)
         #[arg(long, default_value = "claude")]
         target: String,
         /// Enable AI-powered output summarization via Ollama
@@ -121,9 +121,9 @@ enum Commands {
         #[arg(long)]
         enable_plugin: bool,
     },
-    /// Remove ecotokens hook from ~/.claude/settings.json, ~/.gemini/settings.json, ~/.qwen/settings.json, ~/.pi/agent/extensions/, or ~/.hermes/plugins/
+    /// Remove ecotokens hook from ~/.claude/settings.json, ~/.gemini/settings.json, ~/.qwen/settings.json, ~/.pi/agent/extensions/, ~/.hermes/plugins/, or ~/.codex/plugins/
     Uninstall {
-        /// Target to uninstall from: claude, gemini, qwen, pi, hermes, or all (default: claude)
+        /// Target to uninstall from: claude, gemini, qwen, pi, hermes, codex, or all (default: claude)
         #[arg(long, default_value = "claude")]
         target: String,
     },
@@ -208,6 +208,9 @@ enum Commands {
         /// Run in background (no TUI, log events to stdout)
         #[arg(long)]
         background: bool,
+        /// Internal worker mode used by auto-watch supervisors.
+        #[arg(long, hide = true)]
+        background_worker: bool,
         /// Show status of background watch process
         #[arg(long)]
         status: bool,
@@ -229,7 +232,7 @@ enum Commands {
         #[arg(long)]
         json: bool,
     },
-    /// Called by SessionStart hook (Claude Code, Qwen Code) or Hermes on_session_start — starts watch if auto-watch is enabled
+    /// Called by SessionStart hook (Claude Code, Qwen Code, Codex) or Hermes on_session_start — starts watch if auto-watch is enabled
     SessionStart,
     /// Called by SessionEnd hook (Claude Code, Qwen Code) or Hermes on_session_end — stops watch if auto-watch is enabled
     SessionEnd,
@@ -818,16 +821,24 @@ fn cmd_install(
     let gemini_path = install::default_gemini_settings_path();
     let qwen_path = install::default_qwen_settings_path();
     let hermes_plugin_dir = install::default_hermes_plugin_dir();
+    let codex_plugin_dir = install::default_codex_plugin_dir();
 
     let install_claude = matches!(target.as_str(), "claude" | "all");
     let install_gemini = matches!(target.as_str(), "gemini" | "all");
     let install_qwen = matches!(target.as_str(), "qwen" | "all");
     let install_pi = matches!(target.as_str(), "pi" | "all");
     let install_hermes = matches!(target.as_str(), "hermes" | "all");
+    let install_codex = matches!(target.as_str(), "codex" | "all");
 
-    if !install_claude && !install_gemini && !install_qwen && !install_pi && !install_hermes {
+    if !install_claude
+        && !install_gemini
+        && !install_qwen
+        && !install_pi
+        && !install_hermes
+        && !install_codex
+    {
         eprintln!(
-            "unknown target '{}'. Valid values: claude, gemini, qwen, pi, hermes, all",
+            "unknown target '{}'. Valid values: claude, gemini, qwen, pi, hermes, codex, all",
             target
         );
         std::process::exit(1);
@@ -1053,6 +1064,51 @@ fn cmd_install(
         }
     }
 
+    if install_codex {
+        match codex_plugin_dir {
+            Some(ref p) => match install::install_codex_plugin(p) {
+                Ok(()) => {
+                    println!("ecotokens plugin installed (Codex) → {}", p.display());
+                    match install::default_codex_marketplace_path() {
+                        Some(ref marketplace_path) => {
+                            match install::install_codex_marketplace_entry(marketplace_path, p) {
+                                Ok(()) => {
+                                    println!(
+                                        "  Codex marketplace entry added → {}",
+                                        marketplace_path.display()
+                                    );
+                                    println!(
+                                        "  Open /plugins in Codex, install/enable ecotokens, review the hook with /hooks, then restart Codex."
+                                    );
+                                }
+                                Err(e) => {
+                                    eprintln!("  Warning: could not update Codex marketplace: {e}");
+                                    println!("  Add the plugin manually from /plugins before restarting Codex.");
+                                }
+                            }
+                        }
+                        None => {
+                            eprintln!("  Warning: cannot determine Codex marketplace path.");
+                            println!(
+                                "  Add the plugin manually from /plugins before restarting Codex."
+                            );
+                        }
+                    }
+                    // SessionStart hook is declared in the plugin's hooks/hooks.json.
+                    // Trust is stored in ~/.codex/config.toml by Codex on first run.
+                }
+                Err(e) => {
+                    eprintln!("install error (codex): {e}");
+                    std::process::exit(1);
+                }
+            },
+            None => {
+                eprintln!("cannot determine Codex plugin path on this system");
+                std::process::exit(1);
+            }
+        }
+    }
+
     let enable_ai = ai_summary || ai_summary_model.is_some();
     if enable_ai {
         let mut settings = config::Settings::load();
@@ -1074,21 +1130,24 @@ fn cmd_uninstall(target: String) {
     let gemini_path = install::default_gemini_settings_path();
     let qwen_path = install::default_qwen_settings_path();
     let hermes_plugin_dir = install::default_hermes_plugin_dir();
+    let codex_plugin_dir = install::default_codex_plugin_dir();
 
     let uninstall_claude = matches!(target.as_str(), "claude" | "all");
     let uninstall_gemini = matches!(target.as_str(), "gemini" | "all");
     let uninstall_qwen = matches!(target.as_str(), "qwen" | "all");
     let uninstall_pi = matches!(target.as_str(), "pi" | "all");
     let uninstall_hermes = matches!(target.as_str(), "hermes" | "all");
+    let uninstall_codex = matches!(target.as_str(), "codex" | "all");
 
     if !uninstall_claude
         && !uninstall_gemini
         && !uninstall_qwen
         && !uninstall_pi
         && !uninstall_hermes
+        && !uninstall_codex
     {
         eprintln!(
-            "unknown target '{}'. Valid values: claude, gemini, qwen, pi, hermes, all",
+            "unknown target '{}'. Valid values: claude, gemini, qwen, pi, hermes, codex, all",
             target
         );
         std::process::exit(1);
@@ -1273,6 +1332,31 @@ fn cmd_uninstall(target: String) {
             }
             None => {
                 eprintln!("cannot determine Hermes plugin path on this system");
+                std::process::exit(1);
+            }
+        }
+    }
+
+    if uninstall_codex {
+        match codex_plugin_dir {
+            Some(ref p) => {
+                let had = install::is_codex_plugin_installed(p);
+                match install::uninstall_codex_plugin(p) {
+                    Ok(()) => {
+                        if had {
+                            println!("ecotokens plugin removed (Codex) ← {}", p.display());
+                        } else {
+                            println!("ecotokens: nothing to uninstall (codex)");
+                        }
+                    }
+                    Err(e) => {
+                        eprintln!("uninstall error (codex): {e}");
+                        std::process::exit(1);
+                    }
+                }
+            }
+            None => {
+                eprintln!("cannot determine Codex plugin path on this system");
                 std::process::exit(1);
             }
         }
@@ -1894,6 +1978,7 @@ fn cmd_watch(
     path: Option<PathBuf>,
     index_dir: Option<PathBuf>,
     background: bool,
+    background_worker: bool,
     status: bool,
     stop: bool,
     json: bool,
@@ -1901,7 +1986,7 @@ fn cmd_watch(
     // Purge stale entries when not in --background mode.
     // --background is spawned by session_start right after incrementing the session count
     // (watcher_pid still null at that point); running cleanup here would drop that valid entry.
-    if !background {
+    if !background && !background_worker {
         let mut store = config::SessionStore::load();
         store.cleanup_dead();
         let _ = store.save();
@@ -1935,7 +2020,9 @@ fn cmd_watch(
 
     // If --status is requested, show status and exit.
     if status {
-        let store = config::SessionStore::load();
+        let mut store = config::SessionStore::load();
+        store.cleanup_dead();
+        let _ = store.save();
         let entries: Vec<_> = if let Some(ref p) = path {
             let key = p.display().to_string();
             store
@@ -2029,7 +2116,21 @@ fn cmd_watch(
     let watch_path = path.unwrap_or(cwd);
     let idx_dir = index_dir.unwrap_or_else(default_index_dir);
     let watch_path_str = watch_path.display().to_string();
-    let is_interactive = !background && std::io::IsTerminal::is_terminal(&std::io::stdout());
+    if background_worker {
+        let log_path = watch_log_path(&watch_path);
+        let log_path_str = log_path.to_string_lossy().to_string();
+        let mut store = config::SessionStore::load();
+        store.register_watcher(
+            &watch_path.to_string_lossy(),
+            std::process::id(),
+            Some(log_path_str),
+        );
+        let _ = store.save();
+    }
+
+    let is_background_mode = background || background_worker;
+    let is_interactive =
+        !is_background_mode && std::io::IsTerminal::is_terminal(&std::io::stdout());
 
     // Count only truly indexable files for accurate progress.
     let total_files = search::index::count_indexable_files(&watch_path);
@@ -2486,6 +2587,43 @@ fn watch_log_path(watch_path: &std::path::Path) -> PathBuf {
         .join(format!("watch{sanitized}_{fingerprint}.log"))
 }
 
+fn systemd_unit_name_for_watch_path(watch_path: &str) -> String {
+    format!("ecotokens-watch-{:016x}", stable_hash(watch_path))
+}
+
+fn start_auto_watch_process(bin: &std::path::Path, watch_path: &str) -> std::io::Result<()> {
+    let unit = systemd_unit_name_for_watch_path(watch_path);
+    let systemd_status = std::process::Command::new("systemd-run")
+        .args([
+            "--user",
+            "--collect",
+            "--no-block",
+            "--unit",
+            &unit,
+            "--working-directory",
+            watch_path,
+        ])
+        .arg(bin)
+        .args(["watch", "--background-worker", "--path", watch_path])
+        .status();
+
+    match systemd_status {
+        Ok(status) if status.success() => Ok(()),
+        _ => std::process::Command::new(bin)
+            .args(["watch", "--background", "--path", watch_path])
+            .status()
+            .and_then(|status| {
+                if status.success() {
+                    Ok(())
+                } else {
+                    Err(std::io::Error::other(format!(
+                        "watch start exited with status {status}"
+                    )))
+                }
+            }),
+    }
+}
+
 fn cmd_session_start() {
     let settings = config::Settings::load();
 
@@ -2507,9 +2645,16 @@ fn cmd_session_start() {
             }
         } else if decision.needs_watcher {
             let bin = std::env::current_exe().unwrap_or_else(|_| PathBuf::from("ecotokens"));
-            let _ = std::process::Command::new(bin)
-                .args(["watch", "--background", "--path", &decision.watch_path])
-                .spawn();
+            let result = start_auto_watch_process(&bin, &decision.watch_path);
+            if settings.debug {
+                match result {
+                    Ok(()) => eprintln!(
+                        "ecotokens auto-watch: started watch on {}.",
+                        decision.watch_path
+                    ),
+                    Err(e) => eprintln!("ecotokens auto-watch: failed to start watch: {e}"),
+                }
+            }
         }
     }
 
@@ -2568,7 +2713,10 @@ fn cmd_auto_watch_enable() {
         }
     }
 
-    println!("✓ auto-watch enabled — ecotokens watch will start automatically with Claude Code, Qwen Code, Pi and Hermes");
+    // Codex: SessionStart hook lives in the plugin's hooks/hooks.json.
+    // install_codex_plugin keeps it up to date; no global hooks.json needed.
+
+    println!("✓ auto-watch enabled — ecotokens watch will start automatically with Claude Code, Qwen Code, Pi, Hermes and Codex");
 }
 
 fn cmd_auto_watch_disable() {
@@ -2801,10 +2949,19 @@ fn main() {
             path,
             index_dir,
             background,
+            background_worker,
             status,
             stop,
             json,
-        } => cmd_watch(path, index_dir, background, status, stop, json),
+        } => cmd_watch(
+            path,
+            index_dir,
+            background,
+            background_worker,
+            status,
+            stop,
+            json,
+        ),
         Commands::Duplicates {
             threshold,
             min_lines,

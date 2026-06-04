@@ -9,6 +9,7 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ### Added
 
+- **Support Codex** : nouveau `ecotokens install --target codex` qui installe le plugin et gère la marketplace personnelle (premières étapes vers le support de codex)
 - **`filter-output` subcommand** : nouvelle sous-commande qui lit la sortie capturée d'un outil depuis stdin, applique le filtrage et enregistre les métriques — permet le traitement post-hoc des sorties d'agents comme Hermes
 - **Support Hermes Agent** : plugin Python généré dans `~/.hermes/plugins/ecotokens/` via `ecotokens install --target hermes` — intercepte les hooks `transform_terminal_output` et `transform_tool_result` et appelle `filter-output` en sous-processus
 - **`--enable-plugin`** : flag d'install Hermes qui ajoute `ecotokens` à `plugins.enabled` dans `~/.hermes/config.yaml` directement (sans dépendance à la CLI `hermes`) — crée le fichier si absent, préserve les clés existantes, idempotent
@@ -25,6 +26,7 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ### Fixed
 
+- **`ecotokens gain`** : les commandes lancées depuis un chemin temporaire hors dépôt git sont désormais regroupées sous `[undefined]` au lieu d'apparaître comme projets `/tmp/...` ; les dépôts git créés dans un répertoire temporaire restent attribués à leur racine git
 - **`HnswIndex::search`** : remplacement de `parallel_insert` (non-déterministe, threads parallèles) par des insertions séquentielles — corrige le test `hnsw_build_search_cosine` qui échouait de manière intermittente sur `x86_64-unknown-linux-musl`
 
 ## [0.20.1] - 2026-05-11
@@ -382,4 +384,3 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 - Vector search with embeddings (Ollama / LMStudio)
 - `ecotokens install` / `uninstall` / `config` commands
 - MIT license
-

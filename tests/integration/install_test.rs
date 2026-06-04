@@ -3,12 +3,13 @@ mod helpers;
 use helpers::ecotokens_bin;
 
 use ecotokens::install::{
-    are_session_hooks_installed, enable_hermes_plugin_in_config, install_gemini_hook,
-    install_hermes_plugin, install_hook, install_mcp_server, install_post_hook, install_qwen_hook,
-    install_session_hooks, is_gemini_hook_installed, is_gemini_mcp_registered,
-    is_hermes_plugin_enabled_in_config, is_hermes_plugin_installed, is_mcp_registered,
-    is_post_hook_installed, is_qwen_hook_installed, is_qwen_mcp_registered, uninstall_gemini,
-    uninstall_hermes_plugin, uninstall_hook, uninstall_qwen,
+    are_session_hooks_installed, enable_hermes_plugin_in_config, install_codex_plugin,
+    install_gemini_hook, install_hermes_plugin, install_hook, install_mcp_server,
+    install_post_hook, install_qwen_hook, install_session_hooks, is_codex_plugin_installed,
+    is_gemini_hook_installed, is_gemini_mcp_registered, is_hermes_plugin_enabled_in_config,
+    is_hermes_plugin_installed, is_mcp_registered, is_post_hook_installed, is_qwen_hook_installed,
+    is_qwen_mcp_registered, uninstall_codex_plugin, uninstall_gemini, uninstall_hermes_plugin,
+    uninstall_hook, uninstall_qwen,
 };
 use std::process::Command;
 use tempfile::TempDir;
@@ -854,6 +855,130 @@ fn hermes_uninstall_when_plugin_absent_is_ok() {
 }
 
 #[test]
+fn codex_install_writes_plugin_manifest() {
+    let dir = TempDir::new().unwrap();
+    let plugin_dir = dir.path().join(".codex").join("plugins").join("ecotokens");
+
+    install_codex_plugin(&plugin_dir).expect("install_codex_plugin should succeed");
+
+    assert!(is_codex_plugin_installed(&plugin_dir));
+    let manifest: serde_json::Value = serde_json::from_str(
+        &std::fs::read_to_string(plugin_dir.join(".codex-plugin").join("plugin.json")).unwrap(),
+    )
+    .unwrap();
+    assert_eq!(manifest["name"].as_str().unwrap(), "ecotokens");
+    assert_eq!(
+        manifest["interface"]["displayName"].as_str().unwrap(),
+        "ecotokens"
+    );
+    assert!(manifest.get("hooks").is_none());
+    assert!(
+        !plugin_dir.join("hooks.json").exists(),
+        "hooks.json ne doit pas être à la racine"
+    );
+    assert!(
+        !plugin_dir.join("hooks").join("hooks.json").exists(),
+        "pas de hooks/hooks.json"
+    );
+}
+
+#[test]
+fn codex_install_writes_personal_marketplace_entry() {
+    use ecotokens::install::install_codex_marketplace_entry;
+
+    let dir = TempDir::new().unwrap();
+    let plugin_dir = dir.path().join(".codex").join("plugins").join("ecotokens");
+    let marketplace_path = dir
+        .path()
+        .join(".agents")
+        .join("plugins")
+        .join("marketplace.json");
+
+    install_codex_plugin(&plugin_dir).unwrap();
+    install_codex_marketplace_entry(&marketplace_path, &plugin_dir).unwrap();
+    install_codex_marketplace_entry(&marketplace_path, &plugin_dir).unwrap();
+
+    let marketplace: serde_json::Value =
+        serde_json::from_str(&std::fs::read_to_string(marketplace_path).unwrap()).unwrap();
+    assert_eq!(marketplace["name"], "personal");
+    assert_eq!(marketplace["interface"]["displayName"], "Personal");
+    let plugins = marketplace["plugins"].as_array().unwrap();
+    assert_eq!(
+        plugins
+            .iter()
+            .filter(|p| p["name"].as_str() == Some("ecotokens"))
+            .count(),
+        1,
+        "marketplace entry should be idempotent"
+    );
+    let ecotokens = plugins
+        .iter()
+        .find(|p| p["name"].as_str() == Some("ecotokens"))
+        .unwrap();
+    assert_eq!(ecotokens["source"]["source"], "local");
+    assert_eq!(
+        ecotokens["source"]["path"],
+        plugin_dir.to_string_lossy().as_ref()
+    );
+    assert_eq!(ecotokens["policy"]["installation"], "AVAILABLE");
+    assert_eq!(ecotokens["policy"]["authentication"], "ON_INSTALL");
+}
+
+#[test]
+fn codex_install_is_idempotent() {
+    let dir = TempDir::new().unwrap();
+    let plugin_dir = dir.path().join(".codex").join("plugins").join("ecotokens");
+
+    install_codex_plugin(&plugin_dir).unwrap();
+    let first =
+        std::fs::read_to_string(plugin_dir.join(".codex-plugin").join("plugin.json")).unwrap();
+    install_codex_plugin(&plugin_dir).unwrap();
+    let second =
+        std::fs::read_to_string(plugin_dir.join(".codex-plugin").join("plugin.json")).unwrap();
+
+    assert_eq!(first, second, "Codex plugin install should be stable");
+}
+
+#[test]
+fn codex_uninstall_removes_plugin_directory() {
+    let dir = TempDir::new().unwrap();
+    let plugin_dir = dir.path().join(".codex").join("plugins").join("ecotokens");
+
+    install_codex_plugin(&plugin_dir).unwrap();
+    assert!(is_codex_plugin_installed(&plugin_dir));
+
+    uninstall_codex_plugin(&plugin_dir).expect("uninstall_codex_plugin should succeed");
+
+    assert!(!plugin_dir.exists(), "Codex plugin dir should be removed");
+}
+
+#[test]
+fn codex_uninstall_when_plugin_absent_is_ok() {
+    let dir = TempDir::new().unwrap();
+    let plugin_dir = dir.path().join(".codex").join("plugins").join("ecotokens");
+    assert!(uninstall_codex_plugin(&plugin_dir).is_ok());
+}
+
+#[test]
+fn codex_plugin_install_no_hooks_file() {
+    // Le hook SessionStart Codex n'est pas géré via plugin (non supporté pour l'instant).
+    // install_codex_plugin ne doit créer aucun fichier hooks dans le répertoire plugin.
+    let dir = TempDir::new().unwrap();
+    let plugin_dir = dir.path().join(".codex").join("plugins").join("ecotokens");
+
+    install_codex_plugin(&plugin_dir).unwrap();
+
+    assert!(
+        !plugin_dir.join("hooks.json").exists(),
+        "pas de hooks.json à la racine"
+    );
+    assert!(
+        !plugin_dir.join("hooks").join("hooks.json").exists(),
+        "pas de hooks/hooks.json"
+    );
+}
+
+#[test]
 fn hermes_default_plugin_dir_respects_hermes_home() {
     use ecotokens::install::default_hermes_plugin_dir;
 
@@ -978,6 +1103,49 @@ fn hermes_enable_plugin_adds_enabled_when_plugins_key_exists_without_it() {
         "ecotokens doit être ajouté"
     );
     assert!(content.contains("- legacy"), "disabled: préservé");
+}
+
+#[test]
+fn codex_install_end_to_end_with_codex_home() {
+    let dir = TempDir::new().unwrap();
+    let codex_home = dir.path().to_str().unwrap();
+
+    let out = Command::new(ecotokens_bin())
+        .args(["install", "--target", "codex"])
+        .env("CODEX_HOME", codex_home)
+        .env("HOME", dir.path())
+        .output()
+        .expect("failed to run ecotokens install --target codex");
+
+    assert!(
+        out.status.success(),
+        "install --target codex doit réussir, stderr: {}",
+        String::from_utf8_lossy(&out.stderr)
+    );
+
+    let plugin_dir = dir.path().join("plugins").join("ecotokens");
+    assert!(
+        plugin_dir
+            .join(".codex-plugin")
+            .join("plugin.json")
+            .exists(),
+        "plugin.json doit être créé"
+    );
+    assert!(
+        dir.path()
+            .join(".agents")
+            .join("plugins")
+            .join("marketplace.json")
+            .exists(),
+        "marketplace.json doit être créé"
+    );
+    // Le hook SessionStart n'est pas géré pour l'instant : aucun fichier hooks.
+    assert!(!plugin_dir.join("hooks").join("hooks.json").exists());
+    let manifest: serde_json::Value = serde_json::from_str(
+        &std::fs::read_to_string(plugin_dir.join(".codex-plugin").join("plugin.json")).unwrap(),
+    )
+    .unwrap();
+    assert!(manifest.get("hooks").is_none());
 }
 
 // ── Phase 5 : test d'intégration end-to-end install Hermes ──────────────────
