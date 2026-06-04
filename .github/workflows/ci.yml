@@ -65,8 +65,7 @@ jobs:
       - uses: Swatinem/rust-cache@v2.9.0
         with:
           key: ${{ matrix.target }}
-      - name: Free disk space (musl only)
-        if: matrix.target == 'x86_64-unknown-linux-musl'
+      - name: Free disk space
         run: |
           sudo rm -rf /usr/share/dotnet /usr/local/lib/android /opt/ghc
           docker system prune -af || true
