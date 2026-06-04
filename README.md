@@ -36,15 +36,17 @@ Full methodology and per-family breakdown: [`docs/BENCHMARKS.md`](docs/BENCHMARK
 | Feature | Details |
 |---------|---------|
 | **PreToolUse hook** | Intercepts every shell (`Bash`) command before its output reaches the model - filters, compresses, and records savings |
-| **PostToolUse hook** *(Claude Code, Gemini CLI, Qwen Code)* | Intercepts native tool results (`Read`/`read_file`, `Grep`/`search_file_content`, `Glob`/`list_directory`) - outline-based compression for source files, grep trimming, glob denoising |
+| **PostToolUse hook** | Intercepts native tool results (`Read`/`read_file`, `Grep`/`search_file_content`, `Glob`/`list_directory`) - outline-based compression for source files, grep trimming, glob denoising |
 | **Gain dashboard** | Interactive TUI - token savings by command family or project, sparkline, diff view, history log |
 | **Multi-agent support** | Works with Claude Code, Gemini CLI, Qwen Code, Pi, Hermes, and Codex out of the box |
 | **Precision guarantees** | Errors, failures, and stack traces are never removed; secrets are redacted before filtering |
 | **Code intelligence** | BM25 + vector search (Candle, zero-config), symbol lookup, call graph tracing, near-duplicate detection |
-| **MCP server** *(Claude Code, Gemini CLI, Qwen Code)* | Exposes code-intelligence tools over stdio (`ecotokens mcp-server`) and auto-registers in agent settings on install |
+| **MCP server** | Exposes code-intelligence tools over stdio (`ecotokens mcp-server`) and auto-registers in agent settings on install |
 | **AI summarization** *(optional)* | Large outputs compressed by a local Ollama model instead of being truncated |
 | **Word abbreviations** *(optional)* | Replace common words with shorter forms (`function`→`fn`, `configuration`→`config`, …) in narrative text, and nudge the model to do the same via a SessionStart instruction |
 | **Zero config** | One `ecotokens install` command - works automatically from there |
+
+> Full compatibility matrix: [harness feature matrix](docs/harness-feature-matrix.md)
 
 ## How it works
 

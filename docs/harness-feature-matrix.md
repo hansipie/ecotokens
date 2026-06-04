@@ -1,37 +1,37 @@
-# Matrice features × harnesses
+# Feature × Harness Matrix
 
-> Dernière mise à jour : 2026-06-04
+> Last updated: 2026-06-04
 
-## Tableau principal
+## Main table
 
 | Feature | Claude Code | Gemini CLI | Qwen Code | Pi | Hermes | Codex |
 |---|:---:|:---:|:---:|:---:|:---:|:---:|
-| **Filtrage pre-tool (shell)** | ✓ | ✓ | ✓ | ✓ | ✓ | ✓ |
-| **Filtrage post-tool (outils natifs)** | ✓ | ✓ | ✓ | ✓ | ✓ | ✓ |
+| **Pre-tool filtering (shell)** | ✓ | ✓ | ✓ | ✓ | ✓ | ✓ |
+| **Post-tool filtering (native tools)** | ✓ | ✓ | ✓ | ✓ | ✓ | ✓ |
 | **MCP server** | ✓ | ✓ | ✓ | — | — | ✓ |
 | **Auto-watch** | ✓ | — | ✓ | ✓ | ✓ | — |
 | **Session hooks (start/end)** | ✓ | — | ✓ | — | ✓ | — |
-| **Masking de secrets** | ✓ | ✓ | ✓ | ✓ | ✓ | ✓ |
-| **Métriques & Gain dashboard** | ✓ | ✓ | ✓ | ✓ | ✓ | ✓ |
-| **IA summarization (optionnel)** | ✓ | ✓ | ✓ | ✓ | ✓ | ✓ |
-| **Word abbreviations (optionnel)** | ✓ | ✓ | ✓ | ✓ | ✓ | ✓ |
+| **Secret masking** | ✓ | ✓ | ✓ | ✓ | ✓ | ✓ |
+| **Metrics & Gain dashboard** | ✓ | ✓ | ✓ | ✓ | ✓ | ✓ |
+| **AI summarization (optional)** | ✓ | ✓ | ✓ | ✓ | ✓ | ✓ |
+| **Word abbreviations (optional)** | ✓ | ✓ | ✓ | ✓ | ✓ | ✓ |
 | **Code intelligence (CLI)** | ✓ | ✓ | ✓ | ✓ | ✓ | ✓ |
 
-## Détails par harness
+## Per-harness details
 
-| Harness | Mécanisme | Hook pre-tool | Hook post-tool | Outils natifs interceptés |
+| Harness | Mechanism | Pre-tool hook | Post-tool hook | Intercepted native tools |
 |---|---|---|---|---|
-| **Claude Code** | Hooks JSON `~/.claude/settings.json` | `PreToolUse` | `PostToolUse` | Read, Grep, Glob |
-| **Gemini CLI** | Hooks JSON `~/.gemini/settings.json` | `BeforeTool` | `AfterTool` | read_file, search_file_content, list_directory |
-| **Qwen Code** | Hooks JSON `~/.qwen/settings.json` | `PreToolUse` | `PostToolUse` | read_file, search_files, list_dir |
-| **Pi** | Extension TypeScript `~/.pi/agent/extensions/` | event `tool_call` | event `tool_result` | read, grep, find, ls |
-| **Hermes** | Plugin Python `~/.hermes/plugins/ecotokens/` | `transform_terminal_output` | `transform_tool_result` | tous les outils non-terminal |
-| **Codex** | Plugin JSON `~/.codex/plugins/ecotokens/` + MCP `~/.codex/config.toml` | — | — | — |
+| **Claude Code** | JSON hooks `~/.claude/settings.json` | `PreToolUse` | `PostToolUse` | Read, Grep, Glob |
+| **Gemini CLI** | JSON hooks `~/.gemini/settings.json` | `BeforeTool` | `AfterTool` | read_file, search_file_content, list_directory |
+| **Qwen Code** | JSON hooks `~/.qwen/settings.json` | `PreToolUse` | `PostToolUse` | read_file, search_files, list_dir |
+| **Pi** | TypeScript extension `~/.pi/agent/extensions/` | event `tool_call` | event `tool_result` | read, grep, find, ls |
+| **Hermes** | Python plugin `~/.hermes/plugins/ecotokens/` | `transform_terminal_output` | `transform_tool_result` | all non-terminal tools |
+| **Codex** | JSON plugin `~/.codex/plugins/ecotokens/` + MCP `~/.codex/config.toml` | — | — | — |
 
 ## Notes
 
-- **Codex** : plugin JSON + MCP server enregistré dans `~/.codex/config.toml` sous `[mcp_servers.ecotokens]`. Les session hooks ne sont pas encore supportés (`install_codex_plugin` ne crée aucun fichier de hooks).
-- **Gemini CLI** : pas de session hooks natifs, donc pas d'auto-watch automatique.
-- **Pi** : pas de session hooks distincts, l'auto-watch est géré directement dans l'extension TypeScript.
-- **MCP server** : enregistré automatiquement à l'installation pour Claude Code, Gemini CLI, Qwen Code et Codex. Accessible en CLI pour Pi et Hermes.
-- **IA summarization** et **Word abbreviations** sont des options activables via `ecotokens install --ai-summary` / `ecotokens abbreviations enable`, indépendamment du harness.
+- **Codex**: JSON plugin + MCP server registered in `~/.codex/config.toml` under `[mcp_servers.ecotokens]`. Session hooks are not yet supported (`install_codex_plugin` creates no hook files).
+- **Gemini CLI**: no native session hooks, so no automatic auto-watch.
+- **Pi**: no distinct session hooks; auto-watch is handled directly in the TypeScript extension.
+- **MCP server**: registered automatically on install for Claude Code, Gemini CLI, Qwen Code, and Codex. Accessible via CLI for Pi and Hermes.
+- **AI summarization** and **Word abbreviations** are opt-in features enabled via `ecotokens install --ai-summary` / `ecotokens abbreviations enable`, independently of the harness.
