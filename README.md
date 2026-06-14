@@ -109,6 +109,8 @@ By default, token counts use a fast character heuristic (`chars × 0.25`, ~80-85
 
 ## Installation
 
+> Ready-to-copy configuration snippets for all supported integrations: [`docs/example-configs.md`](docs/example-configs.md).
+
 ### Claude Code
 
 ```bash
