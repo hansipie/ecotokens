@@ -806,8 +806,8 @@ const CODEX_PLUGIN_MANIFEST: &str = r#"{
   ],
   "interface": {
     "displayName": "ecotokens",
-    "shortDescription": "Starts ecotokens watch with Codex sessions",
-    "longDescription": "Installs a Codex SessionStart hook that calls ecotokens session-start so auto-watch can keep the project index up to date.",
+    "shortDescription": "Intercepts Codex tool calls for token tracking",
+    "longDescription": "Provides PreToolUse/PostToolUse hooks on Bash so ecotokens can track token usage. Session lifecycle hooks are not installed: Codex exposes SessionStart but has no SessionEnd equivalent, so the auto-watch start/stop cycle cannot be completed.",
     "developerName": "ecotokens",
     "category": "Developer Tools",
     "capabilities": [
