@@ -292,6 +292,10 @@ name = "config_integration_test"
 path = "tests/integration/config_test.rs"
 
 [[test]]
+name = "doctor_test"
+path = "tests/integration/doctor_test.rs"
+
+[[test]]
 name = "abbreviations_test"
 path = "tests/abbreviations/abbreviate_test.rs"
 
