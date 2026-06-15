@@ -20,16 +20,25 @@ pub struct DoctorCheck {
     pub path: Option<String>,
 }
 
-#[derive(Debug, Clone, Serialize)]
+#[derive(Debug, Clone)]
 pub struct DoctorReport {
-    pub ok: bool,
     pub checks: Vec<DoctorCheck>,
+}
+
+impl serde::Serialize for DoctorReport {
+    fn serialize<S: serde::Serializer>(&self, s: S) -> Result<S::Ok, S::Error> {
+        use serde::ser::SerializeStruct;
+        let mut state = s.serialize_struct("DoctorReport", 2)?;
+        state.serialize_field("ok", &!self.has_errors())?;
+        state.serialize_field("checks", &self.checks)?;
+        state.end()
+    }
 }
 
 struct DoctorPaths {
     config_path: Option<PathBuf>,
     metrics_path: Option<PathBuf>,
-    claude_settings_path: PathBuf,
+    claude_settings_path: Option<PathBuf>,
     gemini_settings_path: Option<PathBuf>,
     qwen_settings_path: Option<PathBuf>,
 }
@@ -46,7 +55,7 @@ pub fn run() -> DoctorReport {
     run_with_paths(DoctorPaths {
         config_path: config::Settings::config_path(),
         metrics_path: metrics::store::metrics_path(),
-        claude_settings_path: default_claude_settings_path(),
+        claude_settings_path: install::default_claude_settings_path(),
         gemini_settings_path: install::default_gemini_settings_path(),
         qwen_settings_path: install::default_qwen_settings_path(),
     })
@@ -56,7 +65,13 @@ fn run_with_paths(paths: DoctorPaths) -> DoctorReport {
     let checks = vec![
         check_path_binary(),
         check_config(paths.config_path.as_deref()),
-        check_claude_install(&paths.claude_settings_path),
+        check_agent_install(
+            "Claude setup",
+            paths.claude_settings_path.as_deref(),
+            install::is_hook_installed,
+            install::is_post_hook_installed,
+            install::is_mcp_registered,
+        ),
         check_agent_install(
             "Gemini setup",
             paths.gemini_settings_path.as_deref(),
@@ -73,19 +88,7 @@ fn run_with_paths(paths: DoctorPaths) -> DoctorReport {
         ),
         check_metrics(paths.metrics_path.as_deref()),
     ];
-    DoctorReport {
-        ok: !checks
-            .iter()
-            .any(|check| check.status == DoctorStatus::Error),
-        checks,
-    }
-}
-
-fn default_claude_settings_path() -> PathBuf {
-    dirs::home_dir()
-        .unwrap_or_else(|| PathBuf::from("."))
-        .join(".claude")
-        .join("settings.json")
+    DoctorReport { checks }
 }
 
 fn check_path_binary() -> DoctorCheck {
@@ -166,16 +169,6 @@ fn check_config(path: Option<&Path>) -> DoctorCheck {
     }
 }
 
-fn check_claude_install(path: &Path) -> DoctorCheck {
-    check_agent_install(
-        "Claude setup",
-        Some(path),
-        install::is_hook_installed,
-        install::is_post_hook_installed,
-        install::is_mcp_registered,
-    )
-}
-
 fn check_agent_install(
     name: &'static str,
     path: Option<&Path>,
@@ -212,9 +205,14 @@ fn check_agent_install(
             path: Some(path.display().to_string()),
         }
     } else {
+        let status = if !pre && !post {
+            DoctorStatus::Error
+        } else {
+            DoctorStatus::Warning
+        };
         DoctorCheck {
             name,
-            status: DoctorStatus::Warning,
+            status,
             message: format!(
                 "partial setup detected: pre_hook={pre}, post_hook={post}, mcp_server={mcp}"
             ),
@@ -266,7 +264,7 @@ mod tests {
         let report = run_with_paths(DoctorPaths {
             config_path: Some(dir.path().join("config.json")),
             metrics_path: Some(dir.path().join("metrics.db")),
-            claude_settings_path: dir.path().join(".claude").join("settings.json"),
+            claude_settings_path: Some(dir.path().join(".claude").join("settings.json")),
             gemini_settings_path: Some(dir.path().join(".gemini").join("settings.json")),
             qwen_settings_path: Some(dir.path().join(".qwen").join("settings.json")),
         });
@@ -287,5 +285,69 @@ mod tests {
         let check = check_config(Some(&config_path));
 
         assert_eq!(check.status, DoctorStatus::Error);
+    }
+
+    #[test]
+    fn no_hooks_at_all_is_an_error() {
+        let dir = tempdir().unwrap();
+        let settings = dir.path().join("settings.json");
+        std::fs::write(&settings, "{}").unwrap();
+
+        let check = check_agent_install(
+            "Claude setup",
+            Some(&settings),
+            |_| false,
+            |_| false,
+            |_| true,
+        );
+
+        assert_eq!(check.status, DoctorStatus::Error);
+    }
+
+    #[test]
+    fn partial_hooks_is_a_warning() {
+        let dir = tempdir().unwrap();
+        let settings = dir.path().join("settings.json");
+        std::fs::write(&settings, "{}").unwrap();
+
+        let check = check_agent_install(
+            "Claude setup",
+            Some(&settings),
+            |_| true,
+            |_| false,
+            |_| true,
+        );
+
+        assert_eq!(check.status, DoctorStatus::Warning);
+    }
+
+    #[test]
+    fn ok_field_is_false_when_errors_present() {
+        let report = DoctorReport {
+            checks: vec![DoctorCheck {
+                name: "test",
+                status: DoctorStatus::Error,
+                message: "oops".to_string(),
+                path: None,
+            }],
+        };
+        let json = serde_json::to_value(&report).unwrap();
+        assert_eq!(json["ok"], false);
+        assert!(report.has_errors());
+    }
+
+    #[test]
+    fn ok_field_is_true_when_no_errors() {
+        let report = DoctorReport {
+            checks: vec![DoctorCheck {
+                name: "test",
+                status: DoctorStatus::Warning,
+                message: "meh".to_string(),
+                path: None,
+            }],
+        };
+        let json = serde_json::to_value(&report).unwrap();
+        assert_eq!(json["ok"], true);
+        assert!(!report.has_errors());
     }
 }

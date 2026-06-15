@@ -256,6 +256,11 @@ pub fn uninstall_session_hooks(settings_path: &Path) -> InstallResult {
     write_settings(settings_path, &v)
 }
 
+/// Get the default Claude Code settings path: ~/.claude/settings.json
+pub fn default_claude_settings_path() -> Option<std::path::PathBuf> {
+    dirs::home_dir().map(|d| d.join(".claude").join("settings.json"))
+}
+
 // ============================================================================
 // Gemini CLI Support (BeforeTool hook + shared mcpServers in single file)
 // ============================================================================
