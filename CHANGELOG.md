@@ -5,6 +5,19 @@ All notable changes to this project will be documented in this file.
 The format is based on [Keep a Changelog](https://keepachangelog.com/en/1.0.0/),
 and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0.html).
 
+## [0.23.0] - 2026-06-15
+
+### Added
+
+- **Ollama embedding provider** : nouveau provider `ollama` pour la recherche sémantique — délègue le calcul d'embeddings à une instance Ollama locale ou distante via `POST /api/embeddings`; compatible avec tous les modèles Ollama dont `qwen3-embedding:latest` (2560 dim), `nomic-embed-text`, etc.
+  - `ecotokens config --embed-provider ollama` active le provider avec le modèle par défaut `qwen3-embedding:latest`
+  - `ecotokens config --embed-url URL` configure l'URL de base (défaut : `http://localhost:11434`)
+  - `ecotokens config --embed-model MODEL` change le modèle sans toucher au provider
+  - Les vecteurs retournés par Ollama sont normalisés L2 automatiquement (Ollama ne normalise pas)
+  - Echec silencieux si Ollama est injoignable → fallback BM25, cohérent avec le provider Candle
+  - Changement de provider ou de dimension de vecteurs → reconstruction automatique de l'index HNSW (comportement existant, désormais fonctionnel pour Ollama)
+- **`--embed-url`** : nouveau flag CLI sur `ecotokens config` pour configurer l'URL du provider Ollama
+
 ## [0.22.0] - 2026-06-15
 
 ### Added

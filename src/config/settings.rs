@@ -12,6 +12,8 @@ pub enum EmbedProvider {
     },
     /// Disabled — embed_text returns None, search falls back to BM25 only.
     None,
+    /// Ollama HTTP embedding API (e.g. qwen3-embedding:latest).
+    Ollama { url: String, model: String },
     /// Catch-all for legacy configs (ollama, lm_studio) — migrated to Candle at load time.
     Legacy,
 }
@@ -32,6 +34,19 @@ impl<'de> serde::Deserialize<'de> for EmbedProvider {
                 Ok(EmbedProvider::Candle { model })
             }
             Some("none") => Ok(EmbedProvider::None),
+            Some("ollama") => {
+                let url = value
+                    .get("url")
+                    .and_then(|v| v.as_str())
+                    .unwrap_or("http://localhost:11434")
+                    .to_string();
+                let model = value
+                    .get("model")
+                    .and_then(|v| v.as_str())
+                    .unwrap_or("qwen3-embedding:latest")
+                    .to_string();
+                Ok(EmbedProvider::Ollama { url, model })
+            }
             // Unknown type tag or missing type field (old externally-tagged format) → Legacy
             _ => Ok(EmbedProvider::Legacy),
         }

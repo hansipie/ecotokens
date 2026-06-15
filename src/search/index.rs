@@ -149,6 +149,7 @@ pub fn index_directory(opts: IndexOptions) -> tantivy::Result<IndexStats> {
     // treating it as a full reset for the embeddings (but keep BM25 incremental).
     let current_model_id = match &opts.embed_provider {
         crate::config::settings::EmbedProvider::Candle { model } => model.clone(),
+        crate::config::settings::EmbedProvider::Ollama { model, .. } => model.clone(),
         crate::config::settings::EmbedProvider::None
         | crate::config::settings::EmbedProvider::Legacy => String::new(),
     };
@@ -361,6 +362,7 @@ pub fn index_directory(opts: IndexOptions) -> tantivy::Result<IndexStats> {
         }
         let model_id = match &opts.embed_provider {
             crate::config::settings::EmbedProvider::Candle { model } => model.clone(),
+            crate::config::settings::EmbedProvider::Ollama { model, .. } => model.clone(),
             crate::config::settings::EmbedProvider::None
             | crate::config::settings::EmbedProvider::Legacy => String::new(),
         };
