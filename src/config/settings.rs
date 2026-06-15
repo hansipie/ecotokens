@@ -76,7 +76,11 @@ pub struct Settings {
     pub debug: bool,
     #[serde(default = "default_model")]
     pub default_model: String,
-    #[serde(default = "default_model_pricing")]
+    #[serde(
+        skip_serializing,
+        skip_deserializing,
+        default = "default_model_pricing"
+    )]
     pub model_pricing: HashMap<String, ModelPrice>,
     #[serde(default = "EmbedProvider::default")]
     pub embed_provider: EmbedProvider,
@@ -116,6 +120,8 @@ struct LegacySettingsFile {
     settings: Settings,
     #[serde(default)]
     abbreviations_custom: HashMap<String, String>,
+    #[serde(default)]
+    model_pricing: HashMap<String, ModelPrice>,
 }
 
 fn default_threshold_lines() -> u32 {
@@ -178,6 +184,13 @@ impl Settings {
             .unwrap_or_else(|| PathBuf::from("abbreviations.json"))
     }
 
+    fn pricing_path_for(config_path: &Path) -> PathBuf {
+        config_path
+            .parent()
+            .map(|parent| parent.join("pricing.json"))
+            .unwrap_or_else(|| PathBuf::from("pricing.json"))
+    }
+
     fn load_legacy_config(path: &Path) -> LegacySettingsFile {
         let Ok(data) = std::fs::read_to_string(path) else {
             return LegacySettingsFile::default();
@@ -199,13 +212,21 @@ impl Settings {
         serde_json::from_str(&data).ok()
     }
 
-    fn load_from_paths(config_path: &Path, abbreviations_path: &Path) -> Self {
+    fn load_pricing(path: &Path) -> Option<HashMap<String, ModelPrice>> {
+        let data = std::fs::read_to_string(path).ok()?;
+        serde_json::from_str(&data).ok()
+    }
+
+    fn load_from_paths(config_path: &Path, abbreviations_path: &Path, pricing_path: &Path) -> Self {
         let legacy = Self::load_legacy_config(config_path);
         let mut settings = legacy.settings;
         settings.abbreviations_custom =
             Self::load_abbreviations(abbreviations_path).unwrap_or(legacy.abbreviations_custom);
-        for (k, v) in default_model_pricing() {
-            settings.model_pricing.entry(k).or_insert(v);
+        // pricing.json > migration depuis config.json > built-in seul
+        let overrides = Self::load_pricing(pricing_path).unwrap_or(legacy.model_pricing);
+        settings.model_pricing = default_model_pricing();
+        for (k, v) in overrides {
+            settings.model_pricing.insert(k, v);
         }
         // Migrate legacy providers (None, ollama, lm_studio) → Candle (silent)
         if matches!(
@@ -222,7 +243,8 @@ impl Settings {
             return Settings::default();
         };
         let abbreviations_path = Self::abbreviations_path_for(&path);
-        Self::load_from_paths(&path, &abbreviations_path)
+        let pricing_path = Self::pricing_path_for(&path);
+        Self::load_from_paths(&path, &abbreviations_path, &pricing_path)
     }
 
     fn save_abbreviations(
@@ -245,14 +267,51 @@ impl Settings {
         std::fs::write(abbreviations_path, json)
     }
 
-    fn save_to_paths(&self, config_path: &Path, abbreviations_path: &Path) -> std::io::Result<()> {
+    fn save_pricing(
+        pricing_path: &Path,
+        pricing: &HashMap<String, ModelPrice>,
+    ) -> std::io::Result<()> {
+        let built_in = super::models::build_pricing_map();
+        let overrides: HashMap<_, _> = pricing
+            .iter()
+            .filter(|(k, v)| {
+                built_in.get(*k).map_or(true, |b| {
+                    (b.input_usd_per_1m - v.input_usd_per_1m).abs() > f64::EPSILON
+                        || (b.output_usd_per_1m - v.output_usd_per_1m).abs() > f64::EPSILON
+                })
+            })
+            .map(|(k, v)| (k.clone(), v.clone()))
+            .collect();
+
+        if overrides.is_empty() {
+            return match std::fs::remove_file(pricing_path) {
+                Ok(()) => Ok(()),
+                Err(e) if e.kind() == std::io::ErrorKind::NotFound => Ok(()),
+                Err(e) => Err(e),
+            };
+        }
+        if let Some(parent) = pricing_path.parent() {
+            std::fs::create_dir_all(parent)?;
+        }
+        let json = serde_json::to_string_pretty(&overrides)
+            .map_err(|e| std::io::Error::new(std::io::ErrorKind::InvalidData, e))?;
+        std::fs::write(pricing_path, json)
+    }
+
+    fn save_to_paths(
+        &self,
+        config_path: &Path,
+        abbreviations_path: &Path,
+        pricing_path: &Path,
+    ) -> std::io::Result<()> {
         if let Some(parent) = config_path.parent() {
             std::fs::create_dir_all(parent)?;
         }
         let json = serde_json::to_string_pretty(self)
             .map_err(|e| std::io::Error::new(std::io::ErrorKind::InvalidData, e))?;
         std::fs::write(config_path, json)?;
-        Self::save_abbreviations(abbreviations_path, &self.abbreviations_custom)
+        Self::save_abbreviations(abbreviations_path, &self.abbreviations_custom)?;
+        Self::save_pricing(pricing_path, &self.model_pricing)
     }
 
     pub fn save(&self) -> std::io::Result<()> {
@@ -260,7 +319,17 @@ impl Settings {
             std::io::Error::new(std::io::ErrorKind::NotFound, "cannot resolve config dir")
         })?;
         let abbreviations_path = Self::abbreviations_path_for(&config_path);
-        self.save_to_paths(&config_path, &abbreviations_path)
+        let pricing_path = Self::pricing_path_for(&config_path);
+        self.save_to_paths(&config_path, &abbreviations_path, &pricing_path)
+    }
+
+    #[allow(dead_code)]
+    pub fn load_from_paths_pub(
+        config_path: &Path,
+        abbreviations_path: &Path,
+        pricing_path: &Path,
+    ) -> Self {
+        Self::load_from_paths(config_path, abbreviations_path, pricing_path)
     }
 
     // Exposed for callers that want to validate settings explicitly

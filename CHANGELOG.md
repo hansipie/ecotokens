@@ -5,6 +5,30 @@ All notable changes to this project will be documented in this file.
 The format is based on [Keep a Changelog](https://keepachangelog.com/en/1.0.0/),
 and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0.html).
 
+## [0.21.0] - 2026-05-29
+
+### Added
+
+- **Support Codex** : `ecotokens install --target codex` installe un plugin dans `~/.codex/plugins/ecotokens/` et enregistre le serveur MCP dans `~/.codex/config.toml` sous `[mcp_servers.ecotokens]` — Codex rejoint Claude Code, Gemini CLI et Qwen Code avec un MCP server configuré automatiquement (hook auto-watch non encore implémenté)
+- **Support Hermes Agent** : plugin Python généré dans `~/.hermes/plugins/ecotokens/` via `ecotokens install --target hermes` — intercepte les hooks `transform_terminal_output` et `transform_tool_result` et appelle `filter-output` en sous-processus
+  - **`--enable-plugin`** : flag d'install Hermes qui ajoute `ecotokens` à `plugins.enabled` dans `~/.hermes/config.yaml` directement (sans dépendance à la CLI `hermes`) — crée le fichier si absent, préserve les clés existantes, idempotent
+  - **Auto-watch Hermes** : les hooks `on_session_start` et `on_session_end` du plugin démarrent et arrêtent automatiquement `ecotokens watch --background` à chaque session Hermes — même comportement que Claude Code et Qwen Code ; activer avec `ecotokens auto-watch enable`
+  - **Filtrage par famille pour les outils Hermes** : les labels `hermes-tool:<name>` sont automatiquement mappés à la famille de filtre appropriée — `read_file`/`list_directory` → `fs`, `search_files`/`find_files` → `grep`, `browser_snapshot`/`web_fetch` → `network`, `run_python_code` → `python`, autres → `generic`
+  - **Variables d'environnement du plugin Hermes** : `ECOTOKENS_BIN`, `ECOTOKENS_HERMES_MIN_CHARS` (seuil minimal, défaut 2000 car.), `ECOTOKENS_HERMES_TIMEOUT` (timeout subprocess, défaut 10 s)
+  - **Métriques Hermes distinctes** : types `HermesTransformTerminalOutput` et `HermesTransformToolResult` dans `HookType` — le flag `--hook-type` de `filter-output` permet au plugin de les attribuer correctement ; visibles séparément dans `ecotokens gain`
+- **`filter-output` subcommand** : nouvelle sous-commande qui lit la sortie capturée d'un outil depuis stdin, applique le filtrage et enregistre les métriques — permet le traitement post-hoc des sorties d'agents comme Hermes
+- **Métriques par agent** : nouveau champ `by_agent` dans `Report` — les métriques sont agrégées par agent (`claude`, `gemini`, `qwen`, `pi`, `hermes`, `codex`, `cli`) en plus du total global
+
+### Changed
+
+- **`model_pricing` externalisé dans `pricing.json`** : les tarifs ne sont plus sérialisés dans `config.json`. Seuls les overrides utilisateur (entrées absentes ou modifiées par rapport au catalogue intégré) sont persistés dans `~/.config/ecotokens/pricing.json`. Migration transparente : les overrides présents dans un ancien `config.json` sont repris automatiquement au prochain `save()`.
+- **`filter-output`** : renommage du paramètre interne `returncode` en `exit_code` pour cohérence avec la CLI et le plugin Hermes
+
+### Fixed
+
+- **`ecotokens gain`** : les commandes lancées depuis un chemin temporaire hors dépôt git sont désormais regroupées sous `[undefined]` au lieu d'apparaître comme projets `/tmp/...` ; les dépôts git créés dans un répertoire temporaire restent attribués à leur racine git
+- **`HnswIndex::search`** : remplacement de `parallel_insert` (non-déterministe, threads parallèles) par des insertions séquentielles — corrige le test `hnsw_build_search_cosine` qui échouait de manière intermittente sur `x86_64-unknown-linux-musl`
+
 ## [0.20.1] - 2026-05-11
 
 ### Fixed
@@ -360,4 +384,3 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 - Vector search with embeddings (Ollama / LMStudio)
 - `ecotokens install` / `uninstall` / `config` commands
 - MIT license
-

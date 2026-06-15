@@ -44,7 +44,7 @@ function callHookPost(
     cwd,
   });
 
-  const result = spawnSync("ecotokens", ["hook-post"], {
+  const result = spawnSync("ecotokens", ["hook-post", "--agent", "pi"], {
     input: payload,
     encoding: "utf-8",
     timeout: 10_000,
@@ -91,7 +91,7 @@ export default function (pi: ExtensionAPI) {
     if (event.toolName !== "bash") return;
     const input = event.input as { command?: string };
     if (!input.command) return;
-    input.command = `ecotokens filter --cwd ${JSON.stringify(ctx.cwd)} -- bash -c ${JSON.stringify(input.command)}`;
+    input.command = `ecotokens filter --agent pi --cwd ${JSON.stringify(ctx.cwd)} -- bash -c ${JSON.stringify(input.command)}`;
   });
 
   // ── 2. Outils natifs post-execution : équivalent PostToolUse ─────────────

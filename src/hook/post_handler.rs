@@ -227,6 +227,7 @@ fn record_post_metrics(
     tokens_after: u32,
     content_before: &str,
     final_output: &str,
+    hook_type: HookType,
 ) {
     let mode = if tokens_after < tokens_before {
         FilterMode::Filtered
@@ -245,7 +246,7 @@ fn record_post_metrics(
         Some(content_before.to_string()),
         Some(final_output.to_string()),
     )
-    .with_hook_type(HookType::PostToolUse);
+    .with_hook_type(hook_type);
     if let Some(path) = crate::metrics::store::metrics_path() {
         let _ = crate::metrics::store::append_to(&path, &interception);
     }
@@ -256,6 +257,7 @@ fn process_filter_result(
     input: &PostHookInput,
     family: CommandFamily,
     settings: &Settings,
+    hook_type: HookType,
 ) -> Option<String> {
     match result {
         PostFilterResult::Filtered {
@@ -282,6 +284,7 @@ fn process_filter_result(
                 final_tokens_after,
                 &content_before,
                 &final_output,
+                hook_type,
             );
             Some(final_output)
         }
@@ -290,6 +293,7 @@ fn process_filter_result(
 }
 
 fn run_post_handler<T: Serialize>(
+    hook_type: HookType,
     normalize: Option<fn(&str) -> &str>,
     make_output: impl Fn(Option<String>) -> T,
     fallback: impl Fn(),
@@ -320,7 +324,9 @@ fn run_post_handler<T: Serialize>(
     );
 
     let (result, family) = handle_post_input(&input, depth);
-    let output = make_output(process_filter_result(result, &input, family, &settings));
+    let output = make_output(process_filter_result(
+        result, &input, family, &settings, hook_type,
+    ));
 
     match serde_json::to_string(&output) {
         Ok(json) => {
@@ -340,6 +346,7 @@ fn run_post_handler<T: Serialize>(
 /// Gemini uses `decision: "deny"` + `reason` to substitute the tool result.
 pub fn handle_post_gemini() {
     run_post_handler(
+        HookType::GeminiPostToolUse,
         Some(normalize_gemini_tool_name),
         |o| o.map_or_else(GeminiAfterToolOutput::allow, GeminiAfterToolOutput::deny),
         || {
@@ -354,16 +361,70 @@ pub fn handle_post_gemini() {
 /// Qwen's PostToolUse uses the same additionalContext mechanism as Claude Code.
 pub fn handle_post_qwen() {
     run_post_handler(
+        HookType::QwenPostToolUse,
         Some(normalize_qwen_tool_name),
         |o| o.map_or_else(PostHookOutput::passthrough, PostHookOutput::with_context),
         || print!("{{}}"),
     );
 }
 
-pub fn handle_post() {
+pub fn handle_post(hook_type: HookType) {
     run_post_handler(
+        hook_type,
         None,
         |o| o.map_or_else(PostHookOutput::passthrough, PostHookOutput::with_context),
         || print!("{{}}"),
     );
+}
+
+/// PostToolUse handler for Codex — filters Bash tool output and injects it as additionalContext.
+/// Codex has no native Read/Grep/Glob tools; all shell work goes through the Bash tool.
+/// Pre-tool already rewrites most commands; this acts as a fallback for excluded commands.
+pub fn handle_post_codex() {
+    let input = match read_post_input() {
+        Some(i) => i,
+        None => {
+            print!("{{}}");
+            return;
+        }
+    };
+
+    if input.tool_name != "Bash" {
+        print!("{{}}");
+        return;
+    }
+
+    let command = input
+        .tool_input
+        .get("command")
+        .and_then(|v| v.as_str())
+        .unwrap_or("")
+        .to_string();
+
+    let output_text = input
+        .tool_response
+        .get("output")
+        .or_else(|| input.tool_response.get("stdout"))
+        .and_then(|v| v.as_str())
+        .unwrap_or("");
+
+    let cwd = input.cwd.as_deref().map(std::path::Path::new);
+    let (filtered, tokens_before, tokens_after) = crate::filter::run_filter_pipeline_with_cwd(
+        &command,
+        output_text,
+        0,
+        cwd,
+        HookType::CodexPostToolUse,
+    );
+
+    let out = if tokens_after < tokens_before {
+        PostHookOutput::with_context(filtered)
+    } else {
+        PostHookOutput::passthrough()
+    };
+
+    match serde_json::to_string(&out) {
+        Ok(s) => print!("{s}"),
+        Err(_) => print!("{{}}"),
+    }
 }

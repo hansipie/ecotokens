@@ -58,13 +58,9 @@ impl HnswIndex {
         let max_elements = n + 1;
         let hnsw: Hnsw<f32, DistCosine> = Hnsw::new(16, max_elements, 16, 200, DistCosine {});
 
-        let data_refs: Vec<(&Vec<f32>, usize)> = self
-            .vectors
-            .iter()
-            .enumerate()
-            .map(|(i, v)| (v, i))
-            .collect();
-        hnsw.parallel_insert(&data_refs);
+        for (i, v) in self.vectors.iter().enumerate() {
+            hnsw.insert((v, i));
+        }
 
         let ef_search = (top_k * 5).max(50);
         let query_vec: Vec<f32> = query.to_vec();

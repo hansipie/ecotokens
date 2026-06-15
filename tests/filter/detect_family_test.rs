@@ -1,5 +1,6 @@
-use ecotokens::filter::detect_family;
+use ecotokens::filter::{detect_family, project_root_for_cwd};
 use ecotokens::metrics::store::CommandFamily;
+use std::process::Command;
 
 // --- Cas nominaux (commandes bare) ---
 
@@ -207,4 +208,106 @@ fn bash_c_unknown_stays_generic() {
 fn unknown_stays_generic() {
     assert_eq!(detect_family("bundle exec rspec"), CommandFamily::Generic);
     assert_eq!(detect_family("./myscript.sh"), CommandFamily::Generic);
+}
+
+#[test]
+fn temp_non_git_cwd_has_no_project_root() {
+    let dir = tempfile::tempdir().unwrap();
+
+    assert_eq!(project_root_for_cwd(dir.path()), None);
+}
+
+#[test]
+fn temp_git_repo_keeps_project_root() {
+    let dir = tempfile::tempdir().unwrap();
+    let output = Command::new("git")
+        .args(["init"])
+        .current_dir(dir.path())
+        .output()
+        .expect("git init should run");
+    assert!(
+        output.status.success(),
+        "git init should succeed: {}",
+        String::from_utf8_lossy(&output.stderr)
+    );
+
+    assert_eq!(
+        project_root_for_cwd(dir.path()).as_deref(),
+        Some(dir.path().to_str().unwrap())
+    );
+}
+
+// --- Hermes Agent tool labels (hermes-tool:<name>) ---
+
+#[test]
+fn hermes_tool_read_file_is_fs() {
+    assert_eq!(detect_family("hermes-tool:read_file"), CommandFamily::Fs);
+    assert_eq!(
+        detect_family("hermes-tool:list_directory"),
+        CommandFamily::Fs
+    );
+    assert_eq!(detect_family("hermes-tool:create_file"), CommandFamily::Fs);
+    assert_eq!(detect_family("hermes-tool:edit_file"), CommandFamily::Fs);
+    assert_eq!(detect_family("hermes-tool:delete_file"), CommandFamily::Fs);
+}
+
+#[test]
+fn hermes_tool_search_files_is_grep() {
+    assert_eq!(
+        detect_family("hermes-tool:search_files"),
+        CommandFamily::Grep
+    );
+    assert_eq!(detect_family("hermes-tool:find_files"), CommandFamily::Grep);
+    assert_eq!(
+        detect_family("hermes-tool:search_in_file"),
+        CommandFamily::Grep
+    );
+}
+
+#[test]
+fn hermes_tool_browser_is_network() {
+    assert_eq!(
+        detect_family("hermes-tool:browser_snapshot"),
+        CommandFamily::Network
+    );
+    assert_eq!(
+        detect_family("hermes-tool:browser_navigate"),
+        CommandFamily::Network
+    );
+    assert_eq!(
+        detect_family("hermes-tool:web_fetch"),
+        CommandFamily::Network
+    );
+    assert_eq!(
+        detect_family("hermes-tool:web_search"),
+        CommandFamily::Network
+    );
+}
+
+#[test]
+fn hermes_tool_python_is_python() {
+    assert_eq!(
+        detect_family("hermes-tool:run_python_code"),
+        CommandFamily::Python
+    );
+    assert_eq!(
+        detect_family("hermes-tool:execute_python"),
+        CommandFamily::Python
+    );
+}
+
+#[test]
+fn hermes_tool_unknown_is_generic() {
+    assert_eq!(
+        detect_family("hermes-tool:delegate_task"),
+        CommandFamily::Generic
+    );
+    assert_eq!(
+        detect_family("hermes-tool:custom_mcp_tool"),
+        CommandFamily::Generic
+    );
+    assert_eq!(
+        detect_family("hermes-tool:run_shell_command"),
+        CommandFamily::Generic
+    );
 }

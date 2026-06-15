@@ -21,7 +21,7 @@ On one developer workstation, ecotokens recorded **19 928 hook executions** betw
 | Commands with savings | 5 735 / 19 928, or 28.8% |
 | Biggest command family | `grep`, with 55 383 168 tokens saved |
 
-[Claude Code](https://claude.ai/code), [Gemini CLI](https://github.com/google-gemini/gemini-cli), [Qwen Code](https://github.com/QwenLM/qwen-code), and [Pi](https://pi.dev) can all dump massive command outputs and native tool results into your context window. ecotokens sits in front of those outputs, removes the noise, preserves the important bits, and records the before/after savings locally.
+[Claude Code](https://claude.ai/code), [Gemini CLI](https://github.com/google-gemini/gemini-cli), [Qwen Code](https://github.com/QwenLM/qwen-code), [Pi](https://pi.dev), [Hermes](https://hermes.dev), and Codex can all dump massive command outputs and native tool results into your context window. ecotokens sits in front of those outputs, removes the noise, preserves the important bits, and records the before/after savings locally.
 
 Built on a *"set it and forget it!"* philosophy: one install command, zero configuration, then automatic compression for shell commands, file reads, grep/search results, directory listings, and code-intelligence workflows.
 
@@ -36,15 +36,17 @@ Full methodology and per-family breakdown: [`docs/BENCHMARKS.md`](docs/BENCHMARK
 | Feature | Details |
 |---------|---------|
 | **PreToolUse hook** | Intercepts every shell (`Bash`) command before its output reaches the model - filters, compresses, and records savings |
-| **PostToolUse hook** *(Claude Code, Gemini CLI, Qwen Code)* | Intercepts native tool results (`Read`/`read_file`, `Grep`/`search_file_content`, `Glob`/`list_directory`) - outline-based compression for source files, grep trimming, glob denoising |
+| **PostToolUse hook** | Intercepts native tool results (`Read`/`read_file`, `Grep`/`search_file_content`, `Glob`/`list_directory`) - outline-based compression for source files, grep trimming, glob denoising |
 | **Gain dashboard** | Interactive TUI - token savings by command family or project, sparkline, diff view, history log |
-| **Multi-agent support** | Works with Claude Code, Gemini CLI, Qwen Code, and Pi out of the box |
+| **Multi-agent support** | Works with Claude Code, Gemini CLI, Qwen Code, Pi, Hermes, and Codex out of the box |
 | **Precision guarantees** | Errors, failures, and stack traces are never removed; secrets are redacted before filtering |
 | **Code intelligence** | BM25 + vector search (Candle, zero-config), symbol lookup, call graph tracing, near-duplicate detection |
-| **MCP server** *(Claude Code, Gemini CLI, Qwen Code)* | Exposes code-intelligence tools over stdio (`ecotokens mcp-server`) and auto-registers in agent settings on install |
+| **MCP server** | Exposes code-intelligence tools over stdio (`ecotokens mcp-server`) and auto-registers in agent settings on install |
 | **AI summarization** *(optional)* | Large outputs compressed by a local Ollama model instead of being truncated |
 | **Word abbreviations** *(optional)* | Replace common words with shorter forms (`function`→`fn`, `configuration`→`config`, …) in narrative text, and nudge the model to do the same via a SessionStart instruction |
 | **Zero config** | One `ecotokens install` command - works automatically from there |
+
+> Full compatibility matrix: [harness feature matrix](docs/harness-feature-matrix.md)
 
 ## How it works
 
@@ -65,7 +67,7 @@ ecotokens installs hooks that intercept tool outputs before they reach the model
 3. Returns the compressed result to the model
 4. Records the savings under the `native_read`, `grep`, or `fs` family
 
-Claude Code uses the `PreToolUse` + `PostToolUse` hooks (`~/.claude/settings.json`). Gemini CLI uses the `BeforeTool` + `AfterTool` hooks (`~/.gemini/settings.json`). Qwen Code uses the `PreToolUse` + `PostToolUse` hooks (`~/.qwen/settings.json`). Pi uses a TypeScript extension (`~/.pi/agent/extensions/ecotokens.ts`) that intercepts `tool_call` (bash pre-exec) and `tool_result` (read/grep/find/ls post-exec) events in-process.
+Claude Code uses the `PreToolUse` + `PostToolUse` hooks (`~/.claude/settings.json`). Gemini CLI uses the `BeforeTool` + `AfterTool` hooks (`~/.gemini/settings.json`). Qwen Code uses the `PreToolUse` + `PostToolUse` hooks (`~/.qwen/settings.json`). Pi uses a TypeScript extension (`~/.pi/agent/extensions/ecotokens.ts`) that intercepts `tool_call` (bash pre-exec) and `tool_result` (read/grep/find/ls post-exec) events in-process. Hermes uses a plugin that sends outputs through `filter-output` via `HermesTransformTerminalOutput` and `HermesTransformToolResult` hook types. Codex uses `PreToolUse` + `PostToolUse` hooks in `~/.codex/hooks.json` and registers the MCP server in `~/.codex/config.toml`.
 
 For a focused view of the runtime path, see [`docs/hook-filter-metrics-flow.md`](docs/hook-filter-metrics-flow.md).
 
@@ -106,6 +108,8 @@ cargo install --path . --features exact-tokens
 By default, token counts use a fast character heuristic (`chars × 0.25`, ~80-85% accuracy). This has no effect on filtering behavior - only the token counts recorded in metrics are more precise.
 
 ## Installation
+
+> Ready-to-copy configuration snippets for all supported integrations: [`docs/example-configs.md`](docs/example-configs.md).
 
 ### Claude Code
 
@@ -164,13 +168,74 @@ ecotokens install --target pi
 
 This writes a TypeScript extension to `~/.pi/agent/extensions/ecotokens.ts`. Pi auto-discovers it on next startup (or `/reload` inside an active session). The extension intercepts bash commands before execution and filters native tool results (`read`, `grep`, `find`, `ls`) after execution.
 
+### Hermes
+
+Requires [Hermes](https://hermes.dev).
+
+```bash
+cargo install --path .
+ecotokens install --target hermes
+```
+
+This installs an ecotokens plugin in `~/.hermes/plugins/`. The plugin intercepts two Hermes hooks:
+
+- `transform_terminal_output` — filters raw terminal output before Hermes truncates it
+- `transform_tool_result` — filters non-terminal tool results (`read_file`, `search_files`, `browser_snapshot`, MCP tools, etc.)
+
+Each hook calls `ecotokens filter-output` as a subprocess with the appropriate `--hook-type`, so savings are tracked separately in `ecotokens gain`.
+
+**Enabling the plugin** — Hermes requires explicit activation. Two options:
+
+```bash
+# Option A: via Hermes CLI (requires hermes to be installed and in PATH)
+hermes plugins enable ecotokens
+
+# Option B: write directly to ~/.hermes/config.yaml (no hermes CLI needed)
+ecotokens install --target hermes --enable-plugin
+```
+
+`--enable-plugin` adds `ecotokens` to `plugins.enabled` in `~/.hermes/config.yaml`, creating the file if it does not exist and preserving all existing keys. Restart Hermes after enabling.
+
+**Per-tool filtering** — tool result labels (`hermes-tool:<name>`) are mapped to the appropriate filter family automatically:
+
+| Tool | Family | Filter applied |
+|------|--------|---------------|
+| `read_file`, `list_directory`, `create_file` | `fs` | file listing compaction |
+| `search_files`, `find_files`, `search_in_file` | `grep` | match deduplication |
+| `browser_snapshot`, `web_fetch`, `web_search` | `network` | HTML/JSON reduction |
+| `run_python_code`, `execute_python` | `python` | traceback extraction |
+| `delegate_task`, MCP tools, others | `generic` | 200-line / 50 KB cap |
+
+**Runtime variables** — the generated plugin reads these from the environment:
+
+| Variable | Default | Effect |
+|----------|---------|--------|
+| `ECOTOKENS_BIN` | path at install time | Override the ecotokens binary called by the plugin |
+| `ECOTOKENS_HERMES_MIN_CHARS` | `2000` | Skip filtering outputs shorter than this |
+| `ECOTOKENS_HERMES_TIMEOUT` | `10` | Subprocess timeout in seconds |
+
+The plugin is fail-open: any error, timeout, or empty output returns the original content unchanged.
+
+### Codex
+
+```bash
+cargo install --path .
+ecotokens install --target codex
+```
+
+This installs three things:
+
+- **Plugin** (`~/.codex/plugins/ecotokens/.codex-plugin/plugin.json`) — identifies ecotokens to Codex
+- **Hooks** (`~/.codex/hooks.json`) — `PreToolUse` (bash pre-exec filtering) and `PostToolUse` (bash post-exec filtering)
+- **MCP server** (`~/.codex/config.toml`) — registers `ecotokens mcp-server` under `[mcp_servers.ecotokens]`
+
 ### All targets at once
 
 ```bash
 ecotokens install --target all
 ```
 
-`--target all` covers Claude Code, Gemini CLI, Qwen Code, and Pi in a single command.
+`--target all` covers Claude Code, Gemini CLI, Qwen Code, Pi, Hermes, and Codex in a single command.
 
 ### With AI summarization
 
@@ -190,6 +255,8 @@ ecotokens uninstall                    # Claude Code
 ecotokens uninstall --target gemini    # Gemini CLI
 ecotokens uninstall --target qwen      # Qwen Code
 ecotokens uninstall --target pi        # Pi
+ecotokens uninstall --target hermes    # Hermes
+ecotokens uninstall --target codex     # Codex
 ecotokens uninstall --target all       # all targets
 ```
 
@@ -198,9 +265,14 @@ ecotokens uninstall --target all       # all targets
 | Command | Description |
 |---------|-------------|
 | `ecotokens install` | Install the PreToolUse + PostToolUse hooks and register the MCP server entry in `~/.claude/settings.json` |
-| `ecotokens uninstall` | Remove all hooks (PreToolUse, PostToolUse, SessionStart, SessionEnd) and the MCP server entry |
+| `ecotokens install --target hermes` | Install the Hermes plugin in `~/.hermes/plugins/` |
+| `ecotokens install --target hermes --enable-plugin` | Install and add to `plugins.enabled` in `~/.hermes/config.yaml` directly |
+| `ecotokens install --target codex` | Install the Codex plugin, `PreToolUse`/`PostToolUse` hooks in `~/.codex/hooks.json`, and MCP server in `~/.codex/config.toml` |
+| `ecotokens uninstall` | Remove all hooks (PreToolUse, PostToolUse, SessionStart, SessionEnd where supported) and the MCP server entry |
 | `ecotokens filter -- CMD [ARGS]` | Run a command, filter its output, record metrics |
 | `ecotokens filter --cwd DIR -- CMD [ARGS]` | Same, with an explicit working directory |
+| `ecotokens filter-output --command LABEL --exit-code N` | Filter captured output read from stdin and record metrics (used by Hermes hooks) |
+| `ecotokens filter-output ... --hook-type transform-tool-result` | Same, attributed to the `transform_tool_result` hook in metrics |
 | `ecotokens hook-post` | PostToolUse handler - intercept native tool results (Read, Grep, Glob) |
 | `ecotokens gain` | Interactive TUI dashboard - savings by family or project |
 | `ecotokens gain --period PERIOD` | Filter TUI to a time window (`all`, `today`, `week`, `month`) |
@@ -217,7 +289,7 @@ ecotokens uninstall --target all       # all targets
 | `ecotokens trace callees SYMBOL` | Find callees of a symbol |
 | `ecotokens watch [--path DIR]` | Watch a directory and keep the index up to date |
 | `ecotokens mcp-server [--index-dir DIR]` | Start the stdio MCP server exposing search/outline/symbol/trace/duplicates tools |
-| `ecotokens auto-watch enable` | Start watch automatically on each Claude Code session |
+| `ecotokens auto-watch enable` | Start watch automatically on each Claude Code, Qwen Code, Pi, Hermes or Codex session |
 | `ecotokens auto-watch disable` | Disable automatic watch |
 | `ecotokens abbreviations enable` | Replace common words with abbreviations in filtered outputs + inject a matching instruction at SessionStart |
 | `ecotokens abbreviations disable` | Turn abbreviations off (default) |
@@ -304,18 +376,27 @@ ecotokens watch --stop             # stop the background process
 
 > **Note:** Background logs are only written if global `debug` is enabled (`ecotokens config --debug true`).
 
-### Auto-watch *(Claude Code <del>& Qwen Code</del>)*
+### Auto-watch *(Claude Code, Qwen Code, Pi, Hermes, Codex)*
 
-`ecotokens auto-watch` integrates with Claude Code <del>and Qwen Code</del>'s session lifecycle to start and stop the watcher automatically.
+`ecotokens auto-watch` integrates with agent session lifecycles to start and stop the watcher automatically where both lifecycle events are available.
 
 ```bash
-ecotokens auto-watch enable    # enable auto-watch, install SessionStart/SessionEnd hooks
+ecotokens auto-watch enable    # enable auto-watch
 ecotokens auto-watch disable   # disable (hooks remain installed but are no-ops)
 ```
 
-When enabled, `ecotokens watch --background` starts automatically when a session opens, and stops when it closes. The setting is stored in `~/.config/ecotokens/config.json` (`auto_watch: true/false`).
+When enabled, `ecotokens watch --background` starts automatically when a session opens, and stops when it closes on agents that expose an end-of-session event. The setting is stored in `~/.config/ecotokens/config.json` (`auto_watch: true/false`).
 
-> **Note:** Auto-watch relies on `SessionStart` / `SessionEnd` hooks. <del>For Qwen Code, session hooks are installed automatically if ecotokens is already installed for Qwen (`ecotokens install --target qwen`).</del> Gemini CLI does not expose session lifecycle hooks.
+Support by agent:
+
+| Agent | Mechanism | Notes |
+|-------|-----------|-------|
+| Claude Code | `SessionStart` / `SessionEnd` shell hooks in `~/.claude/settings.json` | Installed by `auto-watch enable` |
+| Qwen Code | `SessionStart` / `SessionEnd` shell hooks in `~/.qwen/settings.json` | Installed automatically if Qwen hook is present |
+| Pi | `session_start` / `session_end` events in the TypeScript extension | Built into the Pi extension |
+| Hermes | `on_session_start` / `on_session_end` plugin hooks | Built into the Hermes plugin; install first with `ecotokens install --target hermes` |
+| Codex | — | Session hooks not yet supported; auto-watch not available for Codex |
+| Gemini CLI | — | Gemini does not expose session lifecycle hooks |
 
 ## Word abbreviations
 
@@ -348,7 +429,7 @@ Keep the feature flag in `~/.config/ecotokens/config.json`
 
 ## Bonus Tools
 
-### MCP server (Claude Code, Gemini CLI, Qwen Code)
+### MCP server (Claude Code, Gemini CLI, Qwen Code, Codex)
 
 `ecotokens mcp-server` starts a stdio MCP server backed by the ecotokens index and trace engines.
 
@@ -366,7 +447,7 @@ Exposed tools:
 - `ecotokens_trace_callees` - find callees (with depth)
 - `ecotokens_duplicates` - detect near-duplicate code blocks
 
-For Claude Code, Gemini CLI, and Qwen Code, `ecotokens install` registers this server automatically in each target's settings file.
+For Claude Code, Gemini CLI, Qwen Code, and Codex, `ecotokens install` registers this server automatically in each target's settings file (`mcpServers` in JSON settings, `[mcp_servers.ecotokens]` in Codex's `config.toml`).
 
 ### Search command
 
@@ -478,17 +559,15 @@ ecotokens config --model ""                 # list available models
 ecotokens config --model unknown-model      # unknown model → lists available models
 ```
 
-The model name must be present in the built-in pricing table (or overridden via `model_pricing` in `~/.config/ecotokens/config.json`). Passing an empty value or an unrecognised name prints the full list and exits.
+The model name must be present in the built-in pricing table (or added via `~/.config/ecotokens/pricing.json`). Passing an empty value or an unrecognised name prints the full list and exits.
 
 See the full list of built-in models and prices in [docs/models.md](docs/models.md).
 
-Override any entry or add a new model via `model_pricing` in `~/.config/ecotokens/config.json`:
+Override any entry or add a new model by creating `~/.config/ecotokens/pricing.json`:
 
 ```json
 {
-  "model_pricing": {
-    "my-custom-model": { "input_usd_per_1m": 0.50, "output_usd_per_1m": 2.00 }
-  }
+  "my-custom-model": { "input_usd_per_1m": 0.50, "output_usd_per_1m": 2.00 }
 }
 ```
 
@@ -536,6 +615,8 @@ The feature flag stays in `~/.config/ecotokens/config.json`:
 | `native_read` | Claude Code `Read` tool results (PostToolUse, outline-based compression) |
 
 > **Note:** Family detection uses the basename of the first token, so commands invoked via absolute path (`/usr/bin/git`), venv (`.venv/bin/pytest`), version managers (`~/.cargo/bin/cargo`), or wrappers (`poetry run`) are correctly matched to their family.
+
+Hermes tool result labels (`hermes-tool:<name>`) are mapped to the same families: `read_file` → `fs`, `search_files` → `grep`, `browser_snapshot` → `network`, `run_python_code` → `python`, everything else → `generic`.
 
 ## Embeddings
 

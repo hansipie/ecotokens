@@ -1,6 +1,6 @@
 [package]
 name = "ecotokens"
-version = "0.20.1"
+version = "0.21.0"
 edition = "2021"
 description = "Token optimizer for AI coding assistants — hooks into Claude Code/Gemini CLI to compress shell outputs and track USD savings"
 license = "MIT"
@@ -182,6 +182,10 @@ path = "tests/hook/glob_handler_test.rs"
 [[test]]
 name = "install_test"
 path = "tests/integration/install_test.rs"
+
+[[test]]
+name = "filter_output_test"
+path = "tests/integration/filter_output_test.rs"
 
 [[test]]
 name = "index_test"
