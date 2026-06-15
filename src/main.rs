@@ -2787,10 +2787,10 @@ fn cmd_auto_watch_enable() {
         }
     }
 
-    // Codex: SessionStart hook lives in the plugin's hooks/hooks.json.
-    // install_codex_plugin keeps it up to date; no global hooks.json needed.
+    // Codex: auto-watch is not supported. Codex exposes SessionStart but has no SessionEnd
+    // equivalent, so the watch start/stop cycle cannot be completed cleanly.
 
-    println!("✓ auto-watch enabled — ecotokens watch will start automatically with Claude Code, Qwen Code, Pi, Hermes and Codex");
+    println!("✓ auto-watch enabled — ecotokens watch will start automatically with Claude Code, Qwen Code, Pi and Hermes");
 }
 
 fn cmd_auto_watch_disable() {

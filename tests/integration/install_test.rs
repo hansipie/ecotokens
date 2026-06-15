@@ -920,8 +920,8 @@ fn codex_uninstall_when_plugin_absent_is_ok() {
 
 #[test]
 fn codex_plugin_install_no_hooks_file() {
-    // Le hook SessionStart Codex n'est pas géré via plugin (non supporté pour l'instant).
-    // install_codex_plugin ne doit créer aucun fichier hooks dans le répertoire plugin.
+    // Codex exposes SessionStart but has no SessionEnd, so session lifecycle hooks are not
+    // installed. install_codex_plugin must not create any hooks file in the plugin directory.
     let dir = TempDir::new().unwrap();
     let plugin_dir = dir.path().join(".codex").join("plugins").join("ecotokens");
 
