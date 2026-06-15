@@ -40,7 +40,7 @@ Full methodology and per-family breakdown: [`docs/BENCHMARKS.md`](docs/BENCHMARK
 | **Gain dashboard** | Interactive TUI - token savings by command family or project, sparkline, diff view, history log |
 | **Multi-agent support** | Works with Claude Code, Gemini CLI, Qwen Code, Pi, Hermes, and Codex out of the box |
 | **Precision guarantees** | Errors, failures, and stack traces are never removed; secrets are redacted before filtering |
-| **Code intelligence** | BM25 + vector search (Candle, zero-config), symbol lookup, call graph tracing, near-duplicate detection |
+| **Code intelligence** | BM25 + vector search (Candle zero-config or Ollama), symbol lookup, call graph tracing, near-duplicate detection |
 | **MCP server** | Exposes code-intelligence tools over stdio (`ecotokens mcp-server`) and auto-registers in agent settings on install |
 | **AI summarization** *(optional)* | Large outputs compressed by a local Ollama model instead of being truncated |
 | **Word abbreviations** *(optional)* | Replace common words with shorter forms (`function`→`fn`, `configuration`→`config`, …) in narrative text, and nudge the model to do the same via a SessionStart instruction |
@@ -281,6 +281,9 @@ ecotokens uninstall --target all       # all targets
 | `ecotokens config [--debug true\|false]` | Show or update global configuration (including debug mode) |
 | `ecotokens doctor [--json]` | Diagnose PATH, config, hook, MCP, and metrics setup without mutating files |
 | `ecotokens config --model MODEL` | Set the default model used for cost calculations (empty or unknown value lists available models) |
+| `ecotokens config --embed-provider candle\|ollama\|none` | Set the embedding backend (`candle` = local BERT, `ollama` = Ollama HTTP API, `none` = BM25 only) |
+| `ecotokens config --embed-model MODEL` | Set the embedding model (e.g. `qwen3-embedding:latest` for Ollama, or a HuggingFace ID for Candle) |
+| `ecotokens config --embed-url URL` | Set the Ollama base URL (default: `http://localhost:11434`) |
 | `ecotokens index [--path DIR]` | Index a codebase for BM25 + symbolic search |
 | `ecotokens search QUERY [--context N] [--include GLOB] [--exclude GLOB] [--no-trace]` | Search the indexed codebase with line numbers, context, and optional trace augmentation |
 | `ecotokens outline PATH` | List symbols in a file or directory |
@@ -513,7 +516,7 @@ debug                 : false
 debuglog              : false
 default_model         : claude-sonnet-4-6
 exclusions            : []
-embed_provider        : candle (sentence-transformers/all-MiniLM-L6-v2)
+embed_provider        : candle model=sentence-transformers/all-MiniLM-L6-v2
 ai_summary_enabled    : false
 ai_summary_model      : llama3.2:3b (default)
 ai_summary_url        : http://localhost:11434 (default)
@@ -620,17 +623,37 @@ Hermes tool result labels (`hermes-tool:<name>`) are mapped to the same families
 
 ## Embeddings
 
-`ecotokens search` uses **dual BM25 + vector retrieval** with score fusion (`0.4 × BM25 + 0.6 × cosine`). The vector index is powered by [Candle](https://github.com/huggingface/candle) - a zero-config local embedding engine. No external service required.
+`ecotokens search` uses **dual BM25 + vector retrieval** with score fusion (`0.4 × BM25 + 0.6 × cosine`). Two embedding backends are available: the built-in Candle engine (zero-config) or an external Ollama instance.
 
 ### Provider
 
-**Candle** (default) - runs `sentence-transformers/all-MiniLM-L6-v2` (384 dim) locally. The model is downloaded automatically from HuggingFace Hub on first use (~90 MB, cached in `~/.cache/huggingface/`).
+**Candle** (default) — runs `sentence-transformers/all-MiniLM-L6-v2` (384 dim) locally. The model is downloaded automatically from HuggingFace Hub on first use (~90 MB, cached in `~/.cache/huggingface/`).
 
 ```bash
 # Candle is active by default - nothing to configure
 ecotokens index --path /your/project
 ecotokens search "your query"
 ```
+
+**Ollama** — delegates embedding to a running Ollama instance. Supports any Ollama embedding model, including large-dimension models like `qwen3-embedding:latest` (2560 dim).
+
+```bash
+# Switch to Ollama with qwen3-embedding (Ollama must be running)
+ecotokens config --embed-provider ollama --embed-model qwen3-embedding:latest
+
+# Custom URL (default: http://localhost:11434)
+ecotokens config --embed-provider ollama \
+  --embed-url http://localhost:11434 \
+  --embed-model qwen3-embedding:latest
+
+# Change just the model without touching the provider
+ecotokens config --embed-model nomic-embed-text
+
+# Revert to Candle
+ecotokens config --embed-provider candle
+```
+
+> When switching between providers (or between models with different output dimensions), `ecotokens index` automatically detects the change and rebuilds the vector index.
 
 Each result includes a `retrieval_source` field (`bm25`, `vector`, or `both`) visible in JSON output.
 
@@ -711,7 +734,7 @@ Filtering is aggressive on noise, conservative on signal:
 - Rust ≥ 1.75 (stable)
 - One or more of: Claude Code (with hook support), Gemini CLI ≥ 0.1.0, Qwen Code, Pi ≥ 0.62.0
 - Internet access on first use (Candle downloads `all-MiniLM-L6-v2` ~90 MB from HuggingFace Hub; cached locally after that)
-- Ollama (optional, for AI summarization only)
+- Ollama (optional, for AI summarization and/or Ollama-backed embeddings)
 
 ## Contributing
 

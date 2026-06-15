@@ -5,6 +5,7 @@ pub fn embed_text(text: &str, provider: &EmbedProvider) -> Option<Vec<f32>> {
     match provider {
         EmbedProvider::None | EmbedProvider::Legacy => None,
         EmbedProvider::Candle { model } => embed_text_candle(text, model),
+        EmbedProvider::Ollama { url, model } => embed_text_ollama(text, url, model),
     }
 }
 
@@ -38,6 +39,38 @@ fn embed_text_candle(text: &str, model_id: &str) -> Option<Vec<f32>> {
         }
         guard.as_ref()?.1.as_ref()?.embed(text).ok()
     })
+}
+
+fn embed_text_ollama(text: &str, url: &str, model: &str) -> Option<Vec<f32>> {
+    let client = reqwest::blocking::Client::builder()
+        .timeout(std::time::Duration::from_secs(30))
+        .build()
+        .ok()?;
+
+    let payload = serde_json::json!({ "model": model, "prompt": text });
+    let endpoint = format!("{}/api/embeddings", url.trim_end_matches('/'));
+
+    let response = client.post(&endpoint).json(&payload).send().ok()?;
+    if !response.status().is_success() {
+        eprintln!(
+            "ecotokens: ollama embedding failed: HTTP {}",
+            response.status()
+        );
+        return None;
+    }
+
+    let json: serde_json::Value = response.json().ok()?;
+    let raw: Vec<f32> = serde_json::from_value(json["embedding"].clone()).ok()?;
+    if raw.is_empty() {
+        return None;
+    }
+
+    // L2-normalisation — Ollama ne retourne pas de vecteurs normalisés
+    let norm: f32 = raw.iter().map(|x| x * x).sum::<f32>().sqrt();
+    if norm == 0.0 {
+        return None;
+    }
+    Some(raw.into_iter().map(|x| x / norm).collect())
 }
 
 /// Similarité cosinus entre deux vecteurs de même dimension.

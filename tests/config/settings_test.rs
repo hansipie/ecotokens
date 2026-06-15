@@ -128,10 +128,34 @@ fn embed_provider_none_roundtrip() {
 }
 
 #[test]
-fn embed_provider_legacy_ollama_deserializes_to_legacy() {
+fn embed_provider_ollama_deserializes_to_ollama() {
     let json = r#"{"embed_provider": {"type": "ollama", "url": "http://localhost:11434", "model": "nomic-embed-text"}}"#;
     let s: Settings = serde_json::from_str(json).unwrap();
-    assert_eq!(s.embed_provider, EmbedProvider::Legacy);
+    assert_eq!(
+        s.embed_provider,
+        EmbedProvider::Ollama {
+            url: "http://localhost:11434".to_string(),
+            model: "nomic-embed-text".to_string(),
+        }
+    );
+}
+
+#[test]
+fn embed_provider_ollama_roundtrip() {
+    let mut s = Settings::default();
+    s.embed_provider = EmbedProvider::Ollama {
+        url: "http://localhost:11434".to_string(),
+        model: "qwen3-embedding:latest".to_string(),
+    };
+    let json = serde_json::to_string(&s).unwrap();
+    let s2: Settings = serde_json::from_str(&json).unwrap();
+    assert_eq!(
+        s2.embed_provider,
+        EmbedProvider::Ollama {
+            url: "http://localhost:11434".to_string(),
+            model: "qwen3-embedding:latest".to_string(),
+        }
+    );
 }
 
 #[test]

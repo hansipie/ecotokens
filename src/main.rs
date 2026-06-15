@@ -145,12 +145,15 @@ enum Commands {
         /// Set the default model used for cost calculations
         #[arg(long)]
         model: Option<String>,
-        /// Set embed provider: candle, none
+        /// Set embed provider: candle, ollama, none
         #[arg(long)]
         embed_provider: Option<String>,
         /// Model name for the embeddings provider (e.g. sentence-transformers/all-MiniLM-L6-v2)
         #[arg(long)]
         embed_model: Option<String>,
+        /// Base URL for the Ollama embedding API (e.g. http://localhost:11434)
+        #[arg(long)]
+        embed_url: Option<String>,
     },
     /// Diagnose common ecotokens setup issues without changing files
     Doctor {
@@ -1476,6 +1479,7 @@ fn cmd_config(
     model: Option<String>,
     embed_provider: Option<String>,
     embed_model: Option<String>,
+    embed_url: Option<String>,
 ) {
     use config::settings::EmbedProvider;
 
@@ -1520,8 +1524,19 @@ fn cmd_config(
                     .unwrap_or_else(|| "sentence-transformers/all-MiniLM-L6-v2".to_string()),
             },
             "none" => EmbedProvider::None,
+            "ollama" => EmbedProvider::Ollama {
+                url: embed_url
+                    .clone()
+                    .unwrap_or_else(|| "http://localhost:11434".to_string()),
+                model: embed_model
+                    .clone()
+                    .unwrap_or_else(|| "qwen3-embedding:latest".to_string()),
+            },
             other => {
-                eprintln!("unknown provider: '{}'. Valid values: candle, none", other);
+                eprintln!(
+                    "unknown provider: '{}'. Valid values: candle, ollama, none",
+                    other
+                );
                 std::process::exit(1);
             }
         };
@@ -1530,9 +1545,10 @@ fn cmd_config(
         // Changer uniquement le modèle sans toucher au provider
         match &mut settings.embed_provider {
             EmbedProvider::Candle { model } => *model = m.clone(),
+            EmbedProvider::Ollama { model, .. } => *model = m.clone(),
             EmbedProvider::None | EmbedProvider::Legacy => {
                 eprintln!(
-                    "no embed provider configured; set one first with --embed-provider candle"
+                    "no embed provider configured; set one first with --embed-provider candle or ollama"
                 );
                 std::process::exit(1);
             }
@@ -1554,6 +1570,7 @@ fn cmd_config(
         EmbedProvider::None => "none".to_string(),
         EmbedProvider::Legacy => "legacy (will migrate to candle on next save)".to_string(),
         EmbedProvider::Candle { model } => format!("candle model={model}"),
+        EmbedProvider::Ollama { url, model } => format!("ollama url={url} model={model}"),
     };
 
     let hook_installed = install::is_hook_installed(&settings_path);
@@ -3006,7 +3023,16 @@ fn main() {
             model,
             embed_provider,
             embed_model,
-        } => cmd_config(json, debug, debuglog, model, embed_provider, embed_model),
+            embed_url,
+        } => cmd_config(
+            json,
+            debug,
+            debuglog,
+            model,
+            embed_provider,
+            embed_model,
+            embed_url,
+        ),
         Commands::Doctor { json } => cmd_doctor(json),
         Commands::Index {
             path,
