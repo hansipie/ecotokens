@@ -5,6 +5,18 @@ All notable changes to this project will be documented in this file.
 The format is based on [Keep a Changelog](https://keepachangelog.com/en/1.0.0/),
 and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0.html).
 
+## [0.22.0] - 2026-06-15
+
+### Added
+
+- **`ecotokens doctor`**: new diagnostic command that checks the local setup without mutating any file — reports PATH availability, config readability, hook and MCP registration status for Claude Code, Gemini CLI and Qwen Code, and metrics database reachability; human-readable output by default, machine-readable with `--json` (closes #84, co-authored by @Chris79OG)
+  - No hooks at all (`pre=false, post=false`) is classified as `Error`; partial hook presence as `Warning`
+  - Gracefully handles a missing home directory for each agent path
+
+### Fixed
+
+- **Codex plugin manifest**: `shortDescription` and `longDescription` in `CODEX_PLUGIN_MANIFEST` incorrectly claimed a `SessionStart` hook was installed — corrected to reflect actual behaviour (PreToolUse/PostToolUse only); the auto-watch comment and user-facing message now accurately state that Codex has no `SessionEnd` equivalent, so the start/stop cycle cannot be completed (closes #97)
+
 ## [0.21.0] - 2026-05-29
 
 ### Added
