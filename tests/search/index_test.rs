@@ -126,3 +126,39 @@ fn incremental_update_does_not_duplicate() {
     );
     assert!(stats2.chunk_count > 0, "changed file should produce chunks");
 }
+
+#[test]
+fn incremental_update_prunes_stale_vectors_for_changed_file() {
+    use ecotokens::search::hnsw::HnswIndex;
+    use std::thread;
+    use std::time::Duration;
+
+    let src = TempDir::new().unwrap();
+    let idx = TempDir::new().unwrap();
+    let file = src.path().join("main.rs");
+    fs::write(&file, "fn old_name() {}\n").unwrap();
+
+    let opts = IndexOptions {
+        reset: false,
+        path: src.path().to_path_buf(),
+        index_dir: idx.path().to_path_buf(),
+        progress: None,
+        embed_provider: ecotokens::config::settings::EmbedProvider::None,
+        log_tx: None,
+    };
+    index_directory(opts.clone()).unwrap();
+
+    let stale_vectors = vec![("main.rs::old_name".to_string(), vec![1.0_f32, 0.0])];
+    HnswIndex::build(&stale_vectors).save(idx.path()).unwrap();
+
+    thread::sleep(Duration::from_millis(1100));
+    fs::write(&file, "fn new_name() {}\n").unwrap();
+
+    let stats = index_directory(opts).unwrap();
+
+    assert_eq!(stats.vector_count, 0);
+    assert!(
+        HnswIndex::load(idx.path()).is_none(),
+        "stale vectors for a changed file must not survive incremental reindex"
+    );
+}

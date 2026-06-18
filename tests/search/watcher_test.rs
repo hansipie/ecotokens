@@ -1,3 +1,4 @@
+use ecotokens::config::settings::EmbedProvider;
 use ecotokens::daemon::watcher::{watch_directory, WatchEvent};
 use std::sync::mpsc;
 use std::time::Duration;
@@ -16,7 +17,13 @@ fn test_watcher_detects_file_creation() {
     let idx_dir = index_dir.path().to_path_buf();
 
     let handle = std::thread::spawn(move || {
-        let _ = watch_directory(&watch_path, &idx_dir, event_tx, stop_rx);
+        let _ = watch_directory(
+            &watch_path,
+            &idx_dir,
+            EmbedProvider::None,
+            event_tx,
+            stop_rx,
+        );
     });
 
     // Laisser le watcher démarrer
@@ -55,7 +62,13 @@ fn test_watcher_ignores_non_indexable_files() {
     let idx_dir = index_dir.path().to_path_buf();
 
     let handle = std::thread::spawn(move || {
-        let _ = watch_directory(&watch_path, &idx_dir, event_tx, stop_rx);
+        let _ = watch_directory(
+            &watch_path,
+            &idx_dir,
+            EmbedProvider::None,
+            event_tx,
+            stop_rx,
+        );
     });
 
     std::thread::sleep(Duration::from_millis(200));
@@ -93,7 +106,13 @@ fn test_watcher_respects_gitignore() {
     let idx_dir = index_dir.path().to_path_buf();
 
     let handle = std::thread::spawn(move || {
-        let _ = watch_directory(&watch_path, &idx_dir, event_tx, stop_rx);
+        let _ = watch_directory(
+            &watch_path,
+            &idx_dir,
+            EmbedProvider::None,
+            event_tx,
+            stop_rx,
+        );
     });
 
     std::thread::sleep(Duration::from_millis(200));
@@ -138,7 +157,13 @@ fn test_watcher_detects_modification() {
     let idx_dir = index_dir.path().to_path_buf();
 
     let handle = std::thread::spawn(move || {
-        let _ = watch_directory(&watch_path, &idx_dir, event_tx, stop_rx);
+        let _ = watch_directory(
+            &watch_path,
+            &idx_dir,
+            EmbedProvider::None,
+            event_tx,
+            stop_rx,
+        );
     });
 
     std::thread::sleep(Duration::from_millis(200));

@@ -2260,12 +2260,13 @@ fn cmd_watch(
 
     let counter = Arc::new(AtomicUsize::new(0));
     let (log_tx, log_rx) = std::sync::mpsc::channel::<String>();
+    let settings = config::Settings::load();
     let opts = search::index::IndexOptions {
         reset: false,
         path: watch_path.clone(),
         index_dir: idx_dir.clone(),
         progress: Some(counter.clone()),
-        embed_provider: config::Settings::load().embed_provider,
+        embed_provider: settings.embed_provider.clone(),
         log_tx: if is_interactive { Some(log_tx) } else { None },
     };
 
@@ -2339,8 +2340,15 @@ fn cmd_watch(
         let (stop_tx, stop_rx) = std::sync::mpsc::channel::<()>();
         let watch_path_clone = watch_path.clone();
         let idx_dir_clone = idx_dir.clone();
+        let embed_provider = settings.embed_provider.clone();
         let watcher_handle = std::thread::spawn(move || {
-            daemon::watcher::watch_directory(&watch_path_clone, &idx_dir_clone, event_tx, stop_rx)
+            daemon::watcher::watch_directory(
+                &watch_path_clone,
+                &idx_dir_clone,
+                embed_provider,
+                event_tx,
+                stop_rx,
+            )
         });
 
         let index_report = index_result.ok().map(|stats| tui::watch::IndexReport {
@@ -2419,8 +2427,15 @@ fn cmd_watch(
         let (stop_tx, stop_rx) = std::sync::mpsc::channel::<()>();
         let watch_path_clone = watch_path.clone();
         let idx_dir_clone = idx_dir.clone();
+        let embed_provider = settings.embed_provider.clone();
         let watcher_handle = std::thread::spawn(move || {
-            daemon::watcher::watch_directory(&watch_path_clone, &idx_dir_clone, event_tx, stop_rx)
+            daemon::watcher::watch_directory(
+                &watch_path_clone,
+                &idx_dir_clone,
+                embed_provider,
+                event_tx,
+                stop_rx,
+            )
         });
 
         // Background mode: log events to watch.log (only if debug is enabled)

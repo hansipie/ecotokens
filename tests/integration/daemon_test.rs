@@ -1,3 +1,4 @@
+use ecotokens::config::settings::EmbedProvider;
 use ecotokens::daemon::watcher::{watch_directory, WatchEvent};
 use std::sync::mpsc;
 use std::time::Duration;
@@ -16,7 +17,13 @@ fn test_watch_sends_reindexed_event_on_file_change() {
     let idx_dir = index_dir.path().to_path_buf();
 
     let handle = std::thread::spawn(move || {
-        let _ = watch_directory(&watch_path, &idx_dir, event_tx, stop_rx);
+        let _ = watch_directory(
+            &watch_path,
+            &idx_dir,
+            EmbedProvider::None,
+            event_tx,
+            stop_rx,
+        );
     });
 
     std::thread::sleep(Duration::from_millis(200));
@@ -52,8 +59,15 @@ fn test_watch_stops_cleanly_on_stop_signal() {
     let watch_path = dir.path().to_path_buf();
     let idx_dir = index_dir.path().to_path_buf();
 
-    let handle =
-        std::thread::spawn(move || watch_directory(&watch_path, &idx_dir, event_tx, stop_rx));
+    let handle = std::thread::spawn(move || {
+        watch_directory(
+            &watch_path,
+            &idx_dir,
+            EmbedProvider::None,
+            event_tx,
+            stop_rx,
+        )
+    });
 
     std::thread::sleep(Duration::from_millis(200));
 
@@ -81,7 +95,13 @@ fn test_watch_debounces_rapid_changes() {
     let idx_dir = index_dir.path().to_path_buf();
 
     let handle = std::thread::spawn(move || {
-        let _ = watch_directory(&watch_path, &idx_dir, event_tx, stop_rx);
+        let _ = watch_directory(
+            &watch_path,
+            &idx_dir,
+            EmbedProvider::None,
+            event_tx,
+            stop_rx,
+        );
     });
 
     std::thread::sleep(Duration::from_millis(200));

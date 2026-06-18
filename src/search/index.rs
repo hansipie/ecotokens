@@ -144,6 +144,14 @@ fn file_mtime(path: &Path) -> u64 {
         .unwrap_or(0)
 }
 
+fn remove_embeddings_for_path(embeddings: &mut HashMap<String, Vec<f32>>, rel_path: &str) {
+    let symbol_prefix = format!("{rel_path}::");
+    let line_prefix = format!("{rel_path}:");
+    embeddings.retain(|id, _| {
+        !(id.starts_with(&symbol_prefix) || id.starts_with(&line_prefix) || id == rel_path)
+    });
+}
+
 pub fn index_directory(opts: IndexOptions) -> tantivy::Result<IndexStats> {
     // If the embedding model changed, invalidate the existing HNSW index by
     // treating it as a full reset for the embeddings (but keep BM25 incremental).
@@ -266,6 +274,7 @@ pub fn index_directory(opts: IndexOptions) -> tantivy::Result<IndexStats> {
         // Remove stale docs for this file before re-adding
         let term = Term::from_field_text(file_path_field, &rel_path);
         writer.delete_term(term);
+        remove_embeddings_for_path(&mut embeddings, &rel_path);
 
         let content = match std::fs::read_to_string(path) {
             Ok(c) => c,
@@ -343,6 +352,7 @@ pub fn index_directory(opts: IndexOptions) -> tantivy::Result<IndexStats> {
     for p in &deleted {
         let term = Term::from_field_text(file_path_field, p.as_str());
         writer.delete_term(term);
+        remove_embeddings_for_path(&mut embeddings, p);
     }
     for p in deleted {
         timestamps.remove(&p);
@@ -376,6 +386,8 @@ pub fn index_directory(opts: IndexOptions) -> tantivy::Result<IndexStats> {
         let _ = meta.save(&opts.index_dir);
         (vector_count as u32, Some(model_id))
     } else {
+        let _ = std::fs::remove_file(opts.index_dir.join("hnsw_index.bin"));
+        let _ = std::fs::remove_file(opts.index_dir.join("hnsw_meta.json"));
         (0, None)
     };
 
