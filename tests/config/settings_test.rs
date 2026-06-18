@@ -59,7 +59,7 @@ fn valid_settings_pass_validation() {
 fn model_pricing_has_known_models() {
     let s = Settings::default();
     assert!(s.model_pricing.contains_key("claude-sonnet-4-6"));
-    assert!(s.model_pricing.contains_key("claude-opus-4-6"));
+    assert!(s.model_pricing.contains_key("claude-opus-4-8"));
 }
 
 #[test]
@@ -102,7 +102,7 @@ fn pricing_json_overrides_builtin() {
     assert!((price.input_usd_per_1m - 0.01).abs() < f64::EPSILON);
     assert!((price.output_usd_per_1m - 0.02).abs() < f64::EPSILON);
     // Les modèles non overridés restent présents depuis le built-in
-    assert!(s.model_pricing.contains_key("claude-opus-4-6"));
+    assert!(s.model_pricing.contains_key("claude-opus-4-8"));
 }
 
 // ── T072t — Tests embed_provider (CLI --embed-provider) ───────────────────────

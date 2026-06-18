@@ -15,92 +15,36 @@ pub const MODELS: &[ModelDefinition] = &[
         output_usd_per_1m: 5.00,
     },
     ModelDefinition {
-        name: "claude-haiku-4-5-20251001",
-        input_usd_per_1m: 1.00,
-        output_usd_per_1m: 5.00,
-    },
-    ModelDefinition {
-        name: "claude-sonnet-4-5",
-        input_usd_per_1m: 3.00,
-        output_usd_per_1m: 15.00,
-    },
-    ModelDefinition {
         name: "claude-sonnet-4-6",
         input_usd_per_1m: 3.00,
         output_usd_per_1m: 15.00,
     },
     ModelDefinition {
-        name: "claude-opus-4-6",
-        input_usd_per_1m: 15.00,
-        output_usd_per_1m: 75.00,
-    },
-    ModelDefinition {
-        name: "claude-opus-4-7",
+        name: "claude-opus-4-8",
         input_usd_per_1m: 5.00,
         output_usd_per_1m: 25.00,
     },
     // --- OpenAI GPT ---
     ModelDefinition {
-        name: "gpt-4o",
+        name: "gpt-5.5",
+        input_usd_per_1m: 5.00,
+        output_usd_per_1m: 30.00,
+    },
+    ModelDefinition {
+        name: "gpt-5.4",
         input_usd_per_1m: 2.50,
-        output_usd_per_1m: 10.00,
+        output_usd_per_1m: 15.00,
     },
     ModelDefinition {
-        name: "gpt-4o-mini",
-        input_usd_per_1m: 0.15,
-        output_usd_per_1m: 0.60,
-    },
-    ModelDefinition {
-        name: "gpt-4.1",
-        input_usd_per_1m: 2.00,
-        output_usd_per_1m: 8.00,
-    },
-    ModelDefinition {
-        name: "gpt-4.1-mini",
-        input_usd_per_1m: 0.40,
-        output_usd_per_1m: 1.60,
-    },
-    ModelDefinition {
-        name: "gpt-4.1-nano",
-        input_usd_per_1m: 0.10,
-        output_usd_per_1m: 0.40,
-    },
-    ModelDefinition {
-        name: "gpt-5",
-        input_usd_per_1m: 1.25,
-        output_usd_per_1m: 10.00,
-    },
-    ModelDefinition {
-        name: "gpt-5-mini",
-        input_usd_per_1m: 0.25,
-        output_usd_per_1m: 2.00,
-    },
-    ModelDefinition {
-        name: "gpt-5-nano",
-        input_usd_per_1m: 0.05,
-        output_usd_per_1m: 0.40,
-    },
-    // --- OpenAI Reasoning ---
-    ModelDefinition {
-        name: "o1",
-        input_usd_per_1m: 15.00,
-        output_usd_per_1m: 60.00,
-    },
-    ModelDefinition {
-        name: "o3",
-        input_usd_per_1m: 2.00,
-        output_usd_per_1m: 8.00,
-    },
-    ModelDefinition {
-        name: "o4-mini",
-        input_usd_per_1m: 1.10,
-        output_usd_per_1m: 4.40,
+        name: "gpt-5.4-mini",
+        input_usd_per_1m: 0.75,
+        output_usd_per_1m: 4.50,
     },
     // --- Google Gemini ---
     ModelDefinition {
-        name: "gemini-2.5-pro",
-        input_usd_per_1m: 1.25,
-        output_usd_per_1m: 10.00,
+        name: "gemini-2.5-flash-lite",
+        input_usd_per_1m: 0.10,
+        output_usd_per_1m: 0.40,
     },
     ModelDefinition {
         name: "gemini-2.5-flash",
@@ -108,79 +52,25 @@ pub const MODELS: &[ModelDefinition] = &[
         output_usd_per_1m: 2.50,
     },
     ModelDefinition {
-        name: "gemini-2.5-flash-lite",
-        input_usd_per_1m: 0.10,
-        output_usd_per_1m: 0.40,
-    },
-    ModelDefinition {
-        name: "gemini-2.0-flash",
-        input_usd_per_1m: 0.10,
-        output_usd_per_1m: 0.40,
-    },
-    // --- DeepSeek ---
-    ModelDefinition {
-        name: "deepseek-v3",
-        input_usd_per_1m: 0.252,
-        output_usd_per_1m: 0.378,
-    },
-    // --- Mistral ---
-    ModelDefinition {
-        name: "mistral-large",
-        input_usd_per_1m: 0.50,
-        output_usd_per_1m: 1.50,
-    },
-    ModelDefinition {
-        name: "mistral-small",
-        input_usd_per_1m: 0.15,
-        output_usd_per_1m: 0.60,
-    },
-    // --- Meta Llama ---
-    ModelDefinition {
-        name: "llama-4-maverick",
-        input_usd_per_1m: 0.15,
-        output_usd_per_1m: 0.60,
-    },
-    ModelDefinition {
-        name: "llama-4-scout",
-        input_usd_per_1m: 0.08,
-        output_usd_per_1m: 0.30,
-    },
-    ModelDefinition {
-        name: "llama-3.3-70b-instruct",
-        input_usd_per_1m: 0.10,
-        output_usd_per_1m: 0.32,
-    },
-    // --- Alibaba Qwen ---
-    ModelDefinition {
-        name: "qwen3.6-max",
-        input_usd_per_1m: 1.30,
-        output_usd_per_1m: 7.80,
-    },
-    ModelDefinition {
-        name: "qwen3.6-plus",
-        input_usd_per_1m: 0.50,
-        output_usd_per_1m: 3.00,
-    },
-    ModelDefinition {
-        name: "qwen3.6-flash",
+        name: "gemini-3.1-flash-lite-preview",
         input_usd_per_1m: 0.25,
         output_usd_per_1m: 1.50,
     },
     ModelDefinition {
-        name: "qwen3.5-plus",
-        input_usd_per_1m: 0.40,
-        output_usd_per_1m: 2.40,
+        name: "gemini-3-flash-preview",
+        input_usd_per_1m: 0.50,
+        output_usd_per_1m: 3.00,
+    },
+    // --- Mistral ---
+    ModelDefinition {
+        name: "mistral-medium-3.5",
+        input_usd_per_1m: 1.50,
+        output_usd_per_1m: 7.50,
     },
     ModelDefinition {
-        name: "qwen3.5-flash",
+        name: "devstral-small",
         input_usd_per_1m: 0.10,
-        output_usd_per_1m: 0.40,
-    },
-    // Subscription-based: no per-token cost, token savings still tracked
-    ModelDefinition {
-        name: "github-copilot",
-        input_usd_per_1m: 0.0,
-        output_usd_per_1m: 0.0,
+        output_usd_per_1m: 0.30,
     },
 ];
 
