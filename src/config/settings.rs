@@ -279,7 +279,7 @@ impl Settings {
         }
         let json = serde_json::to_string_pretty(abbreviations_custom)
             .map_err(|e| std::io::Error::new(std::io::ErrorKind::InvalidData, e))?;
-        std::fs::write(abbreviations_path, json)
+        super::atomic_write(abbreviations_path, json)
     }
 
     fn save_pricing(
@@ -310,7 +310,7 @@ impl Settings {
         }
         let json = serde_json::to_string_pretty(&overrides)
             .map_err(|e| std::io::Error::new(std::io::ErrorKind::InvalidData, e))?;
-        std::fs::write(pricing_path, json)
+        super::atomic_write(pricing_path, json)
     }
 
     fn save_to_paths(
@@ -319,12 +319,9 @@ impl Settings {
         abbreviations_path: &Path,
         pricing_path: &Path,
     ) -> std::io::Result<()> {
-        if let Some(parent) = config_path.parent() {
-            std::fs::create_dir_all(parent)?;
-        }
         let json = serde_json::to_string_pretty(self)
             .map_err(|e| std::io::Error::new(std::io::ErrorKind::InvalidData, e))?;
-        std::fs::write(config_path, json)?;
+        super::atomic_write(config_path, json)?;
         Self::save_abbreviations(abbreviations_path, &self.abbreviations_custom)?;
         Self::save_pricing(pricing_path, &self.model_pricing)
     }
