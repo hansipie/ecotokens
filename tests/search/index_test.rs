@@ -162,3 +162,170 @@ fn incremental_update_prunes_stale_vectors_for_changed_file() {
         "stale vectors for a changed file must not survive incremental reindex"
     );
 }
+
+#[test]
+fn incremental_update_prunes_stale_vectors_when_manifest_is_missing() {
+    use ecotokens::search::hnsw::HnswIndex;
+
+    let src = TempDir::new().unwrap();
+    let idx = TempDir::new().unwrap();
+    fs::write(src.path().join("main.rs"), "fn keep() {}\n").unwrap();
+
+    let opts = IndexOptions {
+        reset: false,
+        path: src.path().to_path_buf(),
+        index_dir: idx.path().to_path_buf(),
+        progress: None,
+        embed_provider: ecotokens::config::settings::EmbedProvider::None,
+        log_tx: None,
+    };
+    index_directory(opts.clone()).unwrap();
+    fs::remove_file(idx.path().join("semantic_manifest.json")).unwrap();
+
+    let vectors = vec![
+        ("main.rs::keep#fn".to_string(), vec![1.0_f32, 0.0]),
+        ("main.rs::stale#fn".to_string(), vec![0.0_f32, 1.0]),
+    ];
+    HnswIndex::build(&vectors).save(idx.path()).unwrap();
+
+    let stats = index_directory(opts).unwrap();
+    let embeddings = HnswIndex::load(idx.path()).unwrap().to_embeddings();
+
+    assert_eq!(stats.vector_count, 1);
+    assert!(embeddings.contains_key("main.rs::keep#fn"));
+    assert!(!embeddings.contains_key("main.rs::stale#fn"));
+}
+
+#[test]
+fn incremental_update_prunes_vectors_for_deleted_file() {
+    use ecotokens::search::hnsw::HnswIndex;
+
+    let src = TempDir::new().unwrap();
+    let idx = TempDir::new().unwrap();
+    fs::write(src.path().join("a.rs"), "fn alpha() {}\n").unwrap();
+    fs::write(src.path().join("b.rs"), "fn beta() {}\n").unwrap();
+
+    let opts = IndexOptions {
+        reset: false,
+        path: src.path().to_path_buf(),
+        index_dir: idx.path().to_path_buf(),
+        progress: None,
+        embed_provider: ecotokens::config::settings::EmbedProvider::None,
+        log_tx: None,
+    };
+    index_directory(opts.clone()).unwrap();
+
+    let vectors = vec![
+        ("a.rs::alpha#fn".to_string(), vec![1.0_f32, 0.0]),
+        ("b.rs::beta#fn".to_string(), vec![0.0_f32, 1.0]),
+    ];
+    HnswIndex::build(&vectors).save(idx.path()).unwrap();
+    fs::remove_file(src.path().join("b.rs")).unwrap();
+
+    let stats = index_directory(opts).unwrap();
+    let embeddings = HnswIndex::load(idx.path()).unwrap().to_embeddings();
+    let manifest: serde_json::Value = serde_json::from_str(
+        &fs::read_to_string(idx.path().join("semantic_manifest.json")).unwrap(),
+    )
+    .unwrap();
+
+    assert_eq!(stats.vector_count, 1);
+    assert!(embeddings.contains_key("a.rs::alpha#fn"));
+    assert!(!embeddings.contains_key("b.rs::beta#fn"));
+    assert!(manifest["files"]["a.rs"].is_object());
+    assert!(manifest["files"].get("b.rs").is_none());
+}
+
+#[test]
+fn incremental_update_removes_legacy_embeddings_when_no_vectors_remain() {
+    let src = TempDir::new().unwrap();
+    let idx = TempDir::new().unwrap();
+    fs::write(src.path().join("main.rs"), "fn main() {}\n").unwrap();
+
+    let legacy = serde_json::json!({
+        "deleted.rs::gone#fn": [1.0_f32, 0.0]
+    });
+    fs::write(
+        idx.path().join("embeddings.json"),
+        serde_json::to_string(&legacy).unwrap(),
+    )
+    .unwrap();
+
+    let opts = IndexOptions {
+        reset: false,
+        path: src.path().to_path_buf(),
+        index_dir: idx.path().to_path_buf(),
+        progress: None,
+        embed_provider: ecotokens::config::settings::EmbedProvider::None,
+        log_tx: None,
+    };
+    let stats = index_directory(opts).unwrap();
+
+    assert_eq!(stats.vector_count, 0);
+    assert!(!idx.path().join("hnsw_index.bin").exists());
+    assert!(!idx.path().join("hnsw_meta.json").exists());
+    assert!(!idx.path().join("embeddings.json").exists());
+}
+
+#[test]
+fn incremental_update_removes_legacy_embeddings_after_successful_hnsw_save() {
+    use ecotokens::search::hnsw::HnswIndex;
+
+    let src = TempDir::new().unwrap();
+    let idx = TempDir::new().unwrap();
+    fs::write(src.path().join("main.rs"), "fn keep() {}\n").unwrap();
+
+    let opts = IndexOptions {
+        reset: false,
+        path: src.path().to_path_buf(),
+        index_dir: idx.path().to_path_buf(),
+        progress: None,
+        embed_provider: ecotokens::config::settings::EmbedProvider::None,
+        log_tx: None,
+    };
+    index_directory(opts.clone()).unwrap();
+
+    let legacy = serde_json::json!({
+        "main.rs::keep#fn": [1.0_f32, 0.0]
+    });
+    fs::write(
+        idx.path().join("embeddings.json"),
+        serde_json::to_string(&legacy).unwrap(),
+    )
+    .unwrap();
+
+    let stats = index_directory(opts).unwrap();
+
+    assert_eq!(stats.vector_count, 1);
+    assert!(HnswIndex::load(idx.path()).is_some());
+    assert!(!idx.path().join("embeddings.json").exists());
+}
+
+#[test]
+fn incremental_update_with_manifest_keeps_vector_count_stable() {
+    use ecotokens::search::hnsw::HnswIndex;
+
+    let src = TempDir::new().unwrap();
+    let idx = TempDir::new().unwrap();
+    fs::write(src.path().join("main.rs"), "fn keep() {}\n").unwrap();
+
+    let opts = IndexOptions {
+        reset: false,
+        path: src.path().to_path_buf(),
+        index_dir: idx.path().to_path_buf(),
+        progress: None,
+        embed_provider: ecotokens::config::settings::EmbedProvider::None,
+        log_tx: None,
+    };
+    index_directory(opts.clone()).unwrap();
+
+    let vectors = vec![("main.rs::keep#fn".to_string(), vec![1.0_f32, 0.0])];
+    HnswIndex::build(&vectors).save(idx.path()).unwrap();
+
+    let stats = index_directory(opts).unwrap();
+    let embeddings = HnswIndex::load(idx.path()).unwrap().to_embeddings();
+
+    assert_eq!(stats.file_count, 0);
+    assert_eq!(stats.vector_count, 1);
+    assert!(embeddings.contains_key("main.rs::keep#fn"));
+}

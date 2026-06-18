@@ -50,6 +50,18 @@ pub struct SemanticChunk {
     pub is_symbolic: bool,
 }
 
+#[derive(Debug, Clone, Serialize, Deserialize, Default)]
+struct SemanticManifest {
+    version: u32,
+    files: HashMap<String, SemanticManifestFile>,
+}
+
+#[derive(Debug, Clone, Serialize, Deserialize)]
+struct SemanticManifestFile {
+    mtime: u64,
+    chunk_ids: Vec<String>,
+}
+
 /// Produce symbol-based chunks from a set of parsed symbols.
 pub fn chunk_file_by_symbols(
     symbols: &[super::symbols::Symbol],
@@ -135,6 +147,30 @@ fn save_timestamps(dir: &Path, ts: &HashMap<String, u64>) {
     }
 }
 
+fn load_semantic_manifest(dir: &Path) -> SemanticManifest {
+    let path = dir.join("semantic_manifest.json");
+    let Some(mut manifest) = std::fs::read_to_string(path)
+        .ok()
+        .and_then(|s| serde_json::from_str::<SemanticManifest>(&s).ok())
+    else {
+        return SemanticManifest {
+            version: 1,
+            files: HashMap::new(),
+        };
+    };
+    if manifest.version != 1 {
+        manifest.files.clear();
+        manifest.version = 1;
+    }
+    manifest
+}
+
+fn save_semantic_manifest(dir: &Path, manifest: &SemanticManifest) {
+    if let Ok(s) = serde_json::to_string(manifest) {
+        let _ = std::fs::write(dir.join("semantic_manifest.json"), s);
+    }
+}
+
 fn file_mtime(path: &Path) -> u64 {
     std::fs::metadata(path)
         .and_then(|m| m.modified())
@@ -150,6 +186,41 @@ fn remove_embeddings_for_path(embeddings: &mut HashMap<String, Vec<f32>>, rel_pa
     embeddings.retain(|id, _| {
         !(id.starts_with(&symbol_prefix) || id.starts_with(&line_prefix) || id == rel_path)
     });
+}
+
+fn semantic_chunks_for_file(
+    path: &Path,
+    rel_path: &str,
+    content: &str,
+) -> (Vec<SemanticChunk>, Vec<super::symbols::Symbol>) {
+    let ext_str = path.extension().and_then(|e| e.to_str()).unwrap_or("");
+    let mut raw_symbols = match ext_str {
+        "rs" | "py" | "js" | "ts" | "jsx" | "tsx" | "c" | "h" | "cpp" | "cc" | "cxx" | "hpp"
+        | "hh" | "hxx" => parse_symbols(path).unwrap_or_default(),
+        "md" | "markdown" | "toml" | "json" | "yaml" | "yml" => {
+            index_text_doc(path, rel_path).unwrap_or_default()
+        }
+        _ => vec![],
+    };
+
+    // Fix IDs: parse_symbols uses just the basename; we need the rel_path prefix
+    let filename = path.file_name().and_then(|n| n.to_str()).unwrap_or("");
+    for sym in &mut raw_symbols {
+        if sym.file_path == filename {
+            if let Some(suffix) = sym.id.strip_prefix(&format!("{filename}::")) {
+                sym.id = format!("{rel_path}::{suffix}");
+            }
+            sym.file_path = rel_path.to_string();
+        }
+    }
+
+    let chunks = if !raw_symbols.is_empty() {
+        chunk_file_by_symbols(&raw_symbols, rel_path)
+    } else {
+        chunk_file_by_lines(content, rel_path)
+    };
+
+    (chunks, raw_symbols)
 }
 
 pub fn index_directory(opts: IndexOptions) -> tantivy::Result<IndexStats> {
@@ -179,6 +250,7 @@ pub fn index_directory(opts: IndexOptions) -> tantivy::Result<IndexStats> {
         let _ = std::fs::remove_file(opts.index_dir.join("hnsw_index.bin"));
         let _ = std::fs::remove_file(opts.index_dir.join("hnsw_meta.json"));
         let _ = std::fs::remove_file(opts.index_dir.join("embeddings.json"));
+        let _ = std::fs::remove_file(opts.index_dir.join("semantic_manifest.json"));
     }
 
     // T054 — migrate legacy embeddings.json → hnsw_index.bin on first run after upgrade
@@ -204,12 +276,21 @@ pub fn index_directory(opts: IndexOptions) -> tantivy::Result<IndexStats> {
     let mut writer: IndexWriter = index.writer(200_000_000)?;
 
     // Incremental mode: load per-file timestamps to skip unchanged files
-    let mut timestamps = if opts.reset {
+    let mut timestamps = if opts.reset || model_changed {
         HashMap::new()
     } else {
         load_timestamps(&opts.index_dir)
     };
+    let mut semantic_manifest = if opts.reset || model_changed {
+        SemanticManifest {
+            version: 1,
+            files: HashMap::new(),
+        }
+    } else {
+        load_semantic_manifest(&opts.index_dir)
+    };
     let mut seen_paths: HashSet<String> = HashSet::new();
+    let mut seen_chunk_ids: HashSet<String> = HashSet::new();
 
     let mut file_count = 0u32;
     let mut chunk_count = 0u32;
@@ -268,6 +349,22 @@ pub fn index_directory(opts: IndexOptions) -> tantivy::Result<IndexStats> {
         // Skip unchanged files (incremental mode)
         let mtime = file_mtime(path);
         if !opts.reset && timestamps.get(&rel_path) == Some(&mtime) {
+            if let Some(entry) = semantic_manifest.files.get(&rel_path) {
+                if entry.mtime == mtime {
+                    seen_chunk_ids.extend(entry.chunk_ids.iter().cloned());
+                    continue;
+                }
+            }
+
+            let Ok(content) = std::fs::read_to_string(path) else {
+                continue;
+            };
+            let (chunks, _) = semantic_chunks_for_file(path, &rel_path, &content);
+            let chunk_ids: Vec<String> = chunks.into_iter().map(|chunk| chunk.id).collect();
+            seen_chunk_ids.extend(chunk_ids.iter().cloned());
+            semantic_manifest
+                .files
+                .insert(rel_path.clone(), SemanticManifestFile { mtime, chunk_ids });
             continue;
         }
 
@@ -281,35 +378,9 @@ pub fn index_directory(opts: IndexOptions) -> tantivy::Result<IndexStats> {
             Err(_) => continue,
         };
 
-        // ── Symbolic extraction (tree-sitter for code, regex for docs) ──────
-        let ext_str = path.extension().and_then(|e| e.to_str()).unwrap_or("");
-        let mut raw_symbols = match ext_str {
-            "rs" | "py" | "js" | "ts" | "jsx" | "tsx" | "c" | "h" | "cpp" | "cc" | "cxx"
-            | "hpp" | "hh" | "hxx" => parse_symbols(path).unwrap_or_default(),
-            "md" | "markdown" | "toml" | "json" | "yaml" | "yml" => {
-                index_text_doc(path, &rel_path).unwrap_or_default()
-            }
-            _ => vec![],
-        };
-        // Fix IDs: parse_symbols uses just the basename; we need the rel_path prefix
-        let filename = path.file_name().and_then(|n| n.to_str()).unwrap_or("");
-        for sym in &mut raw_symbols {
-            if sym.file_path == filename {
-                if let Some(suffix) = sym.id.strip_prefix(&format!("{filename}::")) {
-                    sym.id = format!("{rel_path}::{suffix}");
-                }
-                sym.file_path = rel_path.clone();
-            }
-        }
-
-        // ── Decide chunking strategy ─────────────────────────────────────────
-        let bm25_chunks: Vec<SemanticChunk> = if !raw_symbols.is_empty() {
-            // Symbol-aware chunks: each symbol = one chunk
-            chunk_file_by_symbols(&raw_symbols, &rel_path)
-        } else {
-            // Fallback: 50-line windows
-            chunk_file_by_lines(&content, &rel_path)
-        };
+        let (bm25_chunks, raw_symbols) = semantic_chunks_for_file(path, &rel_path, &content);
+        let chunk_ids: Vec<String> = bm25_chunks.iter().map(|chunk| chunk.id.clone()).collect();
+        seen_chunk_ids.extend(chunk_ids.iter().cloned());
 
         // ── BM25 indexing ───────────────────────────────────────────────────
         let is_symbolic_batch = !raw_symbols.is_empty();
@@ -339,7 +410,10 @@ pub fn index_directory(opts: IndexOptions) -> tantivy::Result<IndexStats> {
             let _ = write_symbols(&raw_symbols, &mut writer); // best-effort
         }
 
-        timestamps.insert(rel_path, mtime);
+        timestamps.insert(rel_path.clone(), mtime);
+        semantic_manifest
+            .files
+            .insert(rel_path, SemanticManifestFile { mtime, chunk_ids });
         file_count += 1;
     }
 
@@ -356,19 +430,28 @@ pub fn index_directory(opts: IndexOptions) -> tantivy::Result<IndexStats> {
     }
     for p in deleted {
         timestamps.remove(&p);
+        semantic_manifest.files.remove(&p);
     }
 
     writer.commit()?;
 
     save_timestamps(&opts.index_dir, &timestamps);
+    save_semantic_manifest(&opts.index_dir, &semantic_manifest);
+
+    embeddings.retain(|id, _| seen_chunk_ids.contains(id));
 
     // Build HNSW index when embeddings are available.
     let (final_vector_count, final_embed_model) = if !embeddings.is_empty() {
         let hnsw_data: Vec<(String, Vec<f32>)> = embeddings.into_iter().collect();
         let vector_count = hnsw_data.len();
         let hnsw = HnswIndex::build(&hnsw_data);
-        if let Err(e) = hnsw.save(&opts.index_dir) {
-            log!("ecotokens: warning: could not save HNSW index: {e}");
+        match hnsw.save(&opts.index_dir) {
+            Ok(()) => {
+                let _ = std::fs::remove_file(opts.index_dir.join("embeddings.json"));
+            }
+            Err(e) => {
+                log!("ecotokens: warning: could not save HNSW index: {e}");
+            }
         }
         let model_id = match &opts.embed_provider {
             crate::config::settings::EmbedProvider::Candle { model } => model.clone(),
@@ -388,6 +471,7 @@ pub fn index_directory(opts: IndexOptions) -> tantivy::Result<IndexStats> {
     } else {
         let _ = std::fs::remove_file(opts.index_dir.join("hnsw_index.bin"));
         let _ = std::fs::remove_file(opts.index_dir.join("hnsw_meta.json"));
+        let _ = std::fs::remove_file(opts.index_dir.join("embeddings.json"));
         (0, None)
     };
 
