@@ -118,6 +118,15 @@ cargo install --path .
 ecotokens install
 ```
 
+Install commands print a section per target, followed by the entries that were written:
+
+```text
+Install Claude Code
+  ok      hook                   ~/.claude/settings.json
+  ok      post-hook              ~/.claude/settings.json
+  ok      MCP server             ~/.claude/settings.json
+```
+
 In addition to hook installation, this also registers an MCP server entry in `~/.claude/settings.json`:
 
 ```json
@@ -258,6 +267,22 @@ ecotokens uninstall --target pi        # Pi
 ecotokens uninstall --target hermes    # Hermes
 ecotokens uninstall --target codex     # Codex
 ecotokens uninstall --target all       # all targets
+```
+
+Uninstall commands use the same grouped output and only list entries that were present:
+
+```text
+Uninstall Claude Code
+  removed hook                   ~/.claude/settings.json
+  removed post-hook              ~/.claude/settings.json
+  removed MCP server             ~/.claude/settings.json
+```
+
+If nothing is installed for the selected target, the command prints:
+
+```text
+Uninstall Claude Code
+  note    nothing to uninstall
 ```
 
 ## Commands
