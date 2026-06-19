@@ -35,10 +35,7 @@ fn read_settings(path: &Path) -> serde_json::Value {
 }
 
 fn write_settings(path: &Path, v: &serde_json::Value) -> InstallResult {
-    if let Some(parent) = path.parent() {
-        std::fs::create_dir_all(parent)?;
-    }
-    std::fs::write(
+    crate::config::atomic_write(
         path,
         serde_json::to_string_pretty(v).expect("serde_json: impossible (non-string key)"),
     )
@@ -603,10 +600,7 @@ pub fn enable_hermes_plugin_in_config(config_path: &Path) -> InstallResult {
     if new_content == content {
         return Ok(());
     }
-    if let Some(parent) = config_path.parent() {
-        std::fs::create_dir_all(parent)?;
-    }
-    std::fs::write(config_path, new_content)
+    crate::config::atomic_write(config_path, new_content)
 }
 
 /// Return true if `ecotokens` appears in `plugins.enabled` in the Hermes config.
@@ -622,13 +616,13 @@ pub fn is_hermes_plugin_enabled_in_config(config_path: &Path) -> bool {
 /// Install the ecotokens Hermes Agent plugin (idempotent).
 pub fn install_hermes_plugin(plugin_dir: &Path) -> InstallResult {
     std::fs::create_dir_all(plugin_dir)?;
-    std::fs::write(plugin_dir.join("plugin.yaml"), HERMES_PLUGIN_MANIFEST)?;
+    crate::config::atomic_write(&plugin_dir.join("plugin.yaml"), HERMES_PLUGIN_MANIFEST)?;
     let binary = std::env::current_exe()
         .unwrap_or_else(|_| std::path::PathBuf::from("ecotokens"))
         .to_string_lossy()
         .into_owned();
-    std::fs::write(
-        plugin_dir.join("__init__.py"),
+    crate::config::atomic_write(
+        &plugin_dir.join("__init__.py"),
         hermes_plugin_init_content(&binary),
     )
 }
@@ -758,10 +752,7 @@ pub fn install_codex_mcp_server(config_path: &Path) -> InstallResult {
         );
         servers.insert("ecotokens".to_string(), toml::Value::Table(entry));
     }
-    if let Some(parent) = config_path.parent() {
-        std::fs::create_dir_all(parent)?;
-    }
-    std::fs::write(
+    crate::config::atomic_write(
         config_path,
         toml::to_string_pretty(&v).expect("toml serialisation impossible"),
     )
@@ -788,7 +779,7 @@ pub fn uninstall_codex_mcp_server(config_path: &Path) -> InstallResult {
         false
     };
     if changed {
-        std::fs::write(
+        crate::config::atomic_write(
             config_path,
             toml::to_string_pretty(&v).expect("toml serialisation impossible"),
         )?;
@@ -834,8 +825,8 @@ pub fn default_codex_plugin_dir() -> Option<std::path::PathBuf> {
 /// Install the ecotokens Codex plugin (idempotent).
 pub fn install_codex_plugin(plugin_dir: &Path) -> InstallResult {
     std::fs::create_dir_all(plugin_dir.join(".codex-plugin"))?;
-    std::fs::write(
-        plugin_dir.join(".codex-plugin").join("plugin.json"),
+    crate::config::atomic_write(
+        &plugin_dir.join(".codex-plugin").join("plugin.json"),
         CODEX_PLUGIN_MANIFEST,
     )?;
     // Clean up stale hooks files written by older installs.
@@ -884,10 +875,7 @@ pub fn default_pi_extension_path() -> Option<std::path::PathBuf> {
 
 /// Install the ecotokens extension for Pi (idempotent).
 pub fn install_pi_extension(extension_path: &Path) -> InstallResult {
-    if let Some(parent) = extension_path.parent() {
-        std::fs::create_dir_all(parent)?;
-    }
-    std::fs::write(extension_path, PI_EXTENSION_CONTENT)
+    crate::config::atomic_write(extension_path, PI_EXTENSION_CONTENT)
 }
 
 /// Check if the ecotokens Pi extension is installed.

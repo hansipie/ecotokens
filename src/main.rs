@@ -8,7 +8,7 @@ use ratatui::crossterm::terminal::{
 use ratatui::crossterm::ExecutableCommand;
 use ratatui::Terminal;
 use std::io::Read;
-use std::path::PathBuf;
+use std::path::{Path, PathBuf};
 
 use crate::config::default_index_dir;
 
@@ -849,6 +849,22 @@ fn cmd_doctor(json: bool) {
     }
 }
 
+fn print_install_section(first: &mut bool, title: &str) {
+    if !*first {
+        println!();
+    }
+    *first = false;
+    println!("{title}");
+}
+
+fn print_install_item(status: &str, action: &str, path: &Path) {
+    println!("  {status:<7} {action:<22} {}", path.display());
+}
+
+fn print_install_note(message: &str) {
+    println!("  note    {message}");
+}
+
 fn cmd_install(
     target: String,
     ai_summary: bool,
@@ -883,10 +899,13 @@ fn cmd_install(
         std::process::exit(1);
     }
 
+    let mut first_section = true;
+
     if install_claude {
+        print_install_section(&mut first_section, "Install Claude Code");
         match install::install_hook(&claude_path, &claude_json) {
             Ok(()) => {
-                println!("ecotokens hook installed → {}", claude_path.display());
+                print_install_item("ok", "hook", &claude_path);
             }
             Err(e) => {
                 eprintln!("install error (claude): {e}");
@@ -895,7 +914,7 @@ fn cmd_install(
         }
         match install::install_post_hook(&claude_path) {
             Ok(()) => {
-                println!("ecotokens post-hook installed → {}", claude_path.display());
+                print_install_item("ok", "post-hook", &claude_path);
             }
             Err(e) => {
                 eprintln!("install error (post hook): {e}");
@@ -904,10 +923,7 @@ fn cmd_install(
         }
         match install::install_mcp_server(&claude_path) {
             Ok(()) => {
-                println!(
-                    "ecotokens MCP server registered → {}",
-                    claude_path.display()
-                );
+                print_install_item("ok", "MCP server", &claude_path);
             }
             Err(e) => {
                 eprintln!("install error (mcp server): {e}");
@@ -917,28 +933,25 @@ fn cmd_install(
     }
 
     if install_gemini {
+        print_install_section(&mut first_section, "Install Gemini CLI");
         match gemini_path {
             Some(ref p) => {
                 match install::install_gemini_hook(p) {
-                    Ok(()) => println!("ecotokens hook installed (Gemini) → {}", p.display()),
+                    Ok(()) => print_install_item("ok", "hook", p),
                     Err(e) => {
                         eprintln!("install error (gemini hook): {e}");
                         std::process::exit(1);
                     }
                 }
                 match install::install_gemini_post_hook(p) {
-                    Ok(()) => {
-                        println!("ecotokens post-hook installed (Gemini) → {}", p.display())
-                    }
+                    Ok(()) => print_install_item("ok", "post-hook", p),
                     Err(e) => {
                         eprintln!("install error (gemini post-hook): {e}");
                         std::process::exit(1);
                     }
                 }
                 match install::install_mcp_server(p) {
-                    Ok(()) => {
-                        println!("ecotokens MCP server registered (Gemini) → {}", p.display())
-                    }
+                    Ok(()) => print_install_item("ok", "MCP server", p),
                     Err(e) => {
                         eprintln!("install error (gemini mcp server): {e}");
                         std::process::exit(1);
@@ -953,34 +966,25 @@ fn cmd_install(
     }
 
     if install_qwen {
+        print_install_section(&mut first_section, "Install Qwen Code");
         match qwen_path {
             Some(ref p) => {
                 match install::install_qwen_hook(p) {
-                    Ok(()) => println!("ecotokens hook installed (Qwen Code) → {}", p.display()),
+                    Ok(()) => print_install_item("ok", "hook", p),
                     Err(e) => {
                         eprintln!("install error (qwen hook): {e}");
                         std::process::exit(1);
                     }
                 }
                 match install::install_qwen_post_hook(p) {
-                    Ok(()) => {
-                        println!(
-                            "ecotokens post-hook installed (Qwen Code) → {}",
-                            p.display()
-                        )
-                    }
+                    Ok(()) => print_install_item("ok", "post-hook", p),
                     Err(e) => {
                         eprintln!("install error (qwen post-hook): {e}");
                         std::process::exit(1);
                     }
                 }
                 match install::install_mcp_server(p) {
-                    Ok(()) => {
-                        println!(
-                            "ecotokens MCP server registered (Qwen Code) → {}",
-                            p.display()
-                        )
-                    }
+                    Ok(()) => print_install_item("ok", "MCP server", p),
                     Err(e) => {
                         eprintln!("install error (qwen mcp server): {e}");
                         std::process::exit(1);
@@ -989,10 +993,7 @@ fn cmd_install(
                 let settings = config::Settings::load();
                 if settings.auto_watch && !install::are_session_hooks_installed(p) {
                     match install::install_session_hooks(p) {
-                        Ok(()) => println!(
-                            "ecotokens session hooks installed (Qwen Code) → {}",
-                            p.display()
-                        ),
+                        Ok(()) => print_install_item("ok", "session hooks", p),
                         Err(e) => {
                             eprintln!("install error (qwen session hooks): {e}");
                             std::process::exit(1);
@@ -1008,11 +1009,12 @@ fn cmd_install(
     }
 
     if install_pi {
+        print_install_section(&mut first_section, "Install Pi");
         match install::default_pi_extension_path() {
             Some(ref p) => match install::install_pi_extension(p) {
                 Ok(()) => {
-                    println!("ecotokens extension installed (Pi) → {}", p.display());
-                    println!("  Reload in pi with: /reload");
+                    print_install_item("ok", "extension", p);
+                    print_install_note("reload in Pi with: /reload");
                 }
                 Err(e) => {
                     eprintln!("install error (pi): {e}");
@@ -1027,13 +1029,11 @@ fn cmd_install(
     }
 
     if install_hermes {
+        print_install_section(&mut first_section, "Install Hermes Agent");
         match hermes_plugin_dir {
             Some(ref p) => match install::install_hermes_plugin(p) {
                 Ok(()) => {
-                    println!(
-                        "ecotokens plugin installed (Hermes Agent) → {}",
-                        p.display()
-                    );
+                    print_install_item("ok", "plugin", p);
                     if enable_plugin {
                         // Edit config.yaml directly — no Hermes CLI required.
                         match install::default_hermes_config_path() {
@@ -1042,29 +1042,25 @@ fn cmd_install(
                                 match install::enable_hermes_plugin_in_config(cfg) {
                                     Ok(()) => {
                                         if already {
-                                            println!(
-                                                "  Plugin already in plugins.enabled ({}).",
-                                                cfg.display()
-                                            );
+                                            print_install_item("skip", "already enabled", cfg);
                                         } else {
-                                            println!(
-                                                "  Plugin added to plugins.enabled → {}",
-                                                cfg.display()
-                                            );
-                                            println!("  Restart Hermes to load the plugin.");
+                                            print_install_item("ok", "enabled", cfg);
+                                            print_install_note("restart Hermes to load the plugin");
                                         }
                                     }
                                     Err(e) => {
                                         eprintln!("  Warning: could not update config.yaml: {e}");
-                                        println!(
-                                            "  Enable manually: hermes plugins enable ecotokens"
+                                        print_install_note(
+                                            "enable manually: hermes plugins enable ecotokens",
                                         );
                                     }
                                 }
                             }
                             None => {
                                 eprintln!("  Warning: cannot determine Hermes config path.");
-                                println!("  Enable manually: hermes plugins enable ecotokens");
+                                print_install_note(
+                                    "enable manually: hermes plugins enable ecotokens",
+                                );
                             }
                         }
                     } else {
@@ -1076,17 +1072,19 @@ fn cmd_install(
                             Ok(out) => {
                                 let msg = String::from_utf8_lossy(&out.stdout);
                                 if msg.contains("already enabled") {
-                                    println!(
-                                        "  Plugin already enabled in Hermes (plugins.enabled)."
-                                    );
+                                    print_install_note("plugin already enabled in Hermes");
                                 } else if out.status.success() {
-                                    println!("  Plugin enabled in Hermes (plugins.enabled).");
+                                    print_install_note("plugin enabled in Hermes");
                                 } else {
-                                    println!("  Enable manually: hermes plugins enable ecotokens");
+                                    print_install_note(
+                                        "enable manually: hermes plugins enable ecotokens",
+                                    );
                                 }
                             }
                             Err(_) => {
-                                println!("  Enable manually: hermes plugins enable ecotokens");
+                                print_install_note(
+                                    "enable manually: hermes plugins enable ecotokens",
+                                );
                             }
                         }
                     }
@@ -1104,10 +1102,11 @@ fn cmd_install(
     }
 
     if install_codex {
+        print_install_section(&mut first_section, "Install Codex");
         match codex_plugin_dir {
             Some(ref p) => match install::install_codex_plugin(p) {
                 Ok(()) => {
-                    println!("ecotokens plugin installed (Codex) → {}", p.display());
+                    print_install_item("ok", "plugin", p);
                 }
                 Err(e) => {
                     eprintln!("install error (codex): {e}");
@@ -1122,16 +1121,14 @@ fn cmd_install(
         match install::default_codex_hooks_path() {
             Some(ref h) => {
                 match install::install_codex_hook(h) {
-                    Ok(()) => println!("ecotokens hook installed (Codex) → {}", h.display()),
+                    Ok(()) => print_install_item("ok", "hook", h),
                     Err(e) => {
                         eprintln!("install error (codex hook): {e}");
                         std::process::exit(1);
                     }
                 }
                 match install::install_codex_post_hook(h) {
-                    Ok(()) => {
-                        println!("ecotokens post-hook installed (Codex) → {}", h.display())
-                    }
+                    Ok(()) => print_install_item("ok", "post-hook", h),
                     Err(e) => {
                         eprintln!("install error (codex post-hook): {e}");
                         std::process::exit(1);
@@ -1145,9 +1142,7 @@ fn cmd_install(
         }
         match install::default_codex_config_path() {
             Some(ref c) => match install::install_codex_mcp_server(c) {
-                Ok(()) => {
-                    println!("ecotokens MCP server registered (Codex) → {}", c.display())
-                }
+                Ok(()) => print_install_item("ok", "MCP server", c),
                 Err(e) => {
                     eprintln!("install error (codex mcp server): {e}");
                     std::process::exit(1);
@@ -1171,7 +1166,8 @@ fn cmd_install(
             eprintln!("failed to save config: {e}");
             std::process::exit(1);
         }
-        println!("AI summary configured in ~/.config/ecotokens/config.json");
+        print_install_section(&mut first_section, "Configure ecotokens");
+        print_install_note("AI summary configured in ~/.config/ecotokens/config.json");
     }
 }
 
@@ -1204,7 +1200,10 @@ fn cmd_uninstall(target: String) {
         std::process::exit(1);
     }
 
+    let mut first_section = true;
+
     if uninstall_claude {
+        print_install_section(&mut first_section, "Uninstall Claude Code");
         let had_hook = install::is_hook_installed(&claude_path);
         let had_post_hook = install::is_post_hook_installed(&claude_path);
         let had_mcp = install::is_mcp_registered(&claude_path);
@@ -1212,25 +1211,19 @@ fn cmd_uninstall(target: String) {
         match install::uninstall_hook(&claude_path, &claude_json) {
             Ok(()) => {
                 if had_hook {
-                    println!("ecotokens hook removed ← {}", claude_path.display());
+                    print_install_item("removed", "hook", &claude_path);
                 }
                 if had_post_hook {
-                    println!("ecotokens post-hook removed ← {}", claude_path.display());
+                    print_install_item("removed", "post-hook", &claude_path);
                 }
                 if had_mcp {
-                    println!(
-                        "ecotokens MCP server unregistered ← {}",
-                        claude_path.display()
-                    );
+                    print_install_item("removed", "MCP server", &claude_path);
                 }
                 if had_session {
-                    println!(
-                        "ecotokens session hooks removed ← {}",
-                        claude_path.display()
-                    );
+                    print_install_item("removed", "session hooks", &claude_path);
                 }
                 if !had_hook && !had_post_hook && !had_mcp && !had_session {
-                    println!("ecotokens: nothing to uninstall (claude)");
+                    print_install_note("nothing to uninstall");
                 }
             }
             Err(e) => {
@@ -1241,6 +1234,7 @@ fn cmd_uninstall(target: String) {
     }
 
     if uninstall_gemini {
+        print_install_section(&mut first_section, "Uninstall Gemini CLI");
         match gemini_path {
             Some(ref p) => {
                 let had_hook = install::is_gemini_hook_installed(p);
@@ -1249,19 +1243,16 @@ fn cmd_uninstall(target: String) {
                 match install::uninstall_gemini(p) {
                     Ok(()) => {
                         if had_hook {
-                            println!("ecotokens hook removed (Gemini) ← {}", p.display());
+                            print_install_item("removed", "hook", p);
                         }
                         if had_post_hook {
-                            println!("ecotokens post-hook removed (Gemini) ← {}", p.display());
+                            print_install_item("removed", "post-hook", p);
                         }
                         if had_mcp {
-                            println!(
-                                "ecotokens MCP server unregistered (Gemini) ← {}",
-                                p.display()
-                            );
+                            print_install_item("removed", "MCP server", p);
                         }
                         if !had_hook && !had_post_hook && !had_mcp {
-                            println!("ecotokens: nothing to uninstall (gemini)");
+                            print_install_note("nothing to uninstall");
                         }
                     }
                     Err(e) => {
@@ -1278,6 +1269,7 @@ fn cmd_uninstall(target: String) {
     }
 
     if uninstall_qwen {
+        print_install_section(&mut first_section, "Uninstall Qwen Code");
         match qwen_path {
             Some(ref p) => {
                 let had_hook = install::is_qwen_hook_installed(p);
@@ -1287,19 +1279,16 @@ fn cmd_uninstall(target: String) {
                 match install::uninstall_qwen(p) {
                     Ok(()) => {
                         if had_hook {
-                            println!("ecotokens hook removed (Qwen Code) ← {}", p.display());
+                            print_install_item("removed", "hook", p);
                         }
                         if had_post_hook {
-                            println!("ecotokens post-hook removed (Qwen Code) ← {}", p.display());
+                            print_install_item("removed", "post-hook", p);
                         }
                         if had_mcp {
-                            println!(
-                                "ecotokens MCP server unregistered (Qwen Code) ← {}",
-                                p.display()
-                            );
+                            print_install_item("removed", "MCP server", p);
                         }
                         if !had_hook && !had_post_hook && !had_mcp && !had_session {
-                            println!("ecotokens: nothing to uninstall (qwen)");
+                            print_install_note("nothing to uninstall");
                         }
                     }
                     Err(e) => {
@@ -1310,10 +1299,7 @@ fn cmd_uninstall(target: String) {
                 if had_session {
                     match install::uninstall_session_hooks(p) {
                         Ok(()) => {
-                            println!(
-                                "ecotokens session hooks removed (Qwen Code) ← {}",
-                                p.display()
-                            );
+                            print_install_item("removed", "session hooks", p);
                         }
                         Err(e) => {
                             eprintln!("uninstall error (qwen session hooks): {e}");
@@ -1330,15 +1316,16 @@ fn cmd_uninstall(target: String) {
     }
 
     if uninstall_pi {
+        print_install_section(&mut first_section, "Uninstall Pi");
         match install::default_pi_extension_path() {
             Some(ref p) => {
                 let had = install::is_pi_extension_installed(p);
                 match install::uninstall_pi(p) {
                     Ok(()) => {
                         if had {
-                            println!("ecotokens extension removed (Pi) ← {}", p.display());
+                            print_install_item("removed", "extension", p);
                         } else {
-                            println!("ecotokens: nothing to uninstall (pi)");
+                            print_install_note("nothing to uninstall");
                         }
                     }
                     Err(e) => {
@@ -1355,24 +1342,25 @@ fn cmd_uninstall(target: String) {
     }
 
     if uninstall_hermes {
+        print_install_section(&mut first_section, "Uninstall Hermes Agent");
         match hermes_plugin_dir {
             Some(ref p) => {
                 let had = install::is_hermes_plugin_installed(p);
                 match install::uninstall_hermes_plugin(p) {
                     Ok(()) => {
                         if had {
-                            println!("ecotokens plugin removed (Hermes Agent) ← {}", p.display());
+                            print_install_item("removed", "plugin", p);
                             let disabled = std::process::Command::new("hermes")
                                 .args(["plugins", "disable", "ecotokens"])
                                 .output();
                             match disabled {
                                 Ok(out) if out.status.success() => {
-                                    println!("  Plugin disabled in Hermes (plugins.enabled).");
+                                    print_install_note("plugin disabled in Hermes");
                                 }
                                 _ => {}
                             }
                         } else {
-                            println!("ecotokens: nothing to uninstall (hermes)");
+                            print_install_note("nothing to uninstall");
                         }
                     }
                     Err(e) => {
@@ -1389,6 +1377,7 @@ fn cmd_uninstall(target: String) {
     }
 
     if uninstall_codex {
+        print_install_section(&mut first_section, "Uninstall Codex");
         let codex_hooks_path = install::default_codex_hooks_path();
         let codex_config_path = install::default_codex_config_path();
 
@@ -1413,7 +1402,7 @@ fn cmd_uninstall(target: String) {
             Some(ref p) => match install::uninstall_codex_plugin(p) {
                 Ok(()) => {
                     if had_plugin {
-                        println!("ecotokens plugin removed (Codex) ← {}", p.display());
+                        print_install_item("removed", "plugin", p);
                     }
                 }
                 Err(e) => {
@@ -1430,10 +1419,10 @@ fn cmd_uninstall(target: String) {
             Some(ref h) => match install::uninstall_codex_hooks(h) {
                 Ok(()) => {
                     if had_hook {
-                        println!("ecotokens hook removed (Codex) ← {}", h.display());
+                        print_install_item("removed", "hook", h);
                     }
                     if had_post {
-                        println!("ecotokens post-hook removed (Codex) ← {}", h.display());
+                        print_install_item("removed", "post-hook", h);
                     }
                 }
                 Err(e) => {
@@ -1450,10 +1439,7 @@ fn cmd_uninstall(target: String) {
             Some(ref c) => match install::uninstall_codex_mcp_server(c) {
                 Ok(()) => {
                     if had_mcp {
-                        println!(
-                            "ecotokens MCP server unregistered (Codex) ← {}",
-                            c.display()
-                        );
+                        print_install_item("removed", "MCP server", c);
                     }
                 }
                 Err(e) => {
@@ -1467,7 +1453,7 @@ fn cmd_uninstall(target: String) {
             }
         }
         if !had_plugin && !had_hook && !had_post && !had_mcp {
-            println!("ecotokens: nothing to uninstall (codex)");
+            print_install_note("nothing to uninstall");
         }
     }
 }
@@ -2260,12 +2246,13 @@ fn cmd_watch(
 
     let counter = Arc::new(AtomicUsize::new(0));
     let (log_tx, log_rx) = std::sync::mpsc::channel::<String>();
+    let settings = config::Settings::load();
     let opts = search::index::IndexOptions {
         reset: false,
         path: watch_path.clone(),
         index_dir: idx_dir.clone(),
         progress: Some(counter.clone()),
-        embed_provider: config::Settings::load().embed_provider,
+        embed_provider: settings.embed_provider.clone(),
         log_tx: if is_interactive { Some(log_tx) } else { None },
     };
 
@@ -2339,8 +2326,15 @@ fn cmd_watch(
         let (stop_tx, stop_rx) = std::sync::mpsc::channel::<()>();
         let watch_path_clone = watch_path.clone();
         let idx_dir_clone = idx_dir.clone();
+        let embed_provider = settings.embed_provider.clone();
         let watcher_handle = std::thread::spawn(move || {
-            daemon::watcher::watch_directory(&watch_path_clone, &idx_dir_clone, event_tx, stop_rx)
+            daemon::watcher::watch_directory(
+                &watch_path_clone,
+                &idx_dir_clone,
+                embed_provider,
+                event_tx,
+                stop_rx,
+            )
         });
 
         let index_report = index_result.ok().map(|stats| tui::watch::IndexReport {
@@ -2419,8 +2413,15 @@ fn cmd_watch(
         let (stop_tx, stop_rx) = std::sync::mpsc::channel::<()>();
         let watch_path_clone = watch_path.clone();
         let idx_dir_clone = idx_dir.clone();
+        let embed_provider = settings.embed_provider.clone();
         let watcher_handle = std::thread::spawn(move || {
-            daemon::watcher::watch_directory(&watch_path_clone, &idx_dir_clone, event_tx, stop_rx)
+            daemon::watcher::watch_directory(
+                &watch_path_clone,
+                &idx_dir_clone,
+                embed_provider,
+                event_tx,
+                stop_rx,
+            )
         });
 
         // Background mode: log events to watch.log (only if debug is enabled)

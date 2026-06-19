@@ -116,6 +116,14 @@ impl PostHookOutput {
     }
 }
 
+pub fn codex_bash_output_text(tool_response: &serde_json::Value) -> &str {
+    tool_response
+        .as_str()
+        .or_else(|| tool_response.get("output").and_then(|v| v.as_str()))
+        .or_else(|| tool_response.get("stdout").and_then(|v| v.as_str()))
+        .unwrap_or("")
+}
+
 /// Route a PostToolUse input to the appropriate handler.
 /// Returns (PostFilterResult, CommandFamily) for metrics recording.
 pub fn handle_post_input(input: &PostHookInput, depth: u32) -> (PostFilterResult, CommandFamily) {
@@ -401,12 +409,11 @@ pub fn handle_post_codex() {
         .unwrap_or("")
         .to_string();
 
-    let output_text = input
-        .tool_response
-        .get("output")
-        .or_else(|| input.tool_response.get("stdout"))
-        .and_then(|v| v.as_str())
-        .unwrap_or("");
+    let output_text = codex_bash_output_text(&input.tool_response);
+    if output_text.is_empty() {
+        print!("{{}}");
+        return;
+    }
 
     let cwd = input.cwd.as_deref().map(std::path::Path::new);
     let (filtered, tokens_before, tokens_after) = crate::filter::run_filter_pipeline_with_cwd(

@@ -18,3 +18,4 @@ specs/
 # Environnement & logs
 .env*
 *.log
+code-review-report.md

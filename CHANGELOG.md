@@ -5,18 +5,37 @@ All notable changes to this project will be documented in this file.
 The format is based on [Keep a Changelog](https://keepachangelog.com/en/1.0.0/),
 and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0.html).
 
+## [0.23.1] - 2026-06-19
+
+### Added
+
+- **Semantic index**: added `semantic_manifest.json` to precisely track `chunk_ids` per file and remove orphaned HNSW vectors during incremental reindexing.
+
+### Changed
+
+- **Version**: bumped the crate to `0.23.1`.
+- **Model pricing**: updated pricing for `gpt-5.5`, `gemini-2.5-flash`, `gemini-3-flash-preview`, and `mistral-medium-3.5`; `docs/models.md` is resynced with the models actually defined.
+- **Watcher / indexing**: `watch_directory` now receives `EmbedProvider` explicitly and delegates to `index_directory` through `IndexOptions`, removing ad hoc schema and symbol writes.
+- **Install / uninstall**: normalized CLI output per target with grouped sections (`Install ...`, `Uninstall ...`) and aligned `ok`, `removed`, `skip`, and `note` rows.
+- **Documentation**: the README now shows the grouped output from `ecotokens install` and `ecotokens uninstall`.
+
+### Fixed
+
+- **User config**: replaced non-atomic `fs::write` calls with `atomic_write` in settings, the session store, and installation code to avoid truncating config files if the process stops during a write.
+- **Codex PostToolUse**: the bash post-hook now accepts Codex responses as direct JSON strings while preserving compatibility with legacy object fields `output` and `stdout`.
+
 ## [0.23.0] - 2026-06-15
 
 ### Added
 
-- **Ollama embedding provider** : nouveau provider `ollama` pour la recherche sémantique — délègue le calcul d'embeddings à une instance Ollama locale ou distante via `POST /api/embeddings`; compatible avec tous les modèles Ollama dont `qwen3-embedding:latest` (2560 dim), `nomic-embed-text`, etc.
-  - `ecotokens config --embed-provider ollama` active le provider avec le modèle par défaut `qwen3-embedding:latest`
-  - `ecotokens config --embed-url URL` configure l'URL de base (défaut : `http://localhost:11434`)
-  - `ecotokens config --embed-model MODEL` change le modèle sans toucher au provider
-  - Les vecteurs retournés par Ollama sont normalisés L2 automatiquement (Ollama ne normalise pas)
-  - Echec silencieux si Ollama est injoignable → fallback BM25, cohérent avec le provider Candle
-  - Changement de provider ou de dimension de vecteurs → reconstruction automatique de l'index HNSW (comportement existant, désormais fonctionnel pour Ollama)
-- **`--embed-url`** : nouveau flag CLI sur `ecotokens config` pour configurer l'URL du provider Ollama
+- **Ollama embedding provider**: new `ollama` provider for semantic search that delegates embedding computation to a local or remote Ollama instance via `POST /api/embeddings`; compatible with all Ollama models including `qwen3-embedding:latest` (2560 dim), `nomic-embed-text`, etc.
+  - `ecotokens config --embed-provider ollama` enables the provider with the default model `qwen3-embedding:latest`
+  - `ecotokens config --embed-url URL` configures the base URL (default: `http://localhost:11434`)
+  - `ecotokens config --embed-model MODEL` changes the model without changing the provider
+  - Vectors returned by Ollama are L2-normalized automatically (Ollama does not normalize)
+  - Silent failure if Ollama is unreachable -> BM25 fallback, consistent with the Candle provider
+  - Provider or vector-dimension changes -> automatic HNSW index rebuild (existing behavior, now functional for Ollama)
+- **`--embed-url`**: new CLI flag on `ecotokens config` to configure the Ollama provider URL
 
 ## [0.22.0] - 2026-06-15
 
@@ -34,94 +53,94 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ### Added
 
-- **Support Codex** : `ecotokens install --target codex` installe un plugin dans `~/.codex/plugins/ecotokens/` et enregistre le serveur MCP dans `~/.codex/config.toml` sous `[mcp_servers.ecotokens]` — Codex rejoint Claude Code, Gemini CLI et Qwen Code avec un MCP server configuré automatiquement (hook auto-watch non encore implémenté)
-- **Support Hermes Agent** : plugin Python généré dans `~/.hermes/plugins/ecotokens/` via `ecotokens install --target hermes` — intercepte les hooks `transform_terminal_output` et `transform_tool_result` et appelle `filter-output` en sous-processus
-  - **`--enable-plugin`** : flag d'install Hermes qui ajoute `ecotokens` à `plugins.enabled` dans `~/.hermes/config.yaml` directement (sans dépendance à la CLI `hermes`) — crée le fichier si absent, préserve les clés existantes, idempotent
-  - **Auto-watch Hermes** : les hooks `on_session_start` et `on_session_end` du plugin démarrent et arrêtent automatiquement `ecotokens watch --background` à chaque session Hermes — même comportement que Claude Code et Qwen Code ; activer avec `ecotokens auto-watch enable`
-  - **Filtrage par famille pour les outils Hermes** : les labels `hermes-tool:<name>` sont automatiquement mappés à la famille de filtre appropriée — `read_file`/`list_directory` → `fs`, `search_files`/`find_files` → `grep`, `browser_snapshot`/`web_fetch` → `network`, `run_python_code` → `python`, autres → `generic`
-  - **Variables d'environnement du plugin Hermes** : `ECOTOKENS_BIN`, `ECOTOKENS_HERMES_MIN_CHARS` (seuil minimal, défaut 2000 car.), `ECOTOKENS_HERMES_TIMEOUT` (timeout subprocess, défaut 10 s)
-  - **Métriques Hermes distinctes** : types `HermesTransformTerminalOutput` et `HermesTransformToolResult` dans `HookType` — le flag `--hook-type` de `filter-output` permet au plugin de les attribuer correctement ; visibles séparément dans `ecotokens gain`
-- **`filter-output` subcommand** : nouvelle sous-commande qui lit la sortie capturée d'un outil depuis stdin, applique le filtrage et enregistre les métriques — permet le traitement post-hoc des sorties d'agents comme Hermes
-- **Métriques par agent** : nouveau champ `by_agent` dans `Report` — les métriques sont agrégées par agent (`claude`, `gemini`, `qwen`, `pi`, `hermes`, `codex`, `cli`) en plus du total global
+- **Codex support**: `ecotokens install --target codex` installs a plugin in `~/.codex/plugins/ecotokens/` and registers the MCP server in `~/.codex/config.toml` under `[mcp_servers.ecotokens]` — Codex joins Claude Code, Gemini CLI, and Qwen Code with an automatically configured MCP server (auto-watch hook not implemented yet)
+- **Hermes Agent support**: generated Python plugin in `~/.hermes/plugins/ecotokens/` via `ecotokens install --target hermes` — intercepts the `transform_terminal_output` and `transform_tool_result` hooks and calls `filter-output` as a subprocess
+  - **`--enable-plugin`**: Hermes install flag that adds `ecotokens` directly to `plugins.enabled` in `~/.hermes/config.yaml` (no dependency on the `hermes` CLI) — creates the file if missing, preserves existing keys, idempotent
+  - **Hermes auto-watch**: the plugin's `on_session_start` and `on_session_end` hooks automatically start and stop `ecotokens watch --background` for each Hermes session — same behavior as Claude Code and Qwen Code; enable with `ecotokens auto-watch enable`
+  - **Per-family filtering for Hermes tools**: `hermes-tool:<name>` labels are automatically mapped to the appropriate filter family — `read_file`/`list_directory` -> `fs`, `search_files`/`find_files` -> `grep`, `browser_snapshot`/`web_fetch` -> `network`, `run_python_code` -> `python`, others -> `generic`
+  - **Hermes plugin environment variables**: `ECOTOKENS_BIN`, `ECOTOKENS_HERMES_MIN_CHARS` (minimum threshold, default 2000 chars), `ECOTOKENS_HERMES_TIMEOUT` (subprocess timeout, default 10 s)
+  - **Separate Hermes metrics**: `HermesTransformTerminalOutput` and `HermesTransformToolResult` types in `HookType` — the `--hook-type` flag on `filter-output` lets the plugin attribute them correctly; visible separately in `ecotokens gain`
+- **`filter-output` subcommand**: new subcommand that reads captured tool output from stdin, applies filtering, and records metrics — enables post-hoc processing for agent outputs such as Hermes
+- **Per-agent metrics**: new `by_agent` field in `Report` — metrics are aggregated by agent (`claude`, `gemini`, `qwen`, `pi`, `hermes`, `codex`, `cli`) in addition to the global total
 
 ### Changed
 
-- **`model_pricing` externalisé dans `pricing.json`** : les tarifs ne sont plus sérialisés dans `config.json`. Seuls les overrides utilisateur (entrées absentes ou modifiées par rapport au catalogue intégré) sont persistés dans `~/.config/ecotokens/pricing.json`. Migration transparente : les overrides présents dans un ancien `config.json` sont repris automatiquement au prochain `save()`.
-- **`filter-output`** : renommage du paramètre interne `returncode` en `exit_code` pour cohérence avec la CLI et le plugin Hermes
+- **`model_pricing` externalized to `pricing.json`**: pricing is no longer serialized in `config.json`. Only user overrides (entries missing from or modified relative to the built-in catalog) are persisted in `~/.config/ecotokens/pricing.json`. Transparent migration: overrides present in an old `config.json` are automatically carried over on the next `save()`.
+- **`filter-output`**: renamed the internal `returncode` parameter to `exit_code` for consistency with the CLI and Hermes plugin
 
 ### Fixed
 
-- **`ecotokens gain`** : les commandes lancées depuis un chemin temporaire hors dépôt git sont désormais regroupées sous `[undefined]` au lieu d'apparaître comme projets `/tmp/...` ; les dépôts git créés dans un répertoire temporaire restent attribués à leur racine git
-- **`HnswIndex::search`** : remplacement de `parallel_insert` (non-déterministe, threads parallèles) par des insertions séquentielles — corrige le test `hnsw_build_search_cosine` qui échouait de manière intermittente sur `x86_64-unknown-linux-musl`
+- **`ecotokens gain`**: commands launched from a temporary path outside a git repository are now grouped under `[undefined]` instead of appearing as `/tmp/...` projects; git repositories created in a temporary directory remain attributed to their git root
+- **`HnswIndex::search`**: replaced `parallel_insert` (non-deterministic, parallel threads) with sequential insertions — fixes the `hnsw_build_search_cosine` test that intermittently failed on `x86_64-unknown-linux-musl`
 
 ## [0.20.1] - 2026-05-11
 
 ### Fixed
 
-- **Pi extension** : `spawnSync` utilisait le répertoire courant du processus au lieu du répertoire du projet surveillé — `ctx.cwd` est désormais passé correctement aux hooks `session-start` et `session-end`
-- **`auto-watch`** : le message de confirmation mentionne désormais Pi aux côtés de Claude Code et Qwen Code
-- Silencieux : quatre avertissements de compilation préexistants supprimés (champs et imports inutilisés)
+- **Pi extension**: `spawnSync` used the process current directory instead of the watched project directory — `ctx.cwd` is now passed correctly to the `session-start` and `session-end` hooks
+- **`auto-watch`**: the confirmation message now mentions Pi alongside Claude Code and Qwen Code
+- Silent cleanup: removed four pre-existing compilation warnings (unused fields and imports)
 
 ## [0.20.0] - 2026-05-08
 
 ### Added
 
-- **Shell completions** : nouvelle sous-commande `ecotokens completions SHELL` — génère un script de complétion natif pour `bash`, `zsh`, `fish`, `powershell` ou `elvish` via `clap_complete`
+- **Shell completions**: new `ecotokens completions SHELL` subcommand — generates a native completion script for `bash`, `zsh`, `fish`, `powershell`, or `elvish` via `clap_complete`
 
 ### Changed
 
-- **`ecotokens gain` — vue diff améliorée** :
-  - En-tête visuel AVANT/APRÈS avec barre de progression inline et pourcentage d'économie
-  - Séparateurs de sections numérotés (`─── section 1/3  l.N ───`) en remplacement des marqueurs `@@ @@` illisibles
-  - Troncature automatique des séquences homogènes de plus de 15 lignes (`⋯ +N lignes omises ⋯`) pour éviter les diffs de 800 lignes rouges
-  - Nouveau mode **SplitRaw** (`[d]` cycle `Details → Diff → SplitRaw`) : vue panneau splitté 50/50 — AVANT en rouge (o/l) / APRÈS en vert (Maj+O / Maj+L) — utile pour les transformations radicales où le diff unifié est bruité
+- **`ecotokens gain` — improved diff view**:
+  - Visual BEFORE/AFTER header with an inline progress bar and savings percentage
+  - Numbered section separators (`--- section 1/3  l.N ---`) replacing unreadable `@@ @@` markers
+  - Automatic truncation of homogeneous sequences longer than 15 lines (`... +N lines omitted ...`) to avoid 800-line red diffs
+  - New **SplitRaw** mode (`[d]` cycles `Details -> Diff -> SplitRaw`): 50/50 split panel view — BEFORE in red (o/l) / AFTER in green (Shift+O / Shift+L) — useful for radical transformations where the unified diff is noisy
 
 ## [0.19.0] - 2026-05-02
 
 ### Added
 
-- **Recherche sémantique (feature 009)** : retrieval dual BM25+vecteur avec fusion de scores (`0.4 × BM25 + 0.6 × cosinus`) — les résultats indiquent désormais leur source via le champ `retrieval_source` (`bm25` | `vector` | `both`)
-- **`EmbedProvider::Candle`** : provider d'embedding local zéro-config basé sur [Candle](https://github.com/huggingface/candle) — modèle `sentence-transformers/all-MiniLM-L6-v2` (384 dim) téléchargé automatiquement via HuggingFace Hub ; devient le seul provider d'embedding (remplace Ollama et LmStudio)
-- **Support GPU optionnel pour Candle** : compilation avec `--features cuda` (NVIDIA) ou `--features metal` (Apple Silicon) active automatiquement le GPU ; CPU utilisé par défaut si aucune feature GPU n'est activée ou si le device est indisponible
-- **Index HNSW** (`hnsw_index.bin`) : index vectoriel ANN persisté en bincode, reconstruit en mémoire à chaque recherche (< 1 s pour < 20 k vecteurs) ; méta-données dans `hnsw_meta.json` (modèle, dimension, nombre de vecteurs, date)
-- **Chunking symbolique** : les fichiers Rust/Python/JS/TS/C/C++ sont découpés en chunks par symbole tree-sitter (une fonction = un chunk) ; les fichiers sans support tree-sitter utilisent des fenêtres de 50 lignes en fallback
-- **Embedding incrémental** : les chunks inchangés conservent leurs vecteurs entre deux indexations ; seuls les chunks nouveaux ou modifiés sont soumis au provider
-- **Détection de changement de modèle** : l'index HNSW est automatiquement reconstruit lorsque le modèle d'embedding change, sans reconstruire l'index BM25
-- **Migration automatique** `embeddings.json` → `hnsw_index.bin` : exécutée silencieusement au premier lancement après la mise à jour
+- **Semantic search (feature 009)**: dual BM25+vector retrieval with score fusion (`0.4 x BM25 + 0.6 x cosine`) — results now indicate their source through the `retrieval_source` field (`bm25` | `vector` | `both`)
+- **`EmbedProvider::Candle`**: zero-config local embedding provider based on [Candle](https://github.com/huggingface/candle) — `sentence-transformers/all-MiniLM-L6-v2` model (384 dim) downloaded automatically via HuggingFace Hub; becomes the only embedding provider (replaces Ollama and LmStudio)
+- **Optional GPU support for Candle**: building with `--features cuda` (NVIDIA) or `--features metal` (Apple Silicon) automatically enables GPU acceleration; CPU is used by default when no GPU feature is enabled or the device is unavailable
+- **HNSW index** (`hnsw_index.bin`): ANN vector index persisted with bincode and rebuilt in memory on each search (< 1 s for < 20 k vectors); metadata stored in `hnsw_meta.json` (model, dimension, vector count, date)
+- **Symbolic chunking**: Rust/Python/JS/TS/C/C++ files are split into tree-sitter symbol chunks (one function = one chunk); files without tree-sitter support fall back to 50-line windows
+- **Incremental embedding**: unchanged chunks keep their vectors between indexing runs; only new or modified chunks are submitted to the provider
+- **Model-change detection**: the HNSW index is automatically rebuilt when the embedding model changes, without rebuilding the BM25 index
+- **Automatic migration** `embeddings.json` -> `hnsw_index.bin`: runs silently on first launch after the update
 
 ### Fixed
 
-- **Watcher — respect du `.gitignore`** : `reindex_single_file` ignorait le `.gitignore` lors de la ré-indexation incrémentale des fichiers modifiés ; les fichiers exclus par `.gitignore` sont désormais ignorés au même titre que lors de l'indexation complète
+- **Watcher — `.gitignore` support**: `reindex_single_file` ignored `.gitignore` during incremental reindexing of modified files; files excluded by `.gitignore` are now ignored just like during full indexing
 
 ### Changed
 
-- **`EmbedProvider`** : suppression des variants `Ollama` et `LmStudio` — Candle est désormais le seul backend d'embedding ; les configurations existantes avec `"type": "ollama"` ou `"type": "lm_studio"` sont migrées automatiquement vers Candle au chargement via le variant interne `Legacy`
-- **CLI `ecotokens config`** : `--embed-provider` n'accepte plus que `candle` et `none` (suppression de `ollama`, `lmstudio`) ; l'option `--embed-url` est supprimée (Candle n'utilise pas de service externe)
-- `EmbedProvider` : le variant par défaut passe de `None` à `Candle { model: "sentence-transformers/all-MiniLM-L6-v2" }` — les configurations existantes sans `embed_provider` héritent automatiquement du provider Candle
-- `SearchResult` : ajout des champs `line_end` (optionnel) et `retrieval_source` ; `file_path` est désormais extrait directement du document tantivy plutôt que dérivé de la clé de chunk
+- **`EmbedProvider`**: removed the `Ollama` and `LmStudio` variants — Candle is now the only embedding backend; existing configs with `"type": "ollama"` or `"type": "lm_studio"` are automatically migrated to Candle on load through the internal `Legacy` variant
+- **CLI `ecotokens config`**: `--embed-provider` now accepts only `candle` and `none` (removed `ollama`, `lmstudio`); `--embed-url` is removed (Candle does not use an external service)
+- `EmbedProvider`: the default variant changes from `None` to `Candle { model: "sentence-transformers/all-MiniLM-L6-v2" }` — existing configs without `embed_provider` automatically inherit the Candle provider
+- `SearchResult`: added optional `line_end` and `retrieval_source` fields; `file_path` is now extracted directly from the tantivy document instead of derived from the chunk key
 
 ## [0.18.0] - 2026-04-30
 
 ### Added
 
-- **Tarifs LLM élargis** : table de prix étendue de 5 à 36 modèles couvrant Anthropic (Claude Haiku/Sonnet/Opus 4.x–4.7), OpenAI (GPT-4o, GPT-4.1, GPT-5, o1, o3, o4-mini), Google (Gemini 2.0/2.5), DeepSeek (V3, V4), Mistral (Large/Small), Meta Llama (3.3/4) et Alibaba Qwen (qwen3.5/3.6) — prix input et output au million de tokens
-- **`claude-haiku-4-5`** : prix mis à jour 0.80 → 1.00 $/1M input, 4.00 → 5.00 $/1M output
-- **`claude-opus-4-7`** : nouveau modèle ajouté (5.00 $/1M input, 25.00 $/1M output)
-- **`ecotokens config --model MODEL`** : nouvelle option CLI pour définir le modèle par défaut utilisé dans les rapports de gain ; affiche la liste des modèles disponibles si la valeur est vide ou inconnue
-- **`ecotokens config`** : affiche désormais `default_model` dans la sortie texte
-- **`ecotokens gain`** : utilise désormais `settings.default_model` comme fallback (au lieu de la constante hardcodée `"sonnet"`)
+- **Expanded LLM pricing**: price table expanded from 5 to 36 models covering Anthropic (Claude Haiku/Sonnet/Opus 4.x-4.7), OpenAI (GPT-4o, GPT-4.1, GPT-5, o1, o3, o4-mini), Google (Gemini 2.0/2.5), DeepSeek (V3, V4), Mistral (Large/Small), Meta Llama (3.3/4), and Alibaba Qwen (qwen3.5/3.6) — input and output prices per million tokens
+- **`claude-haiku-4-5`**: updated price from 0.80 -> 1.00 $/1M input, 4.00 -> 5.00 $/1M output
+- **`claude-opus-4-7`**: new model added (5.00 $/1M input, 25.00 $/1M output)
+- **`ecotokens config --model MODEL`**: new CLI option to set the default model used in gain reports; shows the list of available models when the value is empty or unknown
+- **`ecotokens config`**: now displays `default_model` in text output
+- **`ecotokens gain`**: now uses `settings.default_model` as fallback (instead of the hardcoded `"sonnet"` constant)
 
 ## [0.17.0] - 2026-04-28
 
 ### Added
 
-- **Serveur MCP stdio** : expose les moteurs search, outline, symbol et trace comme serveur MCP (`rmcp`, transport stdio) via `ecotokens mcp-server` ; `ecotokens install` enregistre automatiquement le serveur dans `~/.claude/settings.json`
-- La journalisation en arrière-plan est désormais conditionnelle au flag global `--debug`
+- **MCP stdio server**: exposes the search, outline, symbol, and trace engines as an MCP server (`rmcp`, stdio transport) via `ecotokens mcp-server`; `ecotokens install` automatically registers the server in `~/.claude/settings.json`
+- Background logging is now conditional on the global `--debug` flag
 
 ### Fixed
 
-- `ecotokens uninstall` supprime maintenant l'intégralité des traces ecotokens dans `~/.claude/settings.json` : hooks PreToolUse, PostToolUse, SessionStart, SessionEnd et l'entrée du serveur MCP
-- Les étapes post-filtre ne remplacent la sortie que si le nombre de tokens diminue réellement ; la troncature d'octets génériques respecte les frontières UTF-8 ; le fallback de parsing JSON des settings est renforcé ; les désérialiseurs numériques MCP sont dédupliqués
+- `ecotokens uninstall` now removes all ecotokens traces from `~/.claude/settings.json`: PreToolUse, PostToolUse, SessionStart, and SessionEnd hooks plus the MCP server entry
+- Post-filter steps replace output only when the token count actually decreases; generic byte truncation respects UTF-8 boundaries; settings JSON parsing fallback is hardened; numeric MCP deserializers are deduplicated
 
 ## [0.16.0] - 2026-04-26
 
@@ -219,19 +238,19 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 ### Added
 
 - Pi coding agent support via TypeScript extension installed at `~/.pi/agent/extensions/ecotokens.ts`
-- `bash` tool calls intercepted in-process: `event.input.command` rewritten to pipe through `ecotokens filter` (équivalent au PreToolUse de Claude Code)
-- `read`/`grep`/`find`/`ls` tool results piped through `ecotokens hook-post` pour compression outline-based (équivalent au PostToolUse)
+- `bash` tool calls intercepted in-process: `event.input.command` rewritten to pipe through `ecotokens filter` (equivalent to Claude Code PreToolUse)
+- `read`/`grep`/`find`/`ls` tool results piped through `ecotokens hook-post` for outline-based compression (equivalent to PostToolUse)
 - `session_start` / `session_shutdown` hooks wired to auto-watch lifecycle
-- `/gain` et `/eco-search` slash commands exposés via `registerCommand`
-- `ecotokens install --target pi` et `ecotokens uninstall --target pi`
-- Extension source embarquée dans le binaire via `include_str!("pi_extension.ts")`
+- `/gain` and `/eco-search` slash commands exposed via `registerCommand`
+- `ecotokens install --target pi` and `ecotokens uninstall --target pi`
+- Extension source embedded in the binary via `include_str!("pi_extension.ts")`
 
 ## [0.13.1] - 2026-04-05
 
 ### Fixed
 
-- `CONN_INIT_LOCK` (`OnceLock<Mutex>`) sérialise `open_conn` pour éviter `SQLITE_BUSY` sur `PRAGMA journal_mode=WAL` lors de migrations concurrentes
-- `read_to_string` traite désormais `NotFound` comme "déjà migré" pour gérer la fenêtre TOCTOU entre le test `migrating_path.exists()` et la lecture effective
+- `CONN_INIT_LOCK` (`OnceLock<Mutex>`) serializes `open_conn` to avoid `SQLITE_BUSY` on `PRAGMA journal_mode=WAL` during concurrent migrations
+- `read_to_string` now treats `NotFound` as "already migrated" to handle the TOCTOU window between the `migrating_path.exists()` check and the actual read
 
 ## [0.13.0] - 2026-04-02
 

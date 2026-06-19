@@ -1,11 +1,10 @@
-use crate::search::index::{build_schema, open_or_create_index};
+use crate::config::settings::EmbedProvider;
+use crate::search::index::{index_directory, IndexOptions};
 use crate::search::is_indexable_extension;
-use crate::search::symbols::{parse_symbols, write_symbols};
 use std::collections::HashMap;
 use std::path::{Path, PathBuf};
 use std::sync::mpsc;
 use std::time::{Duration, Instant};
-use tantivy::doc;
 
 /// Un événement émis par le watcher après ré-indexation d'un fichier.
 #[derive(Debug, Clone)]
@@ -23,6 +22,7 @@ pub struct WatchEvent {
 pub fn watch_directory(
     watch_path: &Path,
     index_dir: &Path,
+    embed_provider: EmbedProvider,
     event_tx: mpsc::Sender<WatchEvent>,
     stop_rx: mpsc::Receiver<()>,
 ) -> notify::Result<()> {
@@ -48,9 +48,12 @@ pub fn watch_directory(
         while let Ok(event) = notify_rx.try_recv() {
             if let Ok(e) = event {
                 match e.kind {
-                    EventKind::Create(_) | EventKind::Modify(_) => {
+                    EventKind::Create(_) | EventKind::Modify(_) | EventKind::Remove(_) => {
                         for path in e.paths {
-                            if path.is_file() {
+                            if path.is_file()
+                                || matches!(e.kind, EventKind::Remove(_))
+                                || is_indexable_path(&path)
+                            {
                                 pending.insert(path, Instant::now());
                             }
                         }
@@ -71,7 +74,7 @@ pub fn watch_directory(
         for path in ready {
             pending.remove(&path);
             let ts = chrono::Utc::now().format("%H:%M:%S").to_string();
-            let status = reindex_single_file(&path, watch_path, index_dir);
+            let status = reindex_incremental(&path, watch_path, index_dir, &embed_provider);
 
             if event_tx
                 .send(WatchEvent {
@@ -90,6 +93,11 @@ pub fn watch_directory(
     }
 
     Ok(())
+}
+
+fn is_indexable_path(path: &Path) -> bool {
+    let ext = path.extension().and_then(|e| e.to_str()).unwrap_or("");
+    is_indexable_extension(ext)
 }
 
 fn is_gitignored(path: &Path, root: &Path) -> bool {
@@ -112,8 +120,13 @@ fn is_gitignored(path: &Path, root: &Path) -> bool {
         .is_ignore()
 }
 
-/// Ré-indexe un seul fichier dans l'index tantivy.
-fn reindex_single_file(path: &Path, watch_path: &Path, index_dir: &Path) -> String {
+/// Ré-indexe le projet en mode incrémental pour garder BM25, symboles et HNSW cohérents.
+fn reindex_incremental(
+    path: &Path,
+    watch_path: &Path,
+    index_dir: &Path,
+    embed_provider: &EmbedProvider,
+) -> String {
     let ext = path.extension().and_then(|e| e.to_str()).unwrap_or("");
     if !is_indexable_extension(ext) {
         return "ignored".to_string();
@@ -122,61 +135,16 @@ fn reindex_single_file(path: &Path, watch_path: &Path, index_dir: &Path) -> Stri
         return "ignored".to_string();
     }
 
-    let content = match std::fs::read_to_string(path) {
-        Ok(c) => c,
-        Err(e) => return format!("error: {e}"),
+    let opts = IndexOptions {
+        reset: false,
+        path: watch_path.to_path_buf(),
+        index_dir: index_dir.to_path_buf(),
+        progress: None,
+        embed_provider: embed_provider.clone(),
+        log_tx: None,
     };
 
-    let rel_path = path
-        .strip_prefix(watch_path)
-        .map(|p| p.to_string_lossy().into_owned())
-        .unwrap_or_else(|_| path.to_string_lossy().into_owned());
-
-    let index = match open_or_create_index(index_dir, false) {
-        Ok(i) => i,
-        Err(e) => return format!("error: {e}"),
-    };
-
-    let (_, file_path_field, content_field, kind_field, line_start_field, _) = build_schema();
-
-    let mut writer = match index.writer(100_000_000) {
-        Ok(w) => w,
-        Err(e) => return format!("error: {e}"),
-    };
-
-    // Supprimer les anciens chunks de ce fichier
-    let term = tantivy::Term::from_field_text(file_path_field, &rel_path);
-    writer.delete_term(term);
-
-    // Ré-indexer par chunks de 50 lignes
-    let lines: Vec<&str> = content.lines().collect();
-    for (chunk_idx, chunk) in lines.chunks(50).enumerate() {
-        let chunk_text = chunk.join("\n");
-        let line_start = chunk_idx as u64 * 50;
-        let _ = writer.add_document(doc!(
-            file_path_field => rel_path.clone(),
-            content_field   => chunk_text,
-            kind_field      => "bm25",
-            line_start_field => line_start,
-        ));
-    }
-
-    // Re-index symbol docs (tree-sitter AST)
-    let filename = path.file_name().and_then(|n| n.to_str()).unwrap_or("");
-    let mut symbols = parse_symbols(path).unwrap_or_default();
-    for sym in &mut symbols {
-        if sym.file_path == filename {
-            if let Some(suffix) = sym.id.strip_prefix(&format!("{filename}::")) {
-                sym.id = format!("{rel_path}::{suffix}");
-            }
-            sym.file_path = rel_path.clone();
-        }
-    }
-    if !symbols.is_empty() {
-        let _ = write_symbols(&symbols, &mut writer);
-    }
-
-    match writer.commit() {
+    match index_directory(opts) {
         Ok(_) => "re-indexed".to_string(),
         Err(e) => format!("error: {e}"),
     }

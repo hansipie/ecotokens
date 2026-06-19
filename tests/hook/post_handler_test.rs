@@ -1,5 +1,5 @@
 use ecotokens::hook::post_handler::{
-    handle_post_input, metrics_command, PostFilterResult, PostHookInput,
+    codex_bash_output_text, handle_post_input, metrics_command, PostFilterResult, PostHookInput,
 };
 use ecotokens::metrics::store::CommandFamily;
 
@@ -130,4 +130,22 @@ fn post_handler_glob_pi_format_routes_glob_handler() {
     );
     let (_result, family) = handle_post_input(&input, 1);
     assert_eq!(family, CommandFamily::Fs);
+}
+
+#[test]
+fn codex_bash_output_accepts_string_tool_response() {
+    let output = serde_json::json!("shell output\n");
+    assert_eq!(codex_bash_output_text(&output), "shell output\n");
+}
+
+#[test]
+fn codex_bash_output_keeps_legacy_object_fields() {
+    assert_eq!(
+        codex_bash_output_text(&serde_json::json!({"output": "from output"})),
+        "from output"
+    );
+    assert_eq!(
+        codex_bash_output_text(&serde_json::json!({"stdout": "from stdout"})),
+        "from stdout"
+    );
 }

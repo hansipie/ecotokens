@@ -42,10 +42,7 @@ impl SessionStore {
         let path = Self::path().ok_or_else(|| {
             std::io::Error::new(std::io::ErrorKind::NotFound, "cannot resolve config dir")
         })?;
-        if let Some(parent) = path.parent() {
-            std::fs::create_dir_all(parent)?;
-        }
-        std::fs::write(&path, serde_json::to_string_pretty(&self.0).unwrap())
+        super::atomic_write(&path, serde_json::to_string_pretty(&self.0).unwrap())
     }
 
     /// Remove stale entries: any entry whose watcher PID is dead or absent is dropped,
