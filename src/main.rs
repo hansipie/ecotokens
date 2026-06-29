@@ -97,12 +97,11 @@ enum Commands {
     Gain {
         #[arg(
             long,
-            default_value = "all",
+            default_value_t,
             value_name = "PERIOD",
-            help = "Time window to aggregate [possible values: all, today, week, month]",
             conflicts_with = "history"
         )]
-        period: String,
+        period: metrics::report::Period,
         #[arg(long)]
         json: bool,
         #[arg(long)]
@@ -528,8 +527,8 @@ fn print_history_table(report: &metrics::report::HistoryReport) {
     println!("{}", "─".repeat(65));
 }
 
-fn cmd_gain(period: String, json: bool, model: Option<String>, history: bool) {
-    use metrics::report::{aggregate, aggregate_history, filter_by_period, Period};
+fn cmd_gain(period: metrics::report::Period, json: bool, model: Option<String>, history: bool) {
+    use metrics::report::{aggregate, aggregate_history, filter_by_period};
     use metrics::store::read_from;
 
     let path = match metrics::store::metrics_path() {
@@ -553,9 +552,8 @@ fn cmd_gain(period: String, json: bool, model: Option<String>, history: bool) {
         return;
     }
 
-    let p = Period::parse(&period);
-    let mut report = aggregate(&items, p.clone(), model_str);
-    let mut filtered_items = filter_by_period(&items, &p);
+    let mut report = aggregate(&items, period.clone(), model_str);
+    let mut filtered_items = filter_by_period(&items, &period);
 
     if json {
         println!("{}", serde_json::to_string_pretty(&report).unwrap());
@@ -587,8 +585,8 @@ fn cmd_gain(period: String, json: bool, model: Option<String>, history: bool) {
                 // Reload data every 10 seconds regardless of incoming key events
                 if last_reload.elapsed() >= std::time::Duration::from_secs(10) {
                     items = read_from(&path).unwrap_or_default();
-                    report = aggregate(&items, p.clone(), model_str);
-                    filtered_items = filter_by_period(&items, &p);
+                    report = aggregate(&items, period.clone(), model_str);
+                    filtered_items = filter_by_period(&items, &period);
                     sorted_projects = sorted_projects_from(&report);
                     last_reload = std::time::Instant::now();
                 }
