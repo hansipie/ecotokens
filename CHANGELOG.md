@@ -5,6 +5,27 @@ All notable changes to this project will be documented in this file.
 The format is based on [Keep a Changelog](https://keepachangelog.com/en/1.0.0/),
 and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0.html).
 
+## [0.24.1] - 2026-06-29
+
+### Changed
+
+- **CLI completion**: refactored `Period` enum to derive `clap::ValueEnum` and `Default`, enabling shell completion support for the `--period` option (values: `all`, `today`, `week`, `month`).
+- **Version**: bumped the crate to `0.24.1`.
+
+## [0.24.0] - 2026-06-18
+
+### Added
+
+- **Semantic manifest**: added `semantic_manifest.json` to track `{mtime, chunk_ids[]}` per file, enabling exact pruning of orphaned HNSW vectors during incremental reindexing. Includes one-time bootstrap for existing indexes without a manifest.
+
+### Changed
+
+- **Model pricing**: updated pricing for `gpt-5.5` ($2.50→$5.00 input, $10.00→$30.00 output), `gemini-2.5-flash` ($0.10→$0.30 / $0.40→$2.50), `gemini-3-flash-preview` ($0.10→$0.50 / $0.40→$3.00), and `mistral-medium-3.5` ($0.50→$1.50 / $1.50→$7.50); `docs/models.md` resynced with the 12 models currently defined.
+
+### Fixed
+
+- **User config**: added `atomic_write()` (temp file + rename) in `src/config/mod.rs` and switched `settings.rs`, `session_store.rs`, and `install.rs` to use it, preventing config file truncation on crash mid-write.
+
 ## [0.23.1] - 2026-06-19
 
 ### Added

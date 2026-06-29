@@ -4,22 +4,23 @@ use chrono::{DateTime, Utc};
 use serde::{Deserialize, Serialize};
 use std::collections::HashMap;
 
-#[derive(Debug, Clone, PartialEq)]
+#[derive(Debug, Clone, PartialEq, clap::ValueEnum, Default)]
 pub enum Period {
+    #[default]
     All,
     Today,
     Week,
     Month,
 }
 
-impl Period {
-    pub fn parse(s: &str) -> Self {
-        match s {
-            "today" => Period::Today,
-            "week" => Period::Week,
-            "month" => Period::Month,
-            _ => Period::All,
-        }
+impl std::fmt::Display for Period {
+    fn fmt(&self, f: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {
+        f.write_str(match self {
+            Period::All => "all",
+            Period::Today => "today",
+            Period::Week => "week",
+            Period::Month => "month",
+        })
     }
 }
 

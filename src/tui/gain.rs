@@ -355,8 +355,10 @@ fn render_stats(
             Span::raw(format!("{}   ", report.total_interceptions)),
             Span::styled("Since: ", Style::default().fg(Color::Cyan)),
             Span::raw(format!("{since} days   ")),
+            Span::styled("Tokens used: ", Style::default().fg(Color::Cyan)),
+            Span::raw(format!("{}   ", fmt_tok(report.total_tokens_before))),
             Span::styled("Tokens saved: ", Style::default().fg(Color::Cyan)),
-            Span::raw(format!("{saved}   ")),
+            Span::raw(format!("{}   ", fmt_tok(saved))),
             Span::styled("Savings: ", Style::default().fg(Color::Cyan)),
             Span::raw(format!("{:.1}%", report.total_savings_pct)),
         ]),
@@ -793,6 +795,18 @@ fn render_project_detail<'a>(
     )
 }
 
+fn fmt_tok(n: u64) -> String {
+    let s = n.to_string();
+    let mut out = String::with_capacity(s.len() + s.len() / 3);
+    for (i, c) in s.chars().rev().enumerate() {
+        if i > 0 && i % 3 == 0 {
+            out.push(',');
+        }
+        out.push(c);
+    }
+    out.chars().rev().collect()
+}
+
 fn is_binary(s: &str) -> bool {
     s.contains('\x00')
 }
@@ -869,8 +883,8 @@ fn render_details_panel(
             Span::styled("Tokens: ", Style::default().fg(Color::Cyan)),
             Span::raw(format!(
                 "{} → {}  ({}{:.1}%)",
-                item.tokens_before,
-                item.tokens_after,
+                fmt_tok(item.tokens_before as u64),
+                fmt_tok(item.tokens_after as u64),
                 if item.savings_pct >= 0.0 { '-' } else { '+' },
                 item.savings_pct.abs()
             )),
@@ -951,8 +965,8 @@ fn render_diff_panel(
     if is_binary(before_text) || is_binary(after_text) {
         let block = Block::default().borders(Borders::ALL).title(format!(
             " Diff : {name} · {cmd_short} · {}→{} tok ({}{:.0}%) · {ts_short}  [d] cycle ",
-            item.tokens_before,
-            item.tokens_after,
+            fmt_tok(item.tokens_before as u64),
+            fmt_tok(item.tokens_after as u64),
             if item.savings_pct >= 0.0 { '-' } else { '+' },
             item.savings_pct.abs(),
         ));
@@ -974,8 +988,8 @@ fn render_diff_panel(
         0.0
     };
 
-    let before_prefix = format!(" BEFORE  {:>8} tokens  ", tb);
-    let after_prefix = format!(" AFTER  {:>8} tokens  ", ta);
+    let before_prefix = format!(" BEFORE  {:>13} tokens  ", fmt_tok(tb as u64));
+    let after_prefix = format!(" AFTER  {:>13} tokens  ", fmt_tok(ta as u64));
     let dash_fill = available_width.saturating_sub(before_prefix.len());
     let dashes: String = "─".repeat(dash_fill);
 
@@ -996,7 +1010,7 @@ fn render_diff_panel(
                 Style::default().fg(Color::Red).add_modifier(Modifier::BOLD),
             ),
             Span::styled(
-                format!("{:>8} tokens  ", tb),
+                format!("{:>13} tokens  ", fmt_tok(tb as u64)),
                 Style::default().fg(Color::White),
             ),
             Span::styled(dashes, Style::default().fg(Color::DarkGray)),
@@ -1009,7 +1023,7 @@ fn render_diff_panel(
                     .add_modifier(Modifier::BOLD),
             ),
             Span::styled(
-                format!("{:>8} tokens  ", ta),
+                format!("{:>13} tokens  ", fmt_tok(ta as u64)),
                 Style::default().fg(Color::White),
             ),
             Span::styled(bar, Style::default().fg(Color::Green)),
@@ -1095,7 +1109,8 @@ fn render_diff_panel(
     };
     let block = Block::default().borders(Borders::ALL).title(format!(
         " Diff : {name} · {cmd_short} · {}→{} tok · {ts_short} · {scroll_hint}",
-        item.tokens_before, item.tokens_after,
+        fmt_tok(item.tokens_before as u64),
+        fmt_tok(item.tokens_after as u64),
     ));
     let inner = block.inner(area);
     frame.render_widget(block, area);
