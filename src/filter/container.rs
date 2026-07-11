@@ -2,17 +2,28 @@ use crate::filter::generic::filter_generic;
 
 /// Filter container tooling output (docker, podman, kubectl).
 pub fn filter_container(command: &str, output: &str) -> String {
-    let cmd = command.trim().to_lowercase();
+    let lower = command.trim().to_lowercase();
+    let mut tokens = lower.split_whitespace();
+    // Program name without any absolute-path prefix (e.g. `/usr/bin/docker`).
+    let prog = tokens
+        .next()
+        .map(|p| p.rsplit('/').next().unwrap_or(p))
+        .unwrap_or("");
+    // Match on exact argument tokens rather than substrings, so `docker run
+    // psql-image` is not misrouted to the `ps` filter.
+    let args: Vec<&str> = tokens.collect();
+    let has = |kw: &str| args.contains(&kw);
+    let is_docker = prog == "docker" || prog == "podman";
 
-    if cmd.contains(" ps") && (cmd.starts_with("docker") || cmd.starts_with("podman")) {
+    if is_docker && has("ps") {
         filter_container_ps(output)
-    } else if cmd.contains(" logs") && (cmd.starts_with("docker") || cmd.starts_with("podman")) {
+    } else if is_docker && has("logs") {
         filter_container_logs(output)
-    } else if cmd.contains(" images") && (cmd.starts_with("docker") || cmd.starts_with("podman")) {
+    } else if is_docker && has("images") {
         filter_docker_images(output)
-    } else if cmd.starts_with("kubectl get") {
+    } else if prog == "kubectl" && has("get") {
         filter_kubectl_get(output)
-    } else if cmd.starts_with("kubectl logs") {
+    } else if prog == "kubectl" && has("logs") {
         filter_container_logs(output)
     } else {
         filter_generic(output, 500, 51200)

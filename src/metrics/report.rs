@@ -91,13 +91,15 @@ fn filter_items_by_period<'a>(
     start: Option<DateTime<Utc>>,
 ) -> Vec<&'a Interception> {
     items
-        .filter(|item| {
-            if let Some(start_ts) = start {
-                if let Ok(ts) = DateTime::parse_from_rfc3339(&item.timestamp) {
-                    return ts.with_timezone(&Utc) >= start_ts;
-                }
-            }
-            true
+        .filter(|item| match start {
+            // With a period filter active, only include items whose timestamp
+            // parses and falls within the window. An unparseable/corrupt timestamp
+            // is excluded rather than leaking into every date-bounded report.
+            Some(start_ts) => DateTime::parse_from_rfc3339(&item.timestamp)
+                .map(|ts| ts.with_timezone(&Utc) >= start_ts)
+                .unwrap_or(false),
+            // No period filter → include everything.
+            None => true,
         })
         .collect()
 }
@@ -151,10 +153,7 @@ pub fn aggregate(items: &[Interception], period: Period, model: &str) -> Report 
     // by_family
     let mut by_family: HashMap<String, FamilyStats> = HashMap::new();
     for item in &filtered {
-        let key = serde_json::to_value(&item.command_family)
-            .ok()
-            .and_then(|v| v.as_str().map(|s| s.to_string()))
-            .unwrap_or_else(|| format!("{:?}", item.command_family).to_lowercase());
+        let key = item.command_family.as_str().to_string();
         let entry = by_family.entry(key).or_insert(FamilyStats {
             count: 0,
             tokens_before: 0,

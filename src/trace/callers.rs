@@ -18,7 +18,8 @@ pub fn find_callers(symbol_name: &str, index_dir: &Path) -> Result<Vec<CallEdge>
         Err(_) => return Err(TraceError::IndexNotFound),
     };
 
-    let (_, file_path_field, content_field, kind_field, _, symbol_id_field) = build_schema();
+    let (_, file_path_field, content_field, kind_field, line_start_field, symbol_id_field) =
+        build_schema();
 
     let reader = index
         .reader_builder()
@@ -31,13 +32,12 @@ pub fn find_callers(symbol_name: &str, index_dir: &Path) -> Result<Vec<CallEdge>
     let kind_query = TermQuery::new(kind_term, IndexRecordOption::Basic);
 
     let top_docs = searcher.search(&kind_query, &TopDocs::with_limit(MAX_SYMBOL_DOCS))?;
-    if top_docs.len() >= MAX_SYMBOL_DOCS {
+    if top_docs.len() > MAX_SYMBOL_DOCS {
         eprintln!(
             "ecotokens: warning: symbol limit ({MAX_SYMBOL_DOCS}) reached; some callers may be missing"
         );
     }
 
-    let call_pattern = format!("{symbol_name}(");
     let mut edges = Vec::new();
 
     for (_score, addr) in top_docs {
@@ -66,34 +66,21 @@ pub fn find_callers(symbol_name: &str, index_dir: &Path) -> Result<Vec<CallEdge>
             continue;
         }
 
-        // Filter out comment lines to reduce false positives
-        let non_comment_source: String = source
-            .lines()
-            .filter(|l| {
-                let t = l.trim();
-                !t.starts_with("//")
-                    && !t.starts_with('#')
-                    && !t.starts_with("--")
-                    && !t.starts_with('*')
-            })
-            .collect::<Vec<_>>()
-            .join("\n");
-
-        // Check if source (excluding comments) contains a call to the target symbol
-        if non_comment_source.contains(&call_pattern) {
+        // Locate the call within the symbol's original source (comment lines are
+        // skipped internally, but not removed, so the index is not shifted).
+        if let Some(within) = super::find_call_line(source, symbol_name) {
             let file = doc
                 .get_first(file_path_field)
                 .and_then(|v| v.as_str())
                 .unwrap_or("")
                 .to_string();
 
-            // Find the line of the call within this symbol's source
-            let call_line = non_comment_source
-                .lines()
-                .enumerate()
-                .find(|(_, l)| l.contains(&call_pattern))
-                .map(|(i, _)| i as u64)
+            // Offset by the symbol's starting line to get a real file line number.
+            let sym_line_start = doc
+                .get_first(line_start_field)
+                .and_then(|v| v.as_u64())
                 .unwrap_or(0);
+            let call_line = sym_line_start + within;
 
             edges.push(CallEdge {
                 symbol_id: sid.to_string(),

@@ -12,6 +12,8 @@ use super::tools::*;
 #[derive(Debug, Clone)]
 pub struct EcotokensServer {
     index_dir: PathBuf,
+    /// Cached at construction so each tool call does not re-read settings from disk.
+    embed_provider: crate::config::settings::EmbedProvider,
     // Accessed by the rmcp-generated tool handler; not referenced directly here.
     #[allow(dead_code)]
     tool_router: ToolRouter<Self>,
@@ -21,6 +23,7 @@ impl EcotokensServer {
     pub fn new(index_dir: PathBuf) -> Self {
         Self {
             index_dir,
+            embed_provider: crate::config::Settings::load().embed_provider,
             tool_router: Self::tool_router(),
         }
     }
@@ -40,7 +43,7 @@ impl EcotokensServer {
             query: params.query.clone(),
             top_k,
             index_dir: self.index_dir.clone(),
-            embed_provider: crate::config::Settings::load().embed_provider,
+            embed_provider: self.embed_provider.clone(),
         };
         match crate::search::query::search_index(opts) {
             Ok(mut results) => {
@@ -48,7 +51,8 @@ impl EcotokensServer {
                 if let Some(root) = crate::config::git_root() {
                     results.retain(|r| root.join(&r.file_path).exists());
                 }
-                serde_json::to_string_pretty(&results).unwrap_or_default()
+                serde_json::to_string_pretty(&results)
+                    .unwrap_or_else(|e| json!({"error": e.to_string()}).to_string())
             }
             Err(e) => json!({"error": e.to_string()}).to_string(),
         }

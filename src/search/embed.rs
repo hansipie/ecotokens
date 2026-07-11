@@ -42,10 +42,22 @@ fn embed_text_candle(text: &str, model_id: &str) -> Option<Vec<f32>> {
 }
 
 fn embed_text_ollama(text: &str, url: &str, model: &str) -> Option<Vec<f32>> {
-    let client = reqwest::blocking::Client::builder()
-        .timeout(std::time::Duration::from_secs(30))
-        .build()
-        .ok()?;
+    use std::cell::RefCell;
+    // Reuse one client per thread so indexing keeps HTTP connections alive
+    // instead of paying DNS/TLS setup for every chunk.
+    thread_local! {
+        static CLIENT: RefCell<Option<reqwest::blocking::Client>> = const { RefCell::new(None) };
+    }
+    let client = CLIENT.with(|cell| {
+        let mut guard = cell.borrow_mut();
+        if guard.is_none() {
+            *guard = reqwest::blocking::Client::builder()
+                .timeout(std::time::Duration::from_secs(30))
+                .build()
+                .ok();
+        }
+        guard.clone()
+    })?;
 
     let payload = serde_json::json!({ "model": model, "prompt": text });
     let endpoint = format!("{}/api/embeddings", url.trim_end_matches('/'));
@@ -107,5 +119,7 @@ pub fn save_embeddings(
 ) -> Result<(), String> {
     let path = index_dir.join("embeddings.json");
     let json = serde_json::to_string(embeddings).map_err(|e| e.to_string())?;
-    std::fs::write(&path, json).map_err(|e| e.to_string())
+    // Atomic write (project policy) to avoid a corrupt embeddings.json under
+    // concurrent writes or a crash.
+    crate::config::atomic_write(&path, json).map_err(|e| e.to_string())
 }

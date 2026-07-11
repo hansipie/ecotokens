@@ -21,16 +21,10 @@ pub use cwd::project_root_for_cwd;
 
 use crate::metrics::store::CommandFamily;
 
-fn is_cpp_command(command: &str) -> bool {
-    use std::path::Path;
-    let Some(program) = command.split_whitespace().next() else {
-        return false;
-    };
-    let Some(program) = Path::new(program).file_name().and_then(|n| n.to_str()) else {
-        return false;
-    };
+/// `prog` is the already-basename-normalised program name (see `detect_family`).
+fn is_cpp_command(prog: &str) -> bool {
     matches!(
-        program,
+        prog,
         "gcc"
             | "g++"
             | "cc"
@@ -88,7 +82,7 @@ pub fn detect_family(command: &str) -> CommandFamily {
         CommandFamily::Git
     } else if prog == "cargo" {
         CommandFamily::Cargo
-    } else if is_cpp_command(cmd) {
+    } else if is_cpp_command(prog) {
         CommandFamily::Cpp
     } else if prog.starts_with("python")
         || matches!(
@@ -178,7 +172,7 @@ pub fn run_filter_pipeline_with_cwd(
 ) -> (String, u32, u32) {
     let settings = crate::config::Settings::load();
     let (masked, redacted) = crate::masking::mask(raw);
-    let filtered = if raw.chars().count() < 200 {
+    let filtered = if raw.len() < 200 {
         masked.clone()
     } else {
         let mut f = apply_filter(command, &masked);
@@ -204,8 +198,14 @@ pub fn run_filter_pipeline_with_cwd(
 
     let tokens_before = crate::tokens::count_tokens(raw) as u32;
     let filtered_tokens = crate::tokens::count_tokens(&filtered) as u32;
-    let (filtered, tokens_after) = if filtered_tokens > tokens_before {
-        (masked.clone(), crate::tokens::count_tokens(&masked) as u32)
+    // Compare the filtered result against the *masked* baseline (what filtering
+    // actually operates on), not the raw text: masking can legitimately expand
+    // token count, and comparing filtered vs raw would unfairly discard a good
+    // filtered result. `tokens_before` stays raw so user-facing savings reflect
+    // the original output.
+    let masked_tokens = crate::tokens::count_tokens(&masked) as u32;
+    let (filtered, tokens_after) = if filtered_tokens > masked_tokens {
+        (masked.clone(), masked_tokens)
     } else {
         (filtered, filtered_tokens)
     };

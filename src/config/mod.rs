@@ -40,10 +40,16 @@ pub fn atomic_write(path: &Path, contents: impl AsRef<[u8]>) -> std::io::Result<
         .file_name()
         .and_then(|n| n.to_str())
         .unwrap_or("ecotokens");
+    // A per-process monotonic counter guarantees a unique temp name even when two
+    // writes from the same PID land in the same nanosecond (or after 2262, where
+    // `timestamp_nanos_opt` saturates to 0).
+    static COUNTER: std::sync::atomic::AtomicU64 = std::sync::atomic::AtomicU64::new(0);
+    let seq = COUNTER.fetch_add(1, std::sync::atomic::Ordering::Relaxed);
     let tmp_path = parent.join(format!(
-        ".{file_name}.{}.{}.tmp",
+        ".{file_name}.{}.{}.{}.tmp",
         std::process::id(),
-        chrono::Utc::now().timestamp_nanos_opt().unwrap_or_default()
+        chrono::Utc::now().timestamp_nanos_opt().unwrap_or_default(),
+        seq
     ));
 
     let write_result = (|| {
@@ -53,6 +59,9 @@ pub fn atomic_write(path: &Path, contents: impl AsRef<[u8]>) -> std::io::Result<
             .open(&tmp_path)?;
         file.write_all(contents.as_ref())?;
         file.sync_all()?;
+        // The temp file lives in `parent` — the same directory (and therefore the
+        // same filesystem) as `path` — so this rename is atomic rather than a
+        // copy-then-delete.
         std::fs::rename(&tmp_path, path)
     })();
 

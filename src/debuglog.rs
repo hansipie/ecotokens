@@ -33,6 +33,16 @@ impl DebugLogger {
         if let Some(parent) = self.path.parent() {
             let _ = std::fs::create_dir_all(parent);
         }
+        // Cap growth: once the log exceeds MAX_LOG_BYTES, rotate it to `.log.1`
+        // (keeping one generation) so a busy `debuglog=true` session cannot fill
+        // the disk without bound.
+        const MAX_LOG_BYTES: u64 = 10 * 1024 * 1024;
+        if std::fs::metadata(&self.path)
+            .map(|m| m.len() > MAX_LOG_BYTES)
+            .unwrap_or(false)
+        {
+            let _ = std::fs::rename(&self.path, self.path.with_extension("log.1"));
+        }
         if let Ok(mut file) = OpenOptions::new()
             .append(true)
             .create(true)
@@ -44,5 +54,12 @@ impl DebugLogger {
 }
 
 pub fn gen_uid() -> String {
-    uuid::Uuid::new_v4().simple().to_string()[..8].to_string()
+    // `.chars().take(8)` rather than a byte slice `[..8]`, which would panic if
+    // the format string were ever shorter than 8 bytes.
+    uuid::Uuid::new_v4()
+        .simple()
+        .to_string()
+        .chars()
+        .take(8)
+        .collect()
 }

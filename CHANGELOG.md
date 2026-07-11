@@ -5,6 +5,39 @@ All notable changes to this project will be documented in this file.
 The format is based on [Keep a Changelog](https://keepachangelog.com/en/1.0.0/),
 and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0.html).
 
+## [0.25.0] - 2026-07-04
+
+Broad code-review hardening pass across the codebase. All fixes ship with `cargo fmt`, `cargo clippy -- -D warnings`, and the full test suite green.
+
+### Security
+
+- **Secret masking**: fixed five broken patterns in `src/masking/patterns.rs` that let real secrets leak through unmasked — AWS access keys now use `[A-Z0-9]{16}` (was base32 `[A-Z2-7]`), Anthropic API keys drop the unstable `AA` suffix anchor, HuggingFace tokens accept variable length (`{34,}`), Bearer tokens keep `=` mid-token, and `.env` matching allows spaces around `=`. Added word boundaries to the Twilio pattern and relaxed the Azure AD client-secret 4th-character constraint to cut false negatives/positives.
+- **Self-update**: `ecotokens update` now passes a version reconstructed from parsed integers to `cargo install --version`, so a spoofed GitHub API response cannot inject arguments.
+- **Watcher teardown**: `session-end` verifies a stored watcher PID still belongs to an ecotokens process (via `/proc/<pid>/cmdline`, `ps` fallback) before sending `SIGTERM`, avoiding killing a recycled PID.
+- **Model cache**: `CandleProvider` sanitizes user-supplied model IDs into a single safe path component (neutralizing `..` and other path-unsafe characters) before building the cache directory.
+
+### Fixed
+
+- **Semantic search (HNSW)**: the ANN graph is now built once per index instance (cached in a `OnceLock`) instead of being rebuilt on every `search()` call, and a dimension guard rejects heterogeneous/zero-length vectors instead of feeding them to `DistCosine`.
+- **`outline` traversal**: directory walking now uses the `ignore` crate, so it no longer follows symlink cycles into a stack overflow and respects `.gitignore` (no more descending into `node_modules`, `.git`, build artifacts).
+- **`trace` line numbers**: `find_callers`/`find_callees` report real file line numbers (offset by the symbol's start line) instead of a 0-based index into comment-stripped source; added an identifier-boundary check so short symbol names (`f`, `get`) no longer produce false-positive matches.
+- **Duplicate detection**: union-find uses iterative path compression plus union-by-size (no stack overflow on large inputs), and a length-based pre-filter skips pairs that provably cannot reach the similarity threshold.
+- **Crash safety**: `tokens/counter.rs` falls back to the character heuristic instead of `expect()`-panicking (and poisoning the static) when the exact tokenizer fails to load; `tui/gain.rs` no longer panics on zero-width columns or multi-byte path truncation.
+- **Command filters**: corrected several dispatch/parsing bugs — `docker run psql-image` is no longer misrouted to the `ps` filter (exact-token matching), `cargo +nightly build` and absolute-path invocations are recognized, `gh pr list` reads `STATE` from the correct column, cargo-test failure sections reset between suites, and false-positive markers were tightened for cpp (`linking`), go subtests, vitest (`×`), and curl progress lines. Git status now surfaces merge-conflict/`typechange` entries; `diff` keeps git headers; markdown ToC skips headings inside fenced code blocks; `ls -l` symlink lines filter by entry name.
+- **Hooks**: removed the permanently-dead symbol-enrichment path in the grep post-hook; `read` handler falls back to the target file's directory when the working directory was deleted; consistent newline framing on passthrough output.
+- **Session store**: `cleanup_dead` keeps entries with live sessions during the `increment → register_watcher` window, and `is_pid_running` treats Linux zombie processes as not running.
+- **Config integrity**: `install` refuses to overwrite settings files that contain invalid JSON (instead of silently replacing them with `{}`); `atomic_write` uses a per-process counter to guarantee unique temp names; `debug.log` rotates at 10 MB.
+- **Metrics**: post-hook agent→hook-type mapping records dedicated `Gemini`/`Qwen`/`Codex` PostToolUse variants; date-bounded reports exclude items with unparseable timestamps; SQLite connections set `busy_timeout` for multi-process contention; `by_family` aggregation uses a stable `CommandFamily::as_str()` key.
+- **Atomic writes**: the search module (`hnsw`, `index`, `embed`) now uses `atomic_write` for all index metadata files.
+
+### Changed
+
+- **MCP server**: settings are cached at construction instead of reloaded from disk on every tool call; numeric parameter deserialization uses `TryFrom` so out-of-range values error instead of silently truncating on 32-bit targets.
+- **Embeddings**: L2 normalization clamps the norm away from zero to prevent NaN vectors from entering the index; the Ollama embedding client is reused per thread.
+- **Watcher**: a debounce batch triggers at most one project reindex (instead of one per changed file), and log timestamps now include the date.
+- **`.env`/legacy config**: only legacy externally-tagged embed providers migrate to Candle at load time — an explicit `"type": "none"` is preserved.
+- **Version**: bumped the crate to `0.25.0`.
+
 ## [0.24.1] - 2026-06-29
 
 ### Changed

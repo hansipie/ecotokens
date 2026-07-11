@@ -57,13 +57,16 @@ pub fn handle_glob(filenames: &str) -> PostFilterResult {
         return PostFilterResult::Passthrough;
     }
 
+    // excluded_count > 0 here (the == 0 case returned Passthrough above). Glob
+    // filtering intentionally always reports Filtered when noisy directories are
+    // excluded: the value is stripping noise (node_modules, target, .git) so the
+    // model does not have to, even if the short exclusion footer offsets some of
+    // the raw token saving.
     let mut output = clean.join("\n");
-    if excluded_count > 0 {
-        output.push_str(&format!(
-            "\n[ecotokens: {} entries excluded — noisy dirs (node_modules, target, …)]",
-            excluded_count
-        ));
-    }
+    output.push_str(&format!(
+        "\n[ecotokens: {} entries excluded — noisy dirs (node_modules, target, …)]",
+        excluded_count
+    ));
 
     let tokens_before = count_tokens(filenames) as u32;
     let tokens_after = count_tokens(&output) as u32;

@@ -1,7 +1,8 @@
 const HEAD_TAIL_LINES: usize = 20;
 const HEAD_TAIL_BYTES: usize = 2048;
 
-fn floor_char_boundary(s: &str, mut idx: usize) -> usize {
+/// Largest byte index ≤ `idx` that falls on a UTF-8 char boundary.
+pub(crate) fn floor_char_boundary(s: &str, mut idx: usize) -> usize {
     if idx >= s.len() {
         return s.len();
     }

@@ -813,6 +813,10 @@ fn is_binary(s: &str) -> bool {
 
 /// Truncate a command string to `max` chars, showing head + `…` when longer.
 fn truncate_cmd(s: &str, max: usize) -> String {
+    if max == 0 {
+        // A zero-width column would make `max - 1` underflow below.
+        return String::new();
+    }
     let chars: Vec<char> = s.chars().collect();
     if chars.len() <= max {
         chars.into_iter().collect()
@@ -947,8 +951,12 @@ fn render_diff_panel(
             .and_then(extract_outline_path)
             .map(|p| {
                 let max = 40usize;
-                if p.len() > max {
-                    format!("…{}", &p[p.len() - max..])
+                // Count/keep the last `max` *chars* — byte slicing `&p[p.len()-max..]`
+                // panics when that byte index falls inside a multi-byte codepoint.
+                let char_count = p.chars().count();
+                if char_count > max {
+                    let tail: String = p.chars().skip(char_count - max).collect();
+                    format!("…{tail}")
                 } else {
                     p.to_string()
                 }
@@ -1069,7 +1077,9 @@ fn render_diff_panel(
             let truncate = changes.len() > MAX_HUNK_LINES && (all_delete || all_insert);
 
             if truncate {
-                let omitted = changes.len() - 2 * KEEP_LINES;
+                // saturating_sub: the invariant (len > MAX_HUNK_LINES ≥ 2*KEEP_LINES)
+                // holds today, but keep it explicit so a constant change can't panic.
+                let omitted = changes.len().saturating_sub(2 * KEEP_LINES);
                 for change in &changes[..KEEP_LINES] {
                     push_diff_line(&mut lines, change);
                 }

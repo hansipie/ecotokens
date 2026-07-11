@@ -69,6 +69,9 @@ pub fn agent_to_hook_type_pre(s: &str) -> HookType {
 pub fn agent_to_hook_type_post(s: &str) -> HookType {
     match s {
         "claude" => HookType::PostToolUse,
+        "gemini" => HookType::GeminiPostToolUse,
+        "qwen" => HookType::QwenPostToolUse,
+        "codex" => HookType::CodexPostToolUse,
         "pi" => HookType::Pi,
         _ => HookType::PostToolUse,
     }
@@ -94,6 +97,34 @@ pub enum CommandFamily {
     Db,
     Generic,
     NativeRead,
+}
+
+impl CommandFamily {
+    /// Stable snake_case identifier, matching the serde representation. Use this
+    /// for aggregation keys so they never drift from the serialized form (a
+    /// `format!("{:?}")` fallback would produce e.g. `configfile` instead of
+    /// `config_file`).
+    pub fn as_str(&self) -> &'static str {
+        match self {
+            CommandFamily::Git => "git",
+            CommandFamily::Cargo => "cargo",
+            CommandFamily::Cpp => "cpp",
+            CommandFamily::Fs => "fs",
+            CommandFamily::Markdown => "markdown",
+            CommandFamily::Python => "python",
+            CommandFamily::ConfigFile => "config_file",
+            CommandFamily::Go => "go",
+            CommandFamily::Js => "js",
+            CommandFamily::Gh => "gh",
+            CommandFamily::Container => "container",
+            CommandFamily::Grep => "grep",
+            CommandFamily::Aws => "aws",
+            CommandFamily::Network => "network",
+            CommandFamily::Db => "db",
+            CommandFamily::Generic => "generic",
+            CommandFamily::NativeRead => "native_read",
+        }
+    }
 }
 
 #[derive(Debug, Clone, Serialize, Deserialize, PartialEq)]
@@ -233,7 +264,10 @@ fn open_conn(path: &Path) -> io::Result<Connection> {
         .unwrap_or_else(|e| e.into_inner());
     let conn = Connection::open(path).map_err(io::Error::other)?;
     conn.execute_batch(
-        "PRAGMA journal_mode = WAL;
+        // busy_timeout: retry for up to 5s under multi-process contention instead
+        // of failing immediately with SQLITE_BUSY.
+        "PRAGMA busy_timeout = 5000;
+         PRAGMA journal_mode = WAL;
          PRAGMA synchronous = NORMAL;",
     )
     .map_err(io::Error::other)?;
@@ -312,14 +346,14 @@ fn row_to_interception(row: &Row) -> rusqlite::Result<Interception> {
             rusqlite::Error::InvalidColumnType(3, e.to_string(), rusqlite::types::Type::Text)
         })?,
         git_root: row.get("git_root")?,
-        tokens_before: row.get::<_, i64>("tokens_before")? as u32,
-        tokens_after: row.get::<_, i64>("tokens_after")? as u32,
+        tokens_before: u32::try_from(row.get::<_, i64>("tokens_before")?).unwrap_or(u32::MAX),
+        tokens_after: u32::try_from(row.get::<_, i64>("tokens_after")?).unwrap_or(u32::MAX),
         savings_pct: row.get::<_, f64>("savings_pct")? as f32,
         mode: str_to_enum(&mode).map_err(|e| {
             rusqlite::Error::InvalidColumnType(8, e.to_string(), rusqlite::types::Type::Text)
         })?,
         redacted: redacted != 0,
-        duration_ms: row.get::<_, i64>("duration_ms")? as u32,
+        duration_ms: u32::try_from(row.get::<_, i64>("duration_ms")?).unwrap_or(u32::MAX),
         content_before: row.get("content_before")?,
         content_after: row.get("content_after")?,
         hook_type: str_to_enum(&hook_type).map_err(|e| {

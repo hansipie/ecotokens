@@ -136,7 +136,12 @@ pub fn search_index(opts: SearchOptions) -> tantivy::Result<Vec<SearchResult>> {
             .and_then(|v| v.as_str())
             .filter(|s| !s.is_empty())
             .map(|s| s.to_string())
-            .unwrap_or_else(|| format!("{file_path}:{}", line_start / 50));
+            .unwrap_or_else(|| {
+                format!(
+                    "{file_path}:{}",
+                    line_start / super::index::LINE_CHUNK_SIZE as u64
+                )
+            });
 
         let bm25_norm = bm25_score / bm25_max;
 

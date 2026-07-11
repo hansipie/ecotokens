@@ -80,8 +80,12 @@ pub fn abbreviate(text: &str, settings: &Settings) -> (String, u32) {
     let mut out = String::with_capacity(text.len());
     let mut count: u32 = 0;
     let mut in_code = false;
-    let line_count = text.lines().count();
-    for (i, line) in text.lines().enumerate() {
+    // Single pass with `peekable` (no separate `.lines().count()` pass and no
+    // `line_count - 1` that could underflow): append a newline after a line when
+    // another line follows, or to preserve a trailing newline on the last line.
+    let ends_with_newline = text.ends_with('\n');
+    let mut lines = text.lines().peekable();
+    while let Some(line) = lines.next() {
         let trimmed = line.trim();
         if trimmed.starts_with("```") {
             out.push_str(line);
@@ -93,7 +97,7 @@ pub fn abbreviate(text: &str, settings: &Settings) -> (String, u32) {
             count += c;
             out.push_str(&transformed);
         }
-        if i < line_count - 1 || text.ends_with('\n') {
+        if lines.peek().is_some() || ends_with_newline {
             out.push('\n');
         }
     }
