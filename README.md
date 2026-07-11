@@ -303,6 +303,7 @@ Uninstall Claude Code
 | `ecotokens gain --period PERIOD` | Filter TUI to a time window (`all`, `today`, `week`, `month`) |
 | `ecotokens gain --history` | Print a savings summary table for 24h / 7 days / 30 days |
 | `ecotokens gain --json` | JSON report |
+| `ecotokens game [--period PERIOD]` | Space Invaders mini-game - filtered commands spawn enemies scaled by tokens saved |
 | `ecotokens config [--debug true\|false]` | Show or update global configuration (including debug mode) |
 | `ecotokens doctor [--json]` | Diagnose PATH, config, hook, MCP, and metrics setup without mutating files |
 | `ecotokens config --model MODEL` | Set the default model used for cost calculations (empty or unknown value lists available models) |
@@ -525,6 +526,17 @@ ecotokens duplicates --json                   # JSON output
 ```
 
 Each group shows the file paths, line ranges, similarity score, and a refactoring proposal (exact duplicate, near duplicate, or subset).
+
+### Game command
+
+`ecotokens game` turns your token savings into a Space Invaders mini-game. Every filtered command spawns an enemy whose strength scales with the tokens it saved.
+
+```bash
+ecotokens game                    # spawn enemies from all recorded commands
+ecotokens game --period today     # only spawn enemies from today's commands
+```
+
+Commands present at startup form the classic marching formation; commands filtered live while the game is running spawn as free-roaming "snakes". Arrow keys move, space fires.
 
 ## Configuration
 
