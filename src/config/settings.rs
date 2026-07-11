@@ -243,11 +243,10 @@ impl Settings {
         for (k, v) in overrides {
             settings.model_pricing.insert(k, v);
         }
-        // Migrate legacy providers (None, ollama, lm_studio) → Candle (silent)
-        if matches!(
-            settings.embed_provider,
-            EmbedProvider::None | EmbedProvider::Legacy
-        ) {
+        // Migrate only the legacy externally-tagged providers (ollama, lm_studio)
+        // → Candle. An explicit `"type": "none"` is a deliberate user choice to
+        // disable embeddings and must be preserved.
+        if matches!(settings.embed_provider, EmbedProvider::Legacy) {
             settings.embed_provider = EmbedProvider::default();
         }
         settings
@@ -290,9 +289,14 @@ impl Settings {
         let overrides: HashMap<_, _> = pricing
             .iter()
             .filter(|(k, v)| {
+                // A small absolute tolerance rather than `f64::EPSILON`: parsing a
+                // JSON price like 0.252 can differ from the built-in constant by
+                // more than one ULP, which would otherwise flag it as an override
+                // and cause spurious pricing.json writes.
+                const PRICE_TOL: f64 = 1e-9;
                 built_in.get(*k).map_or(true, |b| {
-                    (b.input_usd_per_1m - v.input_usd_per_1m).abs() > f64::EPSILON
-                        || (b.output_usd_per_1m - v.output_usd_per_1m).abs() > f64::EPSILON
+                    (b.input_usd_per_1m - v.input_usd_per_1m).abs() > PRICE_TOL
+                        || (b.output_usd_per_1m - v.output_usd_per_1m).abs() > PRICE_TOL
                 })
             })
             .map(|(k, v)| (k.clone(), v.clone()))

@@ -2,6 +2,7 @@ use bincode;
 use hnsw_rs::prelude::*;
 use serde::{Deserialize, Serialize};
 use std::path::Path;
+use std::sync::OnceLock;
 
 #[derive(Debug, Clone, Serialize, Deserialize)]
 pub struct HnswMeta {
@@ -15,7 +16,9 @@ impl HnswMeta {
     pub fn save(&self, dir: &Path) -> Result<(), String> {
         let path = dir.join("hnsw_meta.json");
         let json = serde_json::to_string_pretty(self).map_err(|e| e.to_string())?;
-        std::fs::write(&path, json).map_err(|e| e.to_string())
+        // Atomic write (project policy): a crash mid-write must not leave a
+        // truncated meta file that silently disables `model_changed` detection.
+        crate::config::atomic_write(&path, json).map_err(|e| e.to_string())
     }
 
     pub fn load(dir: &Path) -> Option<Self> {
@@ -38,6 +41,9 @@ struct StoredData {
 pub struct HnswIndex {
     id_map: Vec<String>,
     vectors: Vec<Vec<f32>>,
+    /// Built lazily on first `search()` and reused for the lifetime of the
+    /// instance, so a reused index never pays the O(N log N) build cost twice.
+    graph: OnceLock<Hnsw<'static, f32, DistCosine>>,
 }
 
 impl HnswIndex {
@@ -46,7 +52,37 @@ impl HnswIndex {
         HnswIndex {
             id_map: data.iter().map(|(id, _)| id.clone()).collect(),
             vectors: data.iter().map(|(_, v)| v.clone()).collect(),
+            graph: OnceLock::new(),
         }
+    }
+
+    /// Dimension of the index, taken from the first non-empty vector (0 if none).
+    fn dimension(&self) -> usize {
+        self.vectors
+            .iter()
+            .map(|v| v.len())
+            .find(|&l| l > 0)
+            .unwrap_or(0)
+    }
+
+    /// Build the HNSW graph once, inserting only vectors whose length matches the
+    /// index dimension. Heterogeneous or zero-length vectors (e.g. left over from a
+    /// partial re-index with a different model) are skipped rather than fed to
+    /// `DistCosine`, which would return garbage scores or panic.
+    fn build_graph(&self) -> Hnsw<'static, f32, DistCosine> {
+        let dim = self.dimension();
+        let max_elements = self.vectors.len() + 1;
+        let hnsw: Hnsw<'static, f32, DistCosine> =
+            Hnsw::new(16, max_elements, 16, 200, DistCosine {});
+        if dim == 0 {
+            return hnsw;
+        }
+        for (i, v) in self.vectors.iter().enumerate() {
+            if v.len() == dim {
+                hnsw.insert((v.as_slice(), i));
+            }
+        }
+        hnsw
     }
 
     /// ANN search: returns `(chunk_id, cosine_similarity)` pairs sorted by score desc.
@@ -54,13 +90,14 @@ impl HnswIndex {
         if self.vectors.is_empty() || top_k == 0 {
             return vec![];
         }
-        let n = self.vectors.len();
-        let max_elements = n + 1;
-        let hnsw: Hnsw<f32, DistCosine> = Hnsw::new(16, max_elements, 16, 200, DistCosine {});
-
-        for (i, v) in self.vectors.iter().enumerate() {
-            hnsw.insert((v, i));
+        // Reject a query whose dimension does not match the index to avoid a
+        // dimension-mismatch panic/garbage inside `DistCosine`.
+        let dim = self.dimension();
+        if dim == 0 || query.len() != dim {
+            return vec![];
         }
+
+        let hnsw = self.graph.get_or_init(|| self.build_graph());
 
         let ef_search = (top_k * 5).max(50);
         let query_vec: Vec<f32> = query.to_vec();
@@ -84,7 +121,10 @@ impl HnswIndex {
             vectors: self.vectors.clone(),
         };
         let bytes = bincode::serialize(&data).map_err(|e| e.to_string())?;
-        std::fs::write(dir.join("hnsw_index.bin"), &bytes).map_err(|e| e.to_string())
+        // Atomic write (project policy): a crash during this potentially large
+        // binary write must not leave a truncated file that `load` silently
+        // discards, losing the entire index.
+        crate::config::atomic_write(&dir.join("hnsw_index.bin"), &bytes).map_err(|e| e.to_string())
     }
 
     /// Load from `{dir}/hnsw_index.bin`. Returns `None` if absent or corrupt.
@@ -94,6 +134,7 @@ impl HnswIndex {
         Some(HnswIndex {
             id_map: data.id_map,
             vectors: data.vectors,
+            graph: OnceLock::new(),
         })
     }
 

@@ -5,6 +5,7 @@ use crate::filter::generic;
 #[cfg(feature = "ai-summary")]
 use std::time::Duration;
 
+#[cfg(feature = "ai-summary")]
 const DEFAULT_OLLAMA_URL: &str = "http://localhost:11434";
 
 #[cfg(feature = "ai-summary")]

@@ -110,6 +110,12 @@ enum Commands {
         #[arg(long)]
         history: bool,
     },
+    /// Play a Space Invaders mini-game where each filtered command spawns an enemy
+    Game {
+        /// Period of filtered commands used to spawn enemies
+        #[arg(long, default_value_t, value_name = "PERIOD")]
+        period: metrics::report::Period,
+    },
     /// Install ecotokens hook in ~/.claude/settings.json, ~/.gemini/settings.json, ~/.qwen/settings.json, ~/.pi/agent/extensions/, ~/.hermes/plugins/, or ~/.codex/plugins/
     Install {
         /// Target AI tool to install for: claude, gemini, qwen, pi, hermes, codex, or all (default: claude)
@@ -412,7 +418,7 @@ fn cmd_filter(args: Vec<String>, debug: bool, cwd: Option<PathBuf>, agent: Strin
         }
     };
 
-    let duration_ms = start.elapsed().as_millis() as u32;
+    let duration_ms = start.elapsed().as_millis().min(u32::MAX as u128) as u32;
     let hook_type = metrics::store::agent_to_hook_type_pre(&agent);
     let (filtered, tokens_before, tokens_after) = filter::run_filter_pipeline_with_cwd(
         &command,
@@ -804,6 +810,31 @@ fn cmd_gain(period: metrics::report::Period, json: bool, model: Option<String>, 
 }
 
 /// Compute projects sorted by savings percentage (descending).
+fn cmd_game(period: metrics::report::Period) {
+    let path = match metrics::store::metrics_path() {
+        Some(p) => p,
+        None => {
+            eprintln!("Cannot locate metrics file");
+            std::process::exit(1);
+        }
+    };
+    if !std::io::IsTerminal::is_terminal(&std::io::stdout()) {
+        eprintln!("ecotokens game requires an interactive terminal");
+        std::process::exit(1);
+    }
+    if let Err(e) = enable_raw_mode() {
+        eprintln!("failed to enable raw mode: {e}");
+    }
+    if let Err(e) = std::io::stdout().execute(EnterAlternateScreen) {
+        eprintln!("failed to enter alternate screen: {e}");
+    }
+    let _guard = TerminalGuard::stdout();
+    let backend = CrosstermBackend::new(std::io::stdout());
+    if let Ok(mut terminal) = Terminal::new(backend) {
+        tui::game::run(&mut terminal, &path, &period);
+    }
+}
+
 fn sorted_projects_from(report: &metrics::report::Report) -> Vec<(String, f32)> {
     let mut projects: Vec<(String, f32)> = report
         .by_project
@@ -2517,10 +2548,9 @@ fn parse_older_than(s: &str) -> Option<chrono::Duration> {
         (n, 'd')
     } else if let Some(n) = s.strip_suffix('w') {
         (n, 'w')
-    } else if let Some(n) = s.strip_suffix('m') {
-        (n, 'm')
     } else {
-        return None;
+        let n = s.strip_suffix('m')?;
+        (n, 'm')
     };
     let n: i64 = num_str.parse().ok()?;
     match unit {
@@ -2709,10 +2739,12 @@ fn watch_log_path(watch_path: &std::path::Path) -> PathBuf {
         .join(format!("watch{sanitized}_{fingerprint}.log"))
 }
 
+#[cfg(unix)]
 fn systemd_unit_name_for_watch_path(watch_path: &str) -> String {
     format!("ecotokens-watch-{:016x}", stable_hash(watch_path))
 }
 
+#[cfg(unix)]
 fn start_auto_watch_process(bin: &std::path::Path, watch_path: &str) -> std::io::Result<()> {
     let unit = systemd_unit_name_for_watch_path(watch_path);
     let systemd_status = std::process::Command::new("systemd-run")
@@ -2766,15 +2798,18 @@ fn cmd_session_start() {
                 );
             }
         } else if decision.needs_watcher {
-            let bin = std::env::current_exe().unwrap_or_else(|_| PathBuf::from("ecotokens"));
-            let result = start_auto_watch_process(&bin, &decision.watch_path);
-            if settings.debug {
-                match result {
-                    Ok(()) => eprintln!(
-                        "ecotokens auto-watch: started watch on {}.",
-                        decision.watch_path
-                    ),
-                    Err(e) => eprintln!("ecotokens auto-watch: failed to start watch: {e}"),
+            #[cfg(unix)]
+            {
+                let bin = std::env::current_exe().unwrap_or_else(|_| PathBuf::from("ecotokens"));
+                let result = start_auto_watch_process(&bin, &decision.watch_path);
+                if settings.debug {
+                    match result {
+                        Ok(()) => eprintln!(
+                            "ecotokens auto-watch: started watch on {}.",
+                            decision.watch_path
+                        ),
+                        Err(e) => eprintln!("ecotokens auto-watch: failed to start watch: {e}"),
+                    }
                 }
             }
         }
@@ -2792,6 +2827,29 @@ fn cmd_session_start() {
     }
 }
 
+/// Best-effort check that `pid` still belongs to an ecotokens watch process
+/// before we signal it — otherwise a recycled PID could point at an unrelated
+/// process that we would wrongly kill.
+#[cfg(unix)]
+fn pid_is_ecotokens_watch(pid: u32) -> bool {
+    // Linux: /proc/<pid>/cmdline holds the NUL-separated argv.
+    if let Ok(bytes) = std::fs::read(format!("/proc/{pid}/cmdline")) {
+        let cmdline = String::from_utf8_lossy(&bytes);
+        return cmdline.contains("ecotokens") && cmdline.contains("watch");
+    }
+    // Other unix (e.g. macOS): fall back to `ps`.
+    match std::process::Command::new("ps")
+        .args(["-p", &pid.to_string(), "-o", "command="])
+        .output()
+    {
+        Ok(out) => {
+            let cmd = String::from_utf8_lossy(&out.stdout);
+            cmd.contains("ecotokens") && cmd.contains("watch")
+        }
+        Err(_) => false,
+    }
+}
+
 fn cmd_session_end() {
     let cwd = std::env::current_dir().unwrap_or_else(|_| PathBuf::from("."));
     let cwd_str = cwd.to_string_lossy().to_string();
@@ -2800,9 +2858,11 @@ fn cmd_session_end() {
     if let Some(_pid) = store.decrement_for_session(&cwd_str) {
         let _ = store.save();
         #[cfg(unix)]
-        let _ = std::process::Command::new("kill")
-            .args(["-TERM", &_pid.to_string()])
-            .status();
+        if pid_is_ecotokens_watch(_pid) {
+            let _ = std::process::Command::new("kill")
+                .args(["-TERM", &_pid.to_string()])
+                .status();
+        }
     } else {
         let _ = store.save();
     }
@@ -2959,9 +3019,12 @@ fn cmd_update(check: bool) {
         return;
     }
 
+    // Reconstruct the version from the parsed integers so only `\d+\.\d+\.\d+`
+    // can ever reach `cargo install`, regardless of what the API returned.
+    let version_arg = format!("{}.{}.{}", v_latest.0, v_latest.1, v_latest.2);
     println!("Running: cargo install ecotokens ...");
     match std::process::Command::new("cargo")
-        .args(["install", "ecotokens", "--version", latest])
+        .args(["install", "ecotokens", "--version", &version_arg])
         .status()
     {
         Ok(s) if s.success() => println!("Updated to v{}.", latest),
@@ -3008,6 +3071,7 @@ fn main() {
             model,
             history,
         } => cmd_gain(period, json, model, history),
+        Commands::Game { period } => cmd_game(period),
         Commands::Install {
             target,
             ai_summary,

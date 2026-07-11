@@ -13,6 +13,10 @@ use super::is_indexable_extension;
 use super::symbols::{parse_symbols, write_symbols};
 use super::text_docs::index_text_doc;
 
+/// Window size (in lines) for the fallback line-based chunker. Shared with the
+/// query fallback so reconstructed chunk keys stay aligned with stored IDs.
+pub const LINE_CHUNK_SIZE: usize = 50;
+
 #[derive(Debug, Clone)]
 pub struct IndexOptions {
     pub reset: bool,
@@ -84,10 +88,10 @@ pub fn chunk_file_by_symbols(
 pub fn chunk_file_by_lines(content: &str, rel_path: &str) -> Vec<SemanticChunk> {
     let lines: Vec<&str> = content.lines().collect();
     lines
-        .chunks(50)
+        .chunks(LINE_CHUNK_SIZE)
         .enumerate()
         .map(|(idx, chunk)| {
-            let line_start = idx as u64 * 50;
+            let line_start = idx as u64 * LINE_CHUNK_SIZE as u64;
             SemanticChunk {
                 id: format!("{rel_path}:{idx}"),
                 file_path: rel_path.to_string(),
@@ -143,7 +147,9 @@ fn load_timestamps(dir: &Path) -> HashMap<String, u64> {
 
 fn save_timestamps(dir: &Path, ts: &HashMap<String, u64>) {
     if let Ok(s) = serde_json::to_string(ts) {
-        let _ = std::fs::write(dir.join("file_timestamps.json"), s);
+        // Atomic write (project policy): a crash here would otherwise lose all
+        // per-file timestamps and force a full re-index on the next run.
+        let _ = crate::config::atomic_write(&dir.join("file_timestamps.json"), s);
     }
 }
 
@@ -167,7 +173,9 @@ fn load_semantic_manifest(dir: &Path) -> SemanticManifest {
 
 fn save_semantic_manifest(dir: &Path, manifest: &SemanticManifest) {
     if let Ok(s) = serde_json::to_string(manifest) {
-        let _ = std::fs::write(dir.join("semantic_manifest.json"), s);
+        // Atomic write (project policy): a partial write corrupts the manifest,
+        // which would silently reset `seen_chunk_ids` on the next run.
+        let _ = crate::config::atomic_write(&dir.join("semantic_manifest.json"), s);
     }
 }
 
@@ -245,12 +253,25 @@ pub fn index_directory(opts: IndexOptions) -> tantivy::Result<IndexStats> {
         }};
     }
 
+    // Remove a stale index file, warning on any error other than "not found" so
+    // that leftover vectors for the wrong model are not silently carried forward.
+    macro_rules! remove_stale {
+        ($name:expr) => {{
+            let p = opts.index_dir.join($name);
+            if let Err(e) = std::fs::remove_file(&p) {
+                if e.kind() != std::io::ErrorKind::NotFound {
+                    log!("ecotokens: failed to remove stale {}: {e}", $name);
+                }
+            }
+        }};
+    }
+
     if model_changed {
         log!("ecotokens: embedding model changed — rebuilding semantic index");
-        let _ = std::fs::remove_file(opts.index_dir.join("hnsw_index.bin"));
-        let _ = std::fs::remove_file(opts.index_dir.join("hnsw_meta.json"));
-        let _ = std::fs::remove_file(opts.index_dir.join("embeddings.json"));
-        let _ = std::fs::remove_file(opts.index_dir.join("semantic_manifest.json"));
+        remove_stale!("hnsw_index.bin");
+        remove_stale!("hnsw_meta.json");
+        remove_stale!("embeddings.json");
+        remove_stale!("semantic_manifest.json");
     }
 
     // T054 — migrate legacy embeddings.json → hnsw_index.bin on first run after upgrade

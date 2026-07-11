@@ -71,11 +71,38 @@ pub fn watch_directory(
             .map(|(p, _)| p.clone())
             .collect();
 
-        for path in ready {
-            pending.remove(&path);
-            let ts = chrono::Utc::now().format("%H:%M:%S").to_string();
-            let status = reindex_incremental(&path, watch_path, index_dir, &embed_provider);
+        // Gate each ready path (extension + gitignore) first, then run at most a
+        // single reindex for the whole debounce batch. `index_directory` walks
+        // the whole project, so calling it once per changed file would repeat
+        // that walk needlessly when an editor or git operation touches many files
+        // at once.
+        let mut statuses: Vec<(PathBuf, Option<String>)> = Vec::new();
+        let mut needs_reindex = false;
+        for path in &ready {
+            let ext = path.extension().and_then(|e| e.to_str()).unwrap_or("");
+            if !is_indexable_extension(ext) || is_gitignored(path, watch_path) {
+                statuses.push((path.clone(), Some("ignored".to_string())));
+            } else {
+                needs_reindex = true;
+                statuses.push((path.clone(), None)); // filled in after the reindex
+            }
+        }
+        for path in &ready {
+            pending.remove(path);
+        }
 
+        let reindex_status = if needs_reindex {
+            Some(run_full_index(watch_path, index_dir, &embed_provider))
+        } else {
+            None
+        };
+
+        for (path, gated) in statuses {
+            let status = gated
+                .or_else(|| reindex_status.clone())
+                .unwrap_or_else(|| "re-indexed".to_string());
+            // Include the date so log ordering is unambiguous across midnight.
+            let ts = chrono::Utc::now().format("%Y-%m-%d %H:%M:%S").to_string();
             if event_tx
                 .send(WatchEvent {
                     path,
@@ -120,21 +147,10 @@ fn is_gitignored(path: &Path, root: &Path) -> bool {
         .is_ignore()
 }
 
-/// Ré-indexe le projet en mode incrémental pour garder BM25, symboles et HNSW cohérents.
-fn reindex_incremental(
-    path: &Path,
-    watch_path: &Path,
-    index_dir: &Path,
-    embed_provider: &EmbedProvider,
-) -> String {
-    let ext = path.extension().and_then(|e| e.to_str()).unwrap_or("");
-    if !is_indexable_extension(ext) {
-        return "ignored".to_string();
-    }
-    if is_gitignored(path, watch_path) {
-        return "ignored".to_string();
-    }
-
+/// Ré-indexe le projet en mode incrémental (reset:false) pour garder BM25,
+/// symboles et HNSW cohérents. Le walk saute les fichiers inchangés via les
+/// timestamps; l'appelant ne l'invoque qu'une fois par cycle de debounce.
+fn run_full_index(watch_path: &Path, index_dir: &Path, embed_provider: &EmbedProvider) -> String {
     let opts = IndexOptions {
         reset: false,
         path: watch_path.to_path_buf(),

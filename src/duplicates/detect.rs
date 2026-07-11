@@ -51,7 +51,7 @@ pub fn detect_duplicates(opts: &DetectionOptions) -> Result<Vec<DuplicateGroup>,
     let kind_term = Term::from_field_text(kind_field, "symbol");
     let kind_query = TermQuery::new(kind_term, IndexRecordOption::Basic);
     let top_docs = searcher.search(&kind_query, &TopDocs::with_limit(MAX_SYMBOL_DOCS))?;
-    if top_docs.len() >= MAX_SYMBOL_DOCS {
+    if top_docs.len() > MAX_SYMBOL_DOCS {
         eprintln!(
             "ecotokens: warning: symbol limit ({MAX_SYMBOL_DOCS}) reached; duplicate detection may be incomplete"
         );
@@ -111,17 +111,34 @@ pub fn detect_duplicates(opts: &DetectionOptions) -> Result<Vec<DuplicateGroup>,
         );
     }
     let mut parent: Vec<usize> = (0..n).collect();
+    let mut size: Vec<usize> = vec![1; n];
     let mut best_score: Vec<f32> = vec![0.0; n];
+
+    // Pre-computed line counts to cheaply skip pairs that provably cannot reach
+    // the threshold, avoiding the expensive TextDiff for those pairs.
+    let line_counts: Vec<usize> = segments.iter().map(|s| s.content.lines().count()).collect();
 
     for i in 0..n {
         for j in (i + 1)..n {
+            // Upper bound on the similarity ratio: matched lines cannot exceed the
+            // shorter segment, so ratio ≤ 200 * min(li, lj) / (li + lj).
+            let (li, lj) = (line_counts[i], line_counts[j]);
+            let max_possible = if li + lj == 0 {
+                0.0
+            } else {
+                200.0 * li.min(lj) as f32 / (li + lj) as f32
+            };
+            if max_possible < opts.threshold {
+                continue;
+            }
+
             let ratio =
                 TextDiff::from_lines(&segments[i].content, &segments[j].content).ratio() * 100.0;
             if ratio >= opts.threshold {
                 let ri = find(&mut parent, i);
                 let rj = find(&mut parent, j);
                 if ri != rj {
-                    union(&mut parent, i, j);
+                    union(&mut parent, &mut size, i, j);
                 }
                 // Track best score for each root
                 let root = find(&mut parent, i);
@@ -185,17 +202,36 @@ pub fn detect_duplicates(opts: &DetectionOptions) -> Result<Vec<DuplicateGroup>,
     Ok(groups)
 }
 
-fn find(parent: &mut Vec<usize>, i: usize) -> usize {
-    if parent[i] != i {
-        parent[i] = find(parent, parent[i]);
+/// Union-find root lookup with iterative path compression — iterative so a long
+/// parent chain cannot overflow the stack on large inputs.
+fn find(parent: &mut [usize], i: usize) -> usize {
+    let mut root = i;
+    while parent[root] != root {
+        root = parent[root];
     }
-    parent[i]
+    // Point every node on the path directly at the root.
+    let mut cur = i;
+    while parent[cur] != root {
+        let next = parent[cur];
+        parent[cur] = root;
+        cur = next;
+    }
+    root
 }
 
-fn union(parent: &mut Vec<usize>, i: usize, j: usize) {
+/// Union by size: attach the smaller tree under the larger root to bound tree
+/// depth (and therefore the work done by `find`) to O(log n).
+fn union(parent: &mut [usize], size: &mut [usize], i: usize, j: usize) {
     let ri = find(parent, i);
     let rj = find(parent, j);
-    if ri != rj {
-        parent[rj] = ri;
+    if ri == rj {
+        return;
     }
+    let (large, small) = if size[ri] >= size[rj] {
+        (ri, rj)
+    } else {
+        (rj, ri)
+    };
+    parent[small] = large;
+    size[large] += size[small];
 }

@@ -87,14 +87,16 @@ fn handle_with_agent(agent: &str) {
         .unwrap_or_default();
 
     if stdin.len() > MAX_STDIN_BYTES {
-        print!("{stdin}");
+        // `println!` (not `print!`) so the framing matches the normal success
+        // path and newline-delimited protocols don't mis-parse the output.
+        println!("{stdin}");
         return;
     }
 
     let v: serde_json::Value = match serde_json::from_str(&stdin) {
         Ok(v) => v,
         Err(_) => {
-            print!("{stdin}");
+            println!("{stdin}");
             return;
         }
     };

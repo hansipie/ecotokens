@@ -52,7 +52,8 @@ fn filter_gh_pr_view(output: &str) -> String {
         } else if lower.starts_with("body:") || lower.starts_with("--") {
             in_body = true;
             result.push(*line);
-            body_lines = 0;
+            // Do not reset the counter: a second `body:`/`--` section must not
+            // bypass the cumulative truncation limit.
         } else if in_body && body_lines < MAX_BODY_LINES {
             result.push(*line);
             body_lines += 1;
@@ -80,8 +81,10 @@ fn filter_gh_list(output: &str, min_parts: usize) -> String {
         if parts.len() >= min_parts {
             let number = parts[0].trim();
             let title = parts[1].trim();
-            let state = if parts.len() > 3 {
-                parts[3].trim()
+            // `gh pr/issue list` columns: NUMBER TITLE BRANCH/LABELS CREATED_AT STATE
+            // — STATE is the 5th field (index 4), not the CREATED_AT at index 3.
+            let state = if parts.len() > 4 {
+                parts[4].trim()
             } else {
                 "open"
             };
@@ -97,7 +100,7 @@ fn filter_gh_list(output: &str, min_parts: usize) -> String {
 }
 
 fn filter_gh_pr_list(output: &str) -> String {
-    // gh pr list: tab-separated NUMBER  TITLE  BRANCH  CREATED_AT
+    // gh pr list: tab-separated NUMBER  TITLE  BRANCH  CREATED_AT  STATE
     filter_gh_list(output, 3)
 }
 

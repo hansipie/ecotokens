@@ -48,8 +48,13 @@ impl SessionStore {
     /// Remove stale entries: any entry whose watcher PID is dead or absent is dropped,
     /// because a session count without a live watcher is unrecoverable.
     pub fn cleanup_dead(&mut self) {
-        self.0
-            .retain(|_, e| e.watcher_pid.map(is_pid_running).unwrap_or(false));
+        self.0.retain(|_, e| match e.watcher_pid {
+            Some(pid) => is_pid_running(pid),
+            // No watcher PID yet: if sessions are still counted we are in the
+            // increment() → register_watcher() window, so keep the entry rather
+            // than racing away a live session and losing its count permanently.
+            None => e.sessions > 0,
+        });
     }
 
     /// Increment session count for `path`.
@@ -180,8 +185,20 @@ impl SessionStore {
 pub fn is_pid_running(pid: u32) -> bool {
     #[cfg(target_os = "linux")]
     {
-        let proc_entry = std::path::Path::new("/proc").join(pid.to_string());
-        proc_entry.exists()
+        // /proc/<pid> exists for zombie (reaped-but-not-waited) processes too, so
+        // check the process state and treat a zombie ('Z') as not running.
+        let stat = std::path::Path::new("/proc")
+            .join(pid.to_string())
+            .join("stat");
+        match std::fs::read_to_string(&stat) {
+            // Format: `pid (comm) state ...` — the state char follows the ')'.
+            Ok(contents) => contents
+                .rsplit_once(')')
+                .and_then(|(_, rest)| rest.split_whitespace().next())
+                .map(|state| state != "Z")
+                .unwrap_or(true),
+            Err(_) => false,
+        }
     }
     #[cfg(all(unix, not(target_os = "linux")))]
     {

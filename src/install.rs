@@ -15,23 +15,37 @@ const GEMINI_POST_HOOK_MATCHER: &str = "read_file|search_file_content|list_direc
 const QWEN_POST_HOOK_COMMAND: &str = "ecotokens hook-post-qwen";
 const QWEN_POST_HOOK_MATCHER: &str = "read_file|search_files|list_dir";
 
-fn read_settings(path: &Path) -> serde_json::Value {
+/// Read a settings file, returning an error when the existing file contains
+/// invalid JSON. Used on the write path so we never overwrite (and thereby
+/// destroy) a user's settings that we merely failed to parse.
+fn read_settings_checked(path: &Path) -> std::io::Result<serde_json::Value> {
     if path.exists() {
-        let s = std::fs::read_to_string(path).unwrap_or_default();
-        match serde_json::from_str(&s) {
-            Ok(v) => v,
-            Err(e) => {
-                eprintln!(
-                    "ecotokens: warning: {} contains invalid JSON, ignoring: {}",
-                    path.display(),
-                    e
-                );
-                serde_json::json!({})
-            }
+        let s = std::fs::read_to_string(path)?;
+        if s.trim().is_empty() {
+            return Ok(serde_json::json!({}));
         }
+        serde_json::from_str(&s).map_err(|e| {
+            std::io::Error::new(
+                std::io::ErrorKind::InvalidData,
+                format!(
+                    "{} contains invalid JSON; refusing to overwrite it: {e}",
+                    path.display()
+                ),
+            )
+        })
     } else {
-        serde_json::json!({})
+        Ok(serde_json::json!({}))
     }
+}
+
+/// Read a settings file for read-only inspection. Invalid JSON is treated as an
+/// empty object (a corrupt file simply reads as "nothing installed"); callers
+/// that go on to *write* the file must use [`read_settings_checked`] instead.
+fn read_settings(path: &Path) -> serde_json::Value {
+    read_settings_checked(path).unwrap_or_else(|e| {
+        eprintln!("ecotokens: warning: {}, ignoring", e);
+        serde_json::json!({})
+    })
 }
 
 fn write_settings(path: &Path, v: &serde_json::Value) -> InstallResult {
@@ -152,7 +166,7 @@ pub fn install_mcp_server(settings_path: &Path) -> InstallResult {
         .unwrap_or_else(|_| std::path::PathBuf::from("ecotokens"))
         .to_string_lossy()
         .into_owned();
-    let mut v = read_settings(settings_path);
+    let mut v = read_settings_checked(settings_path)?;
     if !has_ecotokens_mcp_server(&v) {
         v["mcpServers"]["ecotokens"] = serde_json::json!({
             "command": binary,
@@ -165,14 +179,14 @@ pub fn install_mcp_server(settings_path: &Path) -> InstallResult {
 /// Install the PreToolUse hook into ~/.claude/settings.json (idempotent).
 pub fn install_hook(settings_path: &Path, claude_json_path: &Path) -> InstallResult {
     let _ = claude_json_path; // kept for signature compatibility with uninstall callers
-    let mut v = read_settings(settings_path);
+    let mut v = read_settings_checked(settings_path)?;
     let _ = install_hook_generic(&mut v, "PreToolUse", HOOK_MATCHER, HOOK_COMMAND);
     write_settings(settings_path, &v)
 }
 
 /// Install the PostToolUse hook for Read/Grep/Glob into settings.json (idempotent).
 pub fn install_post_hook(settings_path: &Path) -> InstallResult {
-    let mut v = read_settings(settings_path);
+    let mut v = read_settings_checked(settings_path)?;
     let _ = install_hook_generic(&mut v, "PostToolUse", POST_HOOK_MATCHER, POST_HOOK_COMMAND);
     write_settings(settings_path, &v)
 }
@@ -200,7 +214,7 @@ pub fn is_mcp_registered(claude_json_path: &Path) -> bool {
 /// Also cleans up ~/.claude.json for backward compatibility with older installs.
 pub fn uninstall_hook(settings_path: &Path, claude_json_path: &Path) -> InstallResult {
     if settings_path.exists() {
-        let mut v = read_settings(settings_path);
+        let mut v = read_settings_checked(settings_path)?;
         remove_hook_generic(&mut v, "PreToolUse", HOOK_COMMAND);
         remove_hook_generic(&mut v, "PostToolUse", POST_HOOK_COMMAND);
         remove_hook_generic(&mut v, "SessionStart", SESSION_START_COMMAND);
@@ -211,7 +225,7 @@ pub fn uninstall_hook(settings_path: &Path, claude_json_path: &Path) -> InstallR
 
     // Rétrocompatibilité : anciennes installs où le MCP était dans ~/.claude.json
     if claude_json_path.exists() {
-        let mut cv = read_settings(claude_json_path);
+        let mut cv = read_settings_checked(claude_json_path)?;
         if remove_ecotokens_mcp_server(&mut cv) {
             write_settings(claude_json_path, &cv)?;
         }
@@ -229,7 +243,7 @@ const SESSION_END_COMMAND: &str = "ecotokens session-end";
 
 /// Install SessionStart and SessionEnd hooks in ~/.claude/settings.json (idempotent).
 pub fn install_session_hooks(settings_path: &Path) -> InstallResult {
-    let mut v = read_settings(settings_path);
+    let mut v = read_settings_checked(settings_path)?;
     let _ = install_hook_generic(&mut v, "SessionStart", "", SESSION_START_COMMAND);
     let _ = install_hook_generic(&mut v, "SessionEnd", "", SESSION_END_COMMAND);
     write_settings(settings_path, &v)
@@ -247,7 +261,7 @@ pub fn uninstall_session_hooks(settings_path: &Path) -> InstallResult {
     if !settings_path.exists() {
         return Ok(());
     }
-    let mut v = read_settings(settings_path);
+    let mut v = read_settings_checked(settings_path)?;
     remove_hook_generic(&mut v, "SessionStart", SESSION_START_COMMAND);
     remove_hook_generic(&mut v, "SessionEnd", SESSION_END_COMMAND);
     write_settings(settings_path, &v)
@@ -269,7 +283,7 @@ pub fn default_gemini_settings_path() -> Option<std::path::PathBuf> {
 
 /// Install the BeforeTool hook into ~/.gemini/settings.json (idempotent).
 pub fn install_gemini_hook(settings_path: &Path) -> InstallResult {
-    let mut v = read_settings(settings_path);
+    let mut v = read_settings_checked(settings_path)?;
     let _ = install_hook_generic(
         &mut v,
         "BeforeTool",
@@ -295,7 +309,7 @@ pub fn is_gemini_mcp_registered(settings_path: &Path) -> bool {
 
 /// Install the AfterTool post-hook for read_file/search_file_content/list_directory (idempotent).
 pub fn install_gemini_post_hook(settings_path: &Path) -> InstallResult {
-    let mut v = read_settings(settings_path);
+    let mut v = read_settings_checked(settings_path)?;
     let _ = install_hook_generic(
         &mut v,
         "AfterTool",
@@ -319,7 +333,7 @@ pub fn uninstall_gemini(settings_path: &Path) -> InstallResult {
     if !settings_path.exists() {
         return Ok(());
     }
-    let mut v = read_settings(settings_path);
+    let mut v = read_settings_checked(settings_path)?;
     remove_hook_generic(&mut v, "BeforeTool", GEMINI_HOOK_COMMAND);
     remove_hook_generic(&mut v, "AfterTool", GEMINI_POST_HOOK_COMMAND);
     remove_ecotokens_mcp_server(&mut v);
@@ -337,7 +351,7 @@ pub fn default_qwen_settings_path() -> Option<std::path::PathBuf> {
 
 /// Install the PreToolUse hook into ~/.qwen/settings.json (idempotent).
 pub fn install_qwen_hook(settings_path: &Path) -> InstallResult {
-    let mut v = read_settings(settings_path);
+    let mut v = read_settings_checked(settings_path)?;
     let _ = install_hook_generic(&mut v, "PreToolUse", "run_shell_command", QWEN_HOOK_COMMAND);
     write_settings(settings_path, &v)
 }
@@ -358,7 +372,7 @@ pub fn is_qwen_mcp_registered(settings_path: &Path) -> bool {
 
 /// Install the PostToolUse post-hook for read_file/search_files/list_dir (idempotent).
 pub fn install_qwen_post_hook(settings_path: &Path) -> InstallResult {
-    let mut v = read_settings(settings_path);
+    let mut v = read_settings_checked(settings_path)?;
     let _ = install_hook_generic(
         &mut v,
         "PostToolUse",
@@ -382,7 +396,7 @@ pub fn uninstall_qwen(settings_path: &Path) -> InstallResult {
     if !settings_path.exists() {
         return Ok(());
     }
-    let mut v = read_settings(settings_path);
+    let mut v = read_settings_checked(settings_path)?;
     remove_hook_generic(&mut v, "PreToolUse", QWEN_HOOK_COMMAND);
     remove_hook_generic(&mut v, "PostToolUse", QWEN_POST_HOOK_COMMAND);
     remove_ecotokens_mcp_server(&mut v);
@@ -536,11 +550,6 @@ pub fn default_hermes_config_path() -> Option<std::path::PathBuf> {
 fn yaml_add_to_plugins_enabled(content: &str, plugin: &str) -> String {
     let plugin_item = format!("- {}", plugin);
 
-    // Already present — no-op.
-    if content.lines().any(|l| l.trim() == plugin_item) {
-        return content.to_string();
-    }
-
     let mut lines: Vec<String> = content.lines().map(|l| l.to_string()).collect();
 
     // Locate the top-level `plugins:` key.
@@ -565,6 +574,15 @@ fn yaml_add_to_plugins_enabled(content: &str, plugin: &str) -> String {
                 .iter()
                 .take_while(|l| l.starts_with("    -"))
                 .count();
+            // Already present *within the enabled list* — no-op. Scoping the
+            // check here means a `- ecotokens` entry in a `disabled:` list or a
+            // comment does not suppress insertion into `plugins.enabled`.
+            if lines[ei + 1..ei + 1 + skip]
+                .iter()
+                .any(|l| l.trim() == plugin_item)
+            {
+                return content.to_string();
+            }
             lines.insert(ei + 1 + skip, format!("    - {}", plugin));
         } else {
             // `plugins:` exists but has no `enabled:` key — add it.
@@ -659,14 +677,14 @@ pub fn default_codex_hooks_path() -> Option<std::path::PathBuf> {
 
 /// Install the PreToolUse/Bash hook into ~/.codex/hooks.json (idempotent).
 pub fn install_codex_hook(hooks_path: &Path) -> InstallResult {
-    let mut v = read_settings(hooks_path);
+    let mut v = read_settings_checked(hooks_path)?;
     let _ = install_hook_generic(&mut v, "PreToolUse", CODEX_HOOK_MATCHER, CODEX_HOOK_COMMAND);
     write_settings(hooks_path, &v)
 }
 
 /// Install the PostToolUse/Bash hook into ~/.codex/hooks.json (idempotent).
 pub fn install_codex_post_hook(hooks_path: &Path) -> InstallResult {
-    let mut v = read_settings(hooks_path);
+    let mut v = read_settings_checked(hooks_path)?;
     let _ = install_hook_generic(
         &mut v,
         "PostToolUse",
@@ -695,7 +713,7 @@ pub fn uninstall_codex_hooks(hooks_path: &Path) -> InstallResult {
     if !hooks_path.exists() {
         return Ok(());
     }
-    let mut v = read_settings(hooks_path);
+    let mut v = read_settings_checked(hooks_path)?;
     remove_hook_generic(&mut v, "PreToolUse", CODEX_HOOK_COMMAND);
     remove_hook_generic(&mut v, "PostToolUse", CODEX_POST_HOOK_COMMAND);
     write_settings(hooks_path, &v)
