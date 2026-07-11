@@ -110,6 +110,12 @@ enum Commands {
         #[arg(long)]
         history: bool,
     },
+    /// Play a Space Invaders mini-game where each filtered command spawns an enemy
+    Game {
+        /// Period of filtered commands used to spawn enemies
+        #[arg(long, default_value_t, value_name = "PERIOD")]
+        period: metrics::report::Period,
+    },
     /// Install ecotokens hook in ~/.claude/settings.json, ~/.gemini/settings.json, ~/.qwen/settings.json, ~/.pi/agent/extensions/, ~/.hermes/plugins/, or ~/.codex/plugins/
     Install {
         /// Target AI tool to install for: claude, gemini, qwen, pi, hermes, codex, or all (default: claude)
@@ -804,6 +810,31 @@ fn cmd_gain(period: metrics::report::Period, json: bool, model: Option<String>, 
 }
 
 /// Compute projects sorted by savings percentage (descending).
+fn cmd_game(period: metrics::report::Period) {
+    let path = match metrics::store::metrics_path() {
+        Some(p) => p,
+        None => {
+            eprintln!("Cannot locate metrics file");
+            std::process::exit(1);
+        }
+    };
+    if !std::io::IsTerminal::is_terminal(&std::io::stdout()) {
+        eprintln!("ecotokens game requires an interactive terminal");
+        std::process::exit(1);
+    }
+    if let Err(e) = enable_raw_mode() {
+        eprintln!("failed to enable raw mode: {e}");
+    }
+    if let Err(e) = std::io::stdout().execute(EnterAlternateScreen) {
+        eprintln!("failed to enter alternate screen: {e}");
+    }
+    let _guard = TerminalGuard::stdout();
+    let backend = CrosstermBackend::new(std::io::stdout());
+    if let Ok(mut terminal) = Terminal::new(backend) {
+        tui::game::run(&mut terminal, &path, &period);
+    }
+}
+
 fn sorted_projects_from(report: &metrics::report::Report) -> Vec<(String, f32)> {
     let mut projects: Vec<(String, f32)> = report
         .by_project
@@ -3041,6 +3072,7 @@ fn main() {
             model,
             history,
         } => cmd_gain(period, json, model, history),
+        Commands::Game { period } => cmd_game(period),
         Commands::Install {
             target,
             ai_summary,

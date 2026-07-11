@@ -9,6 +9,10 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 Broad code-review hardening pass across the codebase. All fixes ship with `cargo fmt`, `cargo clippy -- -D warnings`, and the full test suite green.
 
+### Added
+
+- **`ecotokens game`**: a Space Invaders mini-game where every filtered command spawns an enemy whose strength scales with the tokens it saved. Commands present at startup form the classic marching formation; commands filtered live while the game runs spawn as free-roaming snakes.
+
 ### Security
 
 - **Secret masking**: fixed five broken patterns in `src/masking/patterns.rs` that let real secrets leak through unmasked — AWS access keys now use `[A-Z0-9]{16}` (was base32 `[A-Z2-7]`), Anthropic API keys drop the unstable `AA` suffix anchor, HuggingFace tokens accept variable length (`{34,}`), Bearer tokens keep `=` mid-token, and `.env` matching allows spaces around `=`. Added word boundaries to the Twilio pattern and relaxed the Azure AD client-secret 4th-character constraint to cut false negatives/positives.
