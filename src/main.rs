@@ -2548,10 +2548,9 @@ fn parse_older_than(s: &str) -> Option<chrono::Duration> {
         (n, 'd')
     } else if let Some(n) = s.strip_suffix('w') {
         (n, 'w')
-    } else if let Some(n) = s.strip_suffix('m') {
-        (n, 'm')
     } else {
-        return None;
+        let n = s.strip_suffix('m')?;
+        (n, 'm')
     };
     let n: i64 = num_str.parse().ok()?;
     match unit {
