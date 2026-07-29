@@ -1,8 +1,10 @@
 use bincode;
 use hnsw_rs::prelude::*;
 use serde::{Deserialize, Serialize};
-use std::path::Path;
-use std::sync::OnceLock;
+use std::collections::HashMap;
+use std::path::{Path, PathBuf};
+use std::sync::{Arc, Mutex, OnceLock};
+use std::time::SystemTime;
 
 #[derive(Debug, Clone, Serialize, Deserialize)]
 pub struct HnswMeta {
@@ -33,11 +35,27 @@ struct StoredData {
     vectors: Vec<Vec<f32>>,
 }
 
+/// Process-level cache of loaded indices, keyed by index directory and validated
+/// against the mtime of `hnsw_index.bin`.
+///
+/// The per-instance `OnceLock` graph only avoids a rebuild for a *reused*
+/// `HnswIndex`; callers that reload the index per query (the MCP server handles
+/// one `search_index` call per client request) would otherwise deserialise the
+/// whole vector file and rebuild the graph from scratch every single time. See
+/// [`HnswIndex::load_cached`].
+type IndexCache = Mutex<HashMap<PathBuf, (SystemTime, Arc<HnswIndex>)>>;
+
+fn index_cache() -> &'static IndexCache {
+    static CACHE: OnceLock<IndexCache> = OnceLock::new();
+    CACHE.get_or_init(|| Mutex::new(HashMap::new()))
+}
+
 /// HNSW-backed vector index for semantic search.
 ///
-/// Vectors are persisted as bincode (`hnsw_index.bin`). The HNSW graph is rebuilt
-/// from the stored vectors on each load, which is acceptable for project-scale indices
-/// (< 20k vectors ≈ sub-second rebuild on CPU).
+/// Vectors are persisted as bincode (`hnsw_index.bin`). The HNSW graph is built
+/// lazily on first search and memoised for the lifetime of the instance; use
+/// [`HnswIndex::load_cached`] so that lifetime spans the whole process rather
+/// than a single query.
 pub struct HnswIndex {
     id_map: Vec<String>,
     vectors: Vec<Vec<f32>>,
@@ -136,6 +154,34 @@ impl HnswIndex {
             vectors: data.vectors,
             graph: OnceLock::new(),
         })
+    }
+
+    /// Like [`HnswIndex::load`], but shares one instance per index directory for
+    /// the lifetime of the process, so the deserialisation *and* the lazily built
+    /// HNSW graph are paid once instead of once per query.
+    ///
+    /// The cache entry is keyed on the mtime of `hnsw_index.bin`: a re-index
+    /// (which rewrites that file) yields a fresh mtime and transparently evicts
+    /// the stale entry, so a long-running MCP server never serves results from a
+    /// superseded index.
+    pub fn load_cached(dir: &Path) -> Option<Arc<Self>> {
+        let mtime = std::fs::metadata(dir.join("hnsw_index.bin"))
+            .and_then(|m| m.modified())
+            .ok()?;
+
+        if let Ok(cache) = index_cache().lock() {
+            if let Some((cached_mtime, index)) = cache.get(dir) {
+                if *cached_mtime == mtime {
+                    return Some(Arc::clone(index));
+                }
+            }
+        }
+
+        let index = Arc::new(Self::load(dir)?);
+        if let Ok(mut cache) = index_cache().lock() {
+            cache.insert(dir.to_path_buf(), (mtime, Arc::clone(&index)));
+        }
+        Some(index)
     }
 
     /// Reconstruit la map `chunk_id → vecteur` depuis l'index sauvegardé.

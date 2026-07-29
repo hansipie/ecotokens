@@ -116,16 +116,49 @@ impl PostHookOutput {
     }
 }
 
-pub fn codex_bash_output_text(tool_response: &serde_json::Value) -> &str {
-    tool_response
-        .as_str()
-        .or_else(|| tool_response.get("output").and_then(|v| v.as_str()))
-        .or_else(|| tool_response.get("stdout").and_then(|v| v.as_str()))
-        .unwrap_or("")
+/// Extract the text of a Codex Bash `tool_response`.
+///
+/// `stderr` is included, not just `stdout`: it is the only path by which the
+/// Codex hook feeds output into `run_filter_pipeline_with_cwd`, which is in turn
+/// the only place masking runs for that agent. A secret that surfaces solely on
+/// stderr — `curl -v` echoing an `Authorization` header, a tool printing an API
+/// key in an error — would otherwise never enter the pipeline at all, and so
+/// never be redacted.
+pub fn codex_bash_output_text(tool_response: &serde_json::Value) -> String {
+    if let Some(s) = tool_response.as_str() {
+        return s.to_string();
+    }
+    let field = |name: &str| {
+        tool_response
+            .get(name)
+            .and_then(|v| v.as_str())
+            .unwrap_or("")
+    };
+
+    let stdout = match field("output") {
+        "" => field("stdout"),
+        s => s,
+    };
+    let stderr = field("stderr");
+
+    match (stdout.is_empty(), stderr.is_empty()) {
+        (true, true) => String::new(),
+        (false, true) => stdout.to_string(),
+        (true, false) => stderr.to_string(),
+        (false, false) if stdout.ends_with('\n') => format!("{stdout}{stderr}"),
+        (false, false) => format!("{stdout}\n{stderr}"),
+    }
 }
 
 /// Route a PostToolUse input to the appropriate handler.
 /// Returns (PostFilterResult, CommandFamily) for metrics recording.
+///
+/// Every tool payload is passed through `masking::mask` before reaching a
+/// handler, mirroring `filter::run_filter_pipeline_with_cwd` on the Bash path.
+/// This is the single choke point for native Read/Grep/Glob: it keeps secrets
+/// out of the context ecotokens injects, out of the interception rows persisted
+/// by `record_post_metrics`, and — for Gemini, whose `deny` + `reason` replaces
+/// the tool result outright — out of the model's context entirely.
 pub fn handle_post_input(input: &PostHookInput, depth: u32) -> (PostFilterResult, CommandFamily) {
     match input.tool_name.as_str() {
         "Read" => {
@@ -145,9 +178,10 @@ pub fn handle_post_input(input: &PostHookInput, depth: u32) -> (PostFilterResult
                 // Flat format: { "content": "..." }
                 .or_else(|| input.tool_response.get("content").and_then(|v| v.as_str()))
                 .unwrap_or("");
+            let (content, _) = crate::masking::mask(content);
             let result = handle_read(
                 file_path,
-                content,
+                &content,
                 depth,
                 input.cwd.as_deref().map(std::path::Path::new),
             );
@@ -159,11 +193,13 @@ pub fn handle_post_input(input: &PostHookInput, depth: u32) -> (PostFilterResult
                 .get("output")
                 .and_then(|v| v.as_str())
                 .unwrap_or("");
-            let result = handle_grep(grep_output, depth);
+            let (grep_output, _) = crate::masking::mask(grep_output);
+            let result = handle_grep(&grep_output, depth);
             (result, CommandFamily::Grep)
         }
         "Glob" => {
             let filenames = format_glob_output(&input.tool_response);
+            let (filenames, _) = crate::masking::mask(&filenames);
             let result = handle_glob(&filenames);
             (result, CommandFamily::Fs)
         }
@@ -418,7 +454,7 @@ pub fn handle_post_codex() {
     let cwd = input.cwd.as_deref().map(std::path::Path::new);
     let (filtered, tokens_before, tokens_after) = crate::filter::run_filter_pipeline_with_cwd(
         &command,
-        output_text,
+        &output_text,
         0,
         cwd,
         HookType::CodexPostToolUse,

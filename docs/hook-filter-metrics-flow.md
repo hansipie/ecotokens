@@ -40,7 +40,11 @@ Both handlers:
 - load `Settings`
 - check the configured exclusion prefixes
 
-If the command is excluded, the hook returns an allow response without changing the command. Otherwise it rewrites the command to:
+If the command is excluded, the hook returns an allow response without changing the command.
+
+> **Security note:** excluding a command opts out of secret masking as well as filtering. Masking runs inside `ecotokens filter` (step 3.1), so a command that is never rewritten never reaches it, and its output goes to the model unredacted. Exclusions match by prefix, so `git` excludes every command starting with those characters.
+
+Otherwise it rewrites the command to:
 
 ```bash
 ecotokens filter -- <original command>

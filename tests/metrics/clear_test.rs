@@ -1,6 +1,6 @@
 use chrono::{Duration, Utc};
 use ecotokens::metrics::store::{
-    append_to, read_from, write_to, CommandFamily, FilterMode, Interception,
+    append_to, delete_ids, read_from, write_to, CommandFamily, FilterMode, Interception,
 };
 use tempfile::TempDir;
 
@@ -282,4 +282,78 @@ fn clear_by_project_unknown_removes_entries_without_git_root() {
     );
     assert_eq!(kept.len(), 1);
     assert_eq!(kept[0].git_root.as_deref(), Some("/repo/a"));
+}
+
+// ── delete_ids ────────────────────────────────────────────────────────────────
+
+#[test]
+fn delete_ids_removes_only_the_selected_rows() {
+    let dir = TempDir::new().unwrap();
+    let path = metrics_file(&dir);
+
+    let items = vec![
+        make_interception_with("git status", CommandFamily::Git, None, &now_rfc3339()),
+        make_interception_with("cargo build", CommandFamily::Cargo, None, &now_rfc3339()),
+        make_interception_with("ls", CommandFamily::Fs, None, &now_rfc3339()),
+    ];
+    for item in &items {
+        append_to(&path, item).unwrap();
+    }
+
+    let deleted = delete_ids(&path, &[items[1].id.clone()]).unwrap();
+    assert_eq!(deleted, 1);
+
+    let remaining = read_from(&path).unwrap();
+    assert_eq!(remaining.len(), 2);
+    assert!(
+        !remaining.iter().any(|i| i.id == items[1].id),
+        "the selected row must be gone"
+    );
+}
+
+#[test]
+fn delete_ids_preserves_rows_written_after_the_snapshot_was_read() {
+    // Regression: `ecotokens clear` used to read every row, filter in memory, then
+    // replace the whole table via `write_to`. Anything a concurrent hook appended
+    // between the read and the write — a window that spans the interactive
+    // confirmation prompt — was silently destroyed. Deleting by primary key must
+    // leave such a row untouched.
+    let dir = TempDir::new().unwrap();
+    let path = metrics_file(&dir);
+
+    let stale = make_interception_with("git status", CommandFamily::Git, None, &now_rfc3339());
+    append_to(&path, &stale).unwrap();
+
+    // Snapshot taken by `clear` before prompting the user.
+    let snapshot = read_from(&path).unwrap();
+    let to_delete: Vec<String> = snapshot.into_iter().map(|i| i.id).collect();
+
+    // A concurrent session records an interception while the prompt is blocking.
+    let concurrent =
+        make_interception_with("cargo test", CommandFamily::Cargo, None, &now_rfc3339());
+    append_to(&path, &concurrent).unwrap();
+
+    delete_ids(&path, &to_delete).unwrap();
+
+    let remaining = read_from(&path).unwrap();
+    assert_eq!(
+        remaining.len(),
+        1,
+        "the concurrently written row must survive the prune"
+    );
+    assert_eq!(remaining[0].id, concurrent.id);
+}
+
+#[test]
+fn delete_ids_empty_slice_is_a_noop() {
+    let dir = TempDir::new().unwrap();
+    let path = metrics_file(&dir);
+    append_to(
+        &path,
+        &make_interception_with("git status", CommandFamily::Git, None, &now_rfc3339()),
+    )
+    .unwrap();
+
+    assert_eq!(delete_ids(&path, &[]).unwrap(), 0);
+    assert_eq!(read_from(&path).unwrap().len(), 1);
 }

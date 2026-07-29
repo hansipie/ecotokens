@@ -2570,7 +2570,7 @@ fn cmd_clear(
     yes: bool,
 ) {
     use chrono::{DateTime, NaiveDate, Utc};
-    use metrics::store::{read_from, write_to, CommandFamily};
+    use metrics::store::{delete_ids, read_from, CommandFamily};
 
     let has_filter =
         before.is_some() || older_than.is_some() || family.is_some() || project.is_some();
@@ -2632,50 +2632,56 @@ fn cmd_clear(
         }
     }
 
-    // Partition: items matching all filters → to_delete, rest → to_keep
-    let (to_delete, to_keep): (Vec<_>, Vec<_>) = items.into_iter().partition(|item| {
-        if let Some(dt) = before_dt {
-            match DateTime::parse_from_rfc3339(&item.timestamp) {
-                Ok(ts) => {
-                    if ts.with_timezone(&Utc) >= dt {
-                        return false;
+    // Select the items matching every filter. Only their ids are needed: rows are
+    // deleted by primary key rather than by rewriting a kept-snapshot, so
+    // interceptions appended by a concurrent session (including while the
+    // confirmation prompt below is blocking) are never destroyed.
+    let to_delete: Vec<_> = items
+        .into_iter()
+        .filter(|item| {
+            if let Some(dt) = before_dt {
+                match DateTime::parse_from_rfc3339(&item.timestamp) {
+                    Ok(ts) => {
+                        if ts.with_timezone(&Utc) >= dt {
+                            return false;
+                        }
                     }
+                    Err(_) => return false,
                 }
-                Err(_) => return false,
             }
-        }
 
-        if let Some(cutoff) = cutoff_from_older {
-            match DateTime::parse_from_rfc3339(&item.timestamp) {
-                Ok(ts) => {
-                    if ts.with_timezone(&Utc) >= cutoff {
-                        return false;
+            if let Some(cutoff) = cutoff_from_older {
+                match DateTime::parse_from_rfc3339(&item.timestamp) {
+                    Ok(ts) => {
+                        if ts.with_timezone(&Utc) >= cutoff {
+                            return false;
+                        }
                     }
+                    Err(_) => return false,
                 }
-                Err(_) => return false,
             }
-        }
 
-        if let Some(ref fam) = target_family {
-            if &item.command_family != fam {
-                return false;
+            if let Some(ref fam) = target_family {
+                if &item.command_family != fam {
+                    return false;
+                }
             }
-        }
 
-        if let Some(ref proj) = project {
-            let item_root = item.git_root.as_deref().unwrap_or("").trim();
-            let matches = if proj.trim() == "[undefined]" {
-                item_root.is_empty()
-            } else {
-                item_root == proj.trim()
-            };
-            if !matches {
-                return false;
+            if let Some(ref proj) = project {
+                let item_root = item.git_root.as_deref().unwrap_or("").trim();
+                let matches = if proj.trim() == "[undefined]" {
+                    item_root.is_empty()
+                } else {
+                    item_root == proj.trim()
+                };
+                if !matches {
+                    return false;
+                }
             }
-        }
 
-        true
-    });
+            true
+        })
+        .collect();
 
     let delete_count = to_delete.len();
 
@@ -2697,12 +2703,14 @@ fn cmd_clear(
         }
     }
 
-    if let Err(e) = write_to(&path, &to_keep) {
-        eprintln!("Error writing metrics file: {e}");
-        std::process::exit(1);
+    let ids: Vec<String> = to_delete.into_iter().map(|i| i.id).collect();
+    match delete_ids(&path, &ids) {
+        Ok(deleted) => println!("Deleted {deleted} interception(s)."),
+        Err(e) => {
+            eprintln!("Error writing metrics file: {e}");
+            std::process::exit(1);
+        }
     }
-
-    println!("Deleted {delete_count} interception(s).");
 }
 
 #[cfg(unix)]

@@ -589,6 +589,8 @@ When enabled, every hook invocation appends a JSONL entry to `~/.config/ecotoken
 
 Each entry contains a short `uid` to correlate the input and output phases of the same invocation. Distinct from `--debug` (which prints to stderr) - `--debuglog` writes silently to disk and survives across sessions.
 
+Logged payloads go through the same secret masking as intercepted output, and the file is created `0600` (owner-only). It still contains file contents and command output, so review it before attaching it to a bug report.
+
 ### Default model for cost calculations
 
 The model selected here determines the per-token price used in gain reports:

@@ -40,6 +40,15 @@ pub struct SearchResult {
 }
 
 pub fn search_index(opts: SearchOptions) -> tantivy::Result<Vec<SearchResult>> {
+    // `TopDocs::with_limit` asserts `limit >= 1`, so a `top_k` of 0 (reachable
+    // from `--top_k 0` and from an MCP client sending `top_k: 0`) would panic and
+    // take down the whole process — including the long-lived MCP server. The
+    // final `results.truncate(opts.top_k)` makes an empty vec the equivalent
+    // answer anyway, so return it without touching the collector.
+    if opts.top_k == 0 {
+        return Ok(Vec::new());
+    }
+
     let index = Index::open_in_dir(&opts.index_dir)?;
     let (_, file_path_field, content_field, kind_field, line_start_field, symbol_id_field) =
         build_schema();
@@ -91,7 +100,7 @@ pub fn search_index(opts: SearchOptions) -> tantivy::Result<Vec<SearchResult>> {
 
     // ── Vector retrieval (best-effort; never blocks BM25 path) ────────────────
     let query_embedding = embed_text(&opts.query, &opts.embed_provider);
-    let hnsw_index = HnswIndex::load(&opts.index_dir);
+    let hnsw_index = HnswIndex::load_cached(&opts.index_dir);
     let vector_hits: std::collections::HashMap<String, f32> =
         if let (Some(ref qvec), Some(ref idx)) = (&query_embedding, &hnsw_index) {
             idx.search(qvec, fetch_k).into_iter().collect()
