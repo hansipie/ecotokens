@@ -5,6 +5,30 @@ All notable changes to this project will be documented in this file.
 The format is based on [Keep a Changelog](https://keepachangelog.com/en/1.0.0/),
 and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0.html).
 
+## [0.25.1] - 2026-07-29
+
+Follow-up to the 0.25.0 review: a second full-codebase pass that found the native-tool masking gap left open by the previous round. All fixes ship with `cargo fmt`, `cargo clippy -- -D warnings`, and the full test suite green.
+
+### Security
+
+- **Native tool masking**: `Read`/`Grep`/`Glob` results reached the model and the metrics store completely unmasked — unlike the Bash path, no code path applied `masking::mask` to them. A `Read` of a `.env`/`.pem` file, or a `grep` matching a credential line, leaked verbatim into both the injected context and the persisted `content_before`. Masking now runs at the post-hook dispatcher, the single choke point for those tools (and, for Gemini, whose `deny` + `reason` replaces the tool result outright, this keeps the secret out of the model's context entirely).
+- **MCP path traversal**: `ecotokens_outline` built a path straight from client input with no containment check, so `{"path": "/etc"}` or `../../../../.ssh` returned file contents from outside the indexed project. Paths are now canonicalized (resolving `..` *and* symlinks) and rejected unless they sit under the project root, matching the scoping `ecotokens_search` already applied.
+- **Debug log**: logged hook payloads are masked per JSON string (masking the serialized line would let `[^\s\n]+` patterns run past a closing quote and corrupt neighbouring fields), and the file is created `0600` — a pre-existing world-readable log is tightened on next write.
+- **Codex stderr**: `codex_bash_output_text` read only `output`/`stdout`, so a secret surfacing solely on stderr never entered `run_filter_pipeline_with_cwd` — the only place masking runs for that agent — and was never redacted.
+- **Debug tracing**: `--debug` printed the original command to stderr before any masking; both the original and the rewritten form (which embeds it shell-quoted) are now masked, closing the one path where a secret passed as a literal argument could leak.
+
+### Fixed
+
+- **Search crash on `top_k=0`**: tantivy's `TopDocs::with_limit` asserts `limit >= 1`, so `--top_k 0` (or an MCP client sending `top_k: 0`) panicked and took down the whole process, including the long-lived MCP server. Returns an empty result set instead, which is what the final truncation produced anyway.
+- **Game crash on short terminals**: `group_bounds()` returned the raw playfield when no formation enemy was alive, and `field()` has zero height on a terminal two rows tall — `spawn_snake`'s modulo then divided by zero. Both extents are now clamped to the same minimum the computed branch already guaranteed.
+- **`ecotokens clear` data loss**: pruning read every row, filtered in memory, then replaced the whole table — so any interception appended by a concurrent session between the read and the write (a window spanning the interactive confirmation prompt) was silently destroyed. Rows are now deleted by primary key via `delete_ids`, leaving concurrently written rows untouched.
+
+### Changed
+
+- **Semantic search (HNSW)**: the 0.25.0 `OnceLock` only helped a *reused* index instance, but `search_index()` reloaded from disk on every call — so the MCP server, which handles one call per request, still deserialized the vector file and rebuilt the graph on every single query. Indices are now cached per process, keyed on index directory and invalidated on the mtime of `hnsw_index.bin`.
+- **Docs**: `README.md` and `docs/hook-filter-metrics-flow.md` now state that excluding a command opts out of secret masking as well as filtering (ecotokens never sees that output, so it cannot mask it), and that exclusions match by prefix.
+- **Version**: bumped the crate to `0.25.1`.
+
 ## [0.25.0] - 2026-07-11
 
 Broad code-review hardening pass across the codebase. All fixes ship with `cargo fmt`, `cargo clippy -- -D warnings`, and the full test suite green.
