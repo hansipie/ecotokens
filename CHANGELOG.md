@@ -5,6 +5,18 @@ All notable changes to this project will be documented in this file.
 The format is based on [Keep a Changelog](https://keepachangelog.com/en/1.0.0/),
 and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0.html).
 
+## [0.25.2] - 2026-07-29
+
+### Changed
+
+- **Model catalog**: refreshed the built-in Anthropic, OpenAI, and Google models and their pricing; added `claude-fable-5`, replaced the GPT entries with the `gpt-5.6` family, and updated the Gemini 3 models.
+- **Default model**: changed the model used for cost calculations from `claude-sonnet-4-6` to `claude-sonnet-5`.
+- **Version**: bumped the crate to `0.25.2`.
+
+### Fixed
+
+- **Project-scoped duplicate detection**: `ecotokens_duplicates` now excludes symbols from unrelated repositories stored in the shared index and only reports duplicate groups from the caller's current project.
+
 ## [0.25.1] - 2026-07-29
 
 Follow-up to the 0.25.0 review: a second full-codebase pass that found the native-tool masking gap left open by the previous round. All fixes ship with `cargo fmt`, `cargo clippy -- -D warnings`, and the full test suite green.
