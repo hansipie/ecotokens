@@ -86,6 +86,11 @@ pub fn detect_duplicates(opts: &DetectionOptions) -> Result<Vec<DuplicateGroup>,
         if line_count < opts.min_lines {
             continue;
         }
+        if let Some(root) = &opts.project_root {
+            if !root.join(&file_path).exists() {
+                continue;
+            }
+        }
 
         let line_end = line_start + line_count as u64 - 1;
 

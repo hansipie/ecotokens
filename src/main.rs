@@ -2516,6 +2516,7 @@ fn cmd_duplicates(threshold: f32, min_lines: usize, index_dir: Option<PathBuf>, 
         index_dir: idx_dir,
         threshold,
         min_lines,
+        project_root: Some(cwd),
     };
     match duplicates::detect::detect_duplicates(&opts) {
         Ok(groups) => {

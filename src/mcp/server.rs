@@ -168,6 +168,7 @@ impl EcotokensServer {
             index_dir: self.index_dir.clone(),
             threshold: params.threshold.unwrap_or(70.0),
             min_lines: params.min_lines.unwrap_or(5),
+            project_root: crate::config::git_root().or_else(|| std::env::current_dir().ok()),
         };
         let top_k = params.top_k.unwrap_or(10);
         match crate::duplicates::detect::detect_duplicates(&opts) {
