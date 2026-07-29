@@ -10,7 +10,7 @@ fn default_values_when_no_config_file() {
     assert!(s.masking_enabled);
     assert!(!s.exact_token_counting);
     assert!(!s.debug);
-    assert_eq!(s.default_model, "claude-sonnet-4-6");
+    assert_eq!(s.default_model, "claude-sonnet-5");
     assert!(s.exclusions.is_empty());
 }
 
@@ -58,8 +58,8 @@ fn valid_settings_pass_validation() {
 #[test]
 fn model_pricing_has_known_models() {
     let s = Settings::default();
-    assert!(s.model_pricing.contains_key("claude-sonnet-4-6"));
-    assert!(s.model_pricing.contains_key("claude-opus-4-8"));
+    assert!(s.model_pricing.contains_key("claude-sonnet-5"));
+    assert!(s.model_pricing.contains_key("claude-opus-5"));
 }
 
 #[test]
@@ -92,17 +92,17 @@ fn pricing_json_overrides_builtin() {
 
     std::fs::write(&config_path, "{}").unwrap();
     let custom: HashMap<&str, serde_json::Value> = HashMap::from([(
-        "claude-sonnet-4-6",
+        "claude-sonnet-5",
         serde_json::json!({"input_usd_per_1m": 0.01, "output_usd_per_1m": 0.02}),
     )]);
     std::fs::write(&pricing_path, serde_json::to_string(&custom).unwrap()).unwrap();
 
     let s = Settings::load_from_paths_pub(&config_path, &abbrev_path, &pricing_path);
-    let price = s.model_pricing.get("claude-sonnet-4-6").unwrap();
+    let price = s.model_pricing.get("claude-sonnet-5").unwrap();
     assert!((price.input_usd_per_1m - 0.01).abs() < f64::EPSILON);
     assert!((price.output_usd_per_1m - 0.02).abs() < f64::EPSILON);
     // Les modèles non overridés restent présents depuis le built-in
-    assert!(s.model_pricing.contains_key("claude-opus-4-8"));
+    assert!(s.model_pricing.contains_key("claude-opus-5"));
 }
 
 // ── T072t — Tests embed_provider (CLI --embed-provider) ───────────────────────

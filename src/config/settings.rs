@@ -149,7 +149,7 @@ fn default_true() -> bool {
     true
 }
 fn default_model() -> String {
-    "claude-sonnet-4-6".into()
+    "claude-sonnet-5".into()
 }
 fn default_ai_summary_min_tokens() -> u32 {
     2500
@@ -170,7 +170,7 @@ impl Default for Settings {
             masking_enabled: true,
             exact_token_counting: false,
             debug: false,
-            default_model: "claude-sonnet-4-6".into(),
+            default_model: "claude-sonnet-5".into(),
             model_pricing: default_model_pricing(),
             embed_provider: EmbedProvider::default(),
             ai_summary_enabled: false,

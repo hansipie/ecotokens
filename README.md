@@ -355,12 +355,12 @@ Reload your shell (or open a new terminal) to activate completions.
 ecotokens gain                                          # all time, uses default model from config
 ecotokens gain --period today                           # today only
 ecotokens gain --period week                            # last 7 days
-ecotokens gain --period month --model claude-sonnet-4-6 # last 30 days, override model
+ecotokens gain --period month --model claude-sonnet-5 # last 30 days, override model
 ecotokens gain --history                                # summary table: 24h / 7d / 30d
 ecotokens gain --history --json                         # same, as JSON
 ```
 
-The model used for cost calculations defaults to the value set with `ecotokens config --model` (or `claude-sonnet-4-6` if not configured). Pass `--model` to override for a single invocation.
+The model used for cost calculations defaults to the value set with `ecotokens config --model` (or `claude-sonnet-5` if not configured). Pass `--model` to override for a single invocation.
 
 Interactive TUI showing token savings per command family and per project, with a sparkline. The `--period` flag filters both the stats and the history panels.
 
@@ -551,7 +551,7 @@ Output includes:
 hook_installed        : true
 debug                 : false
 debuglog              : false
-default_model         : claude-sonnet-4-6
+default_model         : claude-sonnet-5
 exclusions            : []
 embed_provider        : candle model=sentence-transformers/all-MiniLM-L6-v2
 ai_summary_enabled    : false

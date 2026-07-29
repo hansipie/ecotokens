@@ -2516,6 +2516,7 @@ fn cmd_duplicates(threshold: f32, min_lines: usize, index_dir: Option<PathBuf>, 
         index_dir: idx_dir,
         threshold,
         min_lines,
+        project_root: Some(cwd),
     };
     match duplicates::detect::detect_duplicates(&opts) {
         Ok(groups) => {
@@ -2713,7 +2714,6 @@ fn cmd_clear(
     }
 }
 
-#[cfg(unix)]
 fn stable_hash(s: &str) -> u64 {
     let mut h: u64 = 14695981039346656037;
     for b in s.bytes() {
@@ -2725,7 +2725,6 @@ fn stable_hash(s: &str) -> u64 {
 
 /// Derive a per-path log filename from the watched directory.
 /// `/home/user/my-project` → `~/.config/ecotokens/watch_home_user_my-project.log`
-#[cfg(unix)]
 fn watch_log_path(watch_path: &std::path::Path) -> PathBuf {
     let sanitized: String = watch_path
         .to_string_lossy()

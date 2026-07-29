@@ -124,8 +124,7 @@ impl SessionStore {
         self.decrement(&watch_path)
     }
 
-    /// Called from inside the daemon after `daemonize().start()` succeeds.
-    #[cfg(unix)]
+    /// Register the watcher process after it starts.
     pub fn register_watcher(&mut self, path: &str, pid: u32, log_file: Option<String>) {
         let entry = self.0.entry(path.to_string()).or_default();
         entry.watcher_pid = Some(pid);
