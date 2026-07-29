@@ -15,30 +15,35 @@ pub const MODELS: &[ModelDefinition] = &[
         output_usd_per_1m: 5.00,
     },
     ModelDefinition {
-        name: "claude-sonnet-4-6",
+        name: "claude-sonnet-5",
         input_usd_per_1m: 3.00,
         output_usd_per_1m: 15.00,
     },
     ModelDefinition {
-        name: "claude-opus-4-8",
+        name: "claude-opus-5",
         input_usd_per_1m: 5.00,
         output_usd_per_1m: 25.00,
     },
+    ModelDefinition {
+        name: "claude-fable-5",
+        input_usd_per_1m: 10.00,
+        output_usd_per_1m: 50.00,
+    },
     // --- OpenAI GPT ---
     ModelDefinition {
-        name: "gpt-5.5",
+        name: "gpt-5.6-sol",
         input_usd_per_1m: 5.00,
         output_usd_per_1m: 30.00,
     },
     ModelDefinition {
-        name: "gpt-5.4",
+        name: "gpt-5.6-terra",
         input_usd_per_1m: 2.50,
         output_usd_per_1m: 15.00,
     },
     ModelDefinition {
-        name: "gpt-5.4-mini",
-        input_usd_per_1m: 0.75,
-        output_usd_per_1m: 4.50,
+        name: "gpt-5.6-luna",
+        input_usd_per_1m: 1.00,
+        output_usd_per_1m: 6.00,
     },
     // --- Google Gemini ---
     ModelDefinition {
@@ -52,14 +57,14 @@ pub const MODELS: &[ModelDefinition] = &[
         output_usd_per_1m: 2.50,
     },
     ModelDefinition {
-        name: "gemini-3.1-flash-lite-preview",
-        input_usd_per_1m: 0.25,
-        output_usd_per_1m: 1.50,
+        name: "gemini-3.5-flash-lite",
+        input_usd_per_1m: 0.30,
+        output_usd_per_1m: 2.50,
     },
     ModelDefinition {
-        name: "gemini-3-flash-preview",
-        input_usd_per_1m: 0.50,
-        output_usd_per_1m: 3.00,
+        name: "gemini-3.6-flash",
+        input_usd_per_1m: 1.50,
+        output_usd_per_1m: 7.50,
     },
     // --- Mistral ---
     ModelDefinition {
