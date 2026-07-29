@@ -304,7 +304,16 @@ impl Game {
             max_y = max_y.max(y);
         }
         if min_x == i32::MAX {
-            return field;
+            // No formation on screen. `field()` derives its height from
+            // `area.height - 2`, so on a terminal two rows tall or shorter it is
+            // zero-sized — and callers take a modulo of these extents
+            // (`spawn_snake`), which would panic on a zero divisor. Clamp to the
+            // same minimum the computed branch below already guarantees.
+            return Rect {
+                width: field.width.max(1),
+                height: field.height.max(1),
+                ..field
+            };
         }
         let field_right = (field.x + field.width) as i32;
         let field_bottom = field.y + field.height;

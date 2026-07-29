@@ -43,6 +43,14 @@ struct ShellHookSpecificOutput {
 }
 
 /// Determine hook action for a given command and exclusion list.
+///
+/// Security note: an excluded command is returned as `Passthrough`, so it is
+/// never rewritten to run under `ecotokens filter` — the only place
+/// `masking::mask` is applied on the Bash path. Its output therefore reaches the
+/// model entirely unredacted, and ecotokens cannot do better here: it never sees
+/// that output at all. Excluding a command is a deliberate opt-out of both
+/// filtering *and* secret masking. Note also that matching is by prefix, so
+/// `git` excludes every command starting with those characters.
 pub fn handle_hook_input(
     input: &HookInput,
     exclusions: &[String],
@@ -51,7 +59,8 @@ pub fn handle_hook_input(
 ) -> HookOutput {
     let cmd = input.command.trim();
 
-    // Check exclusion list (prefix match)
+    // Check exclusion list (prefix match) — see the security note above: this
+    // bypasses masking, not just filtering.
     for exclusion in exclusions {
         if cmd.starts_with(exclusion.as_str()) || cmd == exclusion.as_str() {
             return HookOutput::Passthrough;
@@ -120,10 +129,14 @@ fn handle_with_agent(agent: &str) {
         }),
         HookOutput::Rewrite(new_cmd) => {
             if debug {
-                eprintln!(
-                    "[ecotokens debug] rewriting ({agent}): {} → {}",
-                    input.command, new_cmd
-                );
+                // Both sides are masked: masking otherwise only ever covers a
+                // command's *output*, never the command line itself, so a secret
+                // passed as a literal argument (`curl -H "Authorization: Bearer …"`)
+                // would leak here. `new_cmd` embeds the original shell-quoted, so
+                // it carries the same secret and needs the same treatment.
+                let (cmd, _) = crate::masking::mask(&input.command);
+                let (rewritten, _) = crate::masking::mask(&new_cmd);
+                eprintln!("[ecotokens debug] rewriting ({agent}): {cmd} → {rewritten}");
             }
             serde_json::json!({
                 "hookSpecificOutput": {
@@ -219,10 +232,11 @@ fn handle_shell_tool_hook(hook_event_name: &str, label: &str) {
         HookOutput::Passthrough => emit_allow(hook_event_name, None),
         HookOutput::Rewrite(new_cmd) => {
             if debug {
-                eprintln!(
-                    "[ecotokens debug] rewriting ({label}): {} → {}",
-                    input.command, new_cmd
-                );
+                // See `handle_with_agent`: the command line itself is never
+                // covered by the output-masking pipeline, so mask both sides.
+                let (cmd, _) = crate::masking::mask(&input.command);
+                let (rewritten, _) = crate::masking::mask(&new_cmd);
+                eprintln!("[ecotokens debug] rewriting ({label}): {cmd} → {rewritten}");
             }
             let mut tool_input = payload.tool_input.clone();
             tool_input["command"] = serde_json::Value::String(new_cmd);

@@ -446,10 +446,43 @@ pub fn read_all() -> io::Result<Vec<Interception>> {
     }
 }
 
+/// Delete exactly the interceptions whose primary key appears in `ids`, in a
+/// single transaction. Returns the number of rows actually removed.
+///
+/// Prefer this over [`write_to`] for pruning. `write_to` deletes every row and
+/// re-inserts a caller-supplied snapshot, so any interception appended by a
+/// concurrent hook process between the caller's `read_from` and its `write_to`
+/// — a window that spans an interactive confirmation prompt in `ecotokens clear`
+/// — is silently destroyed. Deleting by primary key only ever removes rows the
+/// caller actually selected; rows written concurrently keep their own fresh ids
+/// and survive untouched.
+pub fn delete_ids(path: &Path, ids: &[String]) -> io::Result<usize> {
+    if ids.is_empty() {
+        return Ok(0);
+    }
+    let mut conn = open_conn(path)?;
+    let tx = conn.transaction().map_err(io::Error::other)?;
+    let mut deleted = 0usize;
+    {
+        let mut stmt = tx
+            .prepare("DELETE FROM interceptions WHERE id = ?1")
+            .map_err(io::Error::other)?;
+        for id in ids {
+            deleted += stmt.execute(params![id]).map_err(io::Error::other)?;
+        }
+    }
+    tx.commit().map_err(io::Error::other)?;
+    Ok(deleted)
+}
+
 /// Atomically replace all interceptions at `path` with `items`.
 ///
 /// Implemented as a single transaction (DELETE all + INSERT batch) which is
 /// equivalent to the previous atomic rename approach.
+///
+/// Note: this clobbers rows written between the caller's read and this call —
+/// see [`delete_ids`] for the concurrency-safe way to prune a subset.
+#[allow(dead_code)]
 pub fn write_to(path: &Path, items: &[Interception]) -> io::Result<()> {
     let mut conn = open_conn(path)?;
     let tx = conn.transaction().map_err(io::Error::other)?;

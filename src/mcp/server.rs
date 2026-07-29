@@ -29,6 +29,43 @@ impl EcotokensServer {
     }
 }
 
+/// Resolve a client-supplied path and confine it to the current project.
+///
+/// MCP tool arguments come from whatever client is connected, so a raw
+/// `PathBuf::from(params.path)` would let `/etc` or `../../../.ssh` walk out of
+/// the indexed project and have its contents returned. Both the root and the
+/// request are canonicalised first — that resolves `..` segments *and* symlinks,
+/// so a symlink inside the project pointing outside it cannot be used to escape
+/// either. Relative paths are joined onto the root rather than the process cwd.
+fn resolve_scoped_path(raw: &str) -> Result<PathBuf, String> {
+    let root = crate::config::git_root()
+        .or_else(|| std::env::current_dir().ok())
+        .ok_or_else(|| "could not determine project root".to_string())?
+        .canonicalize()
+        .map_err(|e| format!("could not resolve project root: {e}"))?;
+
+    let requested = {
+        let p = std::path::Path::new(raw);
+        if p.is_absolute() {
+            p.to_path_buf()
+        } else {
+            root.join(p)
+        }
+    };
+
+    let resolved = requested
+        .canonicalize()
+        .map_err(|e| format!("could not resolve path {raw:?}: {e}"))?;
+
+    if !resolved.starts_with(&root) {
+        return Err(format!(
+            "path {raw:?} resolves outside the current project ({})",
+            root.display()
+        ));
+    }
+    Ok(resolved)
+}
+
 #[tool_router]
 impl EcotokensServer {
     #[tool(
@@ -64,8 +101,12 @@ impl EcotokensServer {
         reading it in full."
     )]
     fn ecotokens_outline(&self, Parameters(params): Parameters<OutlineParams>) -> String {
+        let path = match resolve_scoped_path(&params.path) {
+            Ok(p) => p,
+            Err(e) => return json!({"error": e}).to_string(),
+        };
         let opts = crate::search::outline::OutlineOptions {
-            path: PathBuf::from(&params.path),
+            path,
             depth: params.depth,
             kinds: params.kinds,
             base: None,
@@ -167,4 +208,37 @@ pub async fn run_server(index_dir: PathBuf) -> Result<(), Box<dyn std::error::Er
     let service = rmcp::service::serve_server(server, transport).await?;
     service.waiting().await?;
     Ok(())
+}
+
+#[cfg(test)]
+mod tests {
+    use super::resolve_scoped_path;
+
+    // `resolve_scoped_path` is a security control: without it, `ecotokens_outline`
+    // returns the contents of any file an MCP client names. These run against the
+    // crate's own git root, which is the project resolved at test time.
+
+    #[test]
+    fn accepts_a_relative_path_inside_the_project() {
+        let resolved = resolve_scoped_path("src/mcp/server.rs").expect("in-project path");
+        assert!(resolved.ends_with("src/mcp/server.rs"));
+    }
+
+    #[test]
+    fn rejects_an_absolute_path_outside_the_project() {
+        let err = resolve_scoped_path("/etc").expect_err("must not escape the project");
+        assert!(err.contains("outside the current project"), "got: {err}");
+    }
+
+    #[test]
+    fn rejects_a_traversal_escape() {
+        let err = resolve_scoped_path("../../../../etc/passwd")
+            .expect_err("must not escape via .. segments");
+        // Either it resolves outside the root, or it does not exist from here —
+        // both refuse to hand back the file, which is what matters.
+        assert!(
+            err.contains("outside the current project") || err.contains("could not resolve path"),
+            "got: {err}"
+        );
+    }
 }
