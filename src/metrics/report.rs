@@ -1,5 +1,5 @@
 use crate::config::settings::Settings;
-use crate::metrics::store::Interception;
+use crate::metrics::store::{FilterMode, HookType, Interception};
 use chrono::{DateTime, Utc};
 use serde::{Deserialize, Serialize};
 use std::collections::HashMap;
@@ -51,6 +51,12 @@ pub struct Report {
     pub by_family: HashMap<String, FamilyStats>,
     pub by_project: HashMap<String, ProjectStats>,
     pub by_agent: HashMap<String, FamilyStats>,
+    /// Additive token cost of automatic-pipeline rewrite transformations
+    /// (`Origin::AutoPipeline`, `FilterMode::Rewritten`). Local `Cli`/`Mcp`
+    /// rewrites consume no paid tokens and are excluded entirely from this
+    /// report's sums — see `aggregate()` (FR-041, FR-041a, SC-012).
+    #[serde(default)]
+    pub rewrite_overhead_tokens: u64,
 }
 
 fn pricing_usd_per_1m(model: &str, settings: &Settings) -> f64 {
@@ -134,7 +140,27 @@ pub fn filter_by_period(items: &[Interception], period: &Period) -> Vec<Intercep
 /// Aggregate interceptions into a Report.
 pub fn aggregate(items: &[Interception], period: Period, model: &str) -> Report {
     let start = period_start(&period);
-    let filtered = filter_items_by_period(items.iter(), start);
+    let period_items = filter_items_by_period(items.iter(), start);
+
+    // Rewrite rows are transformations, not compressions, and are frequently
+    // token-*expanding* — summing them into the sums below would corrupt
+    // `total_savings_pct` (research.md §9, FR-040/041). They are excluded
+    // entirely from every field below. `AutoPipeline`-origin rewrites (the
+    // only ones with a real paid-token cost) have their expansion delta
+    // surfaced separately as `rewrite_overhead_tokens` instead (FR-041a,
+    // SC-012) rather than silently dropped.
+    let rewrite_overhead_tokens: u64 = period_items
+        .iter()
+        .filter(|i| {
+            i.mode == FilterMode::Rewritten && !matches!(i.hook_type, HookType::Cli | HookType::Mcp)
+        })
+        .map(|i| i.tokens_after.saturating_sub(i.tokens_before) as u64)
+        .sum();
+
+    let filtered: Vec<&Interception> = period_items
+        .into_iter()
+        .filter(|i| i.mode != FilterMode::Rewritten)
+        .collect();
 
     let total_before: u64 = filtered.iter().map(|i| i.tokens_before as u64).sum();
     let total_after: u64 = filtered.iter().map(|i| i.tokens_after as u64).sum();
@@ -229,5 +255,6 @@ pub fn aggregate(items: &[Interception], period: Period, model: &str) -> Report 
         by_family,
         by_project,
         by_agent,
+        rewrite_overhead_tokens,
     }
 }

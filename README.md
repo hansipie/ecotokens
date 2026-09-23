@@ -310,6 +310,8 @@ Uninstall Claude Code
 | `ecotokens config --embed-provider candle\|ollama\|none` | Set the embedding backend (`candle` = local BERT, `ollama` = Ollama HTTP API, `none` = BM25 only) |
 | `ecotokens config --embed-model MODEL` | Set the embedding model (e.g. `qwen3-embedding:latest` for Ollama, or a HuggingFace ID for Candle) |
 | `ecotokens config --embed-url URL` | Set the Ollama base URL (default: `http://localhost:11434`) |
+| `ecotokens config --jev true\|false` | Enable or disable TypeSafe Jev judgments (requires `TYPESAFE_API_KEY`) |
+| `ecotokens config --jev-line-select true\|false` | Enable or disable Jev line selection in the generic filter |
 | `ecotokens index [--path DIR]` | Index a codebase for BM25 + symbolic search |
 | `ecotokens search QUERY [--context N] [--include GLOB] [--exclude GLOB] [--no-trace]` | Search the indexed codebase with line numbers, context, and optional trace augmentation |
 | `ecotokens outline PATH` | List symbols in a file or directory |
@@ -330,6 +332,7 @@ Uninstall Claude Code
 | `ecotokens clear --family FAMILY` | Delete interceptions of a specific command family |
 | `ecotokens clear --project PATH` | Delete interceptions for a specific project (use `"[undefined]"` for entries without a git root) |
 | `ecotokens completions SHELL` | Generate a shell completion script (`bash`, `zsh`, `fish`, `powershell`, `elvish`) |
+| `ecotokens rewrite --mode MODE [--to TARGET]` | Paraphrase, retone, adjust reading level, or translate text using a local model |
 
 ## Shell completions
 
@@ -475,6 +478,7 @@ Exposed tools:
 - `ecotokens_trace_callers` - find callers of a symbol
 - `ecotokens_trace_callees` - find callees (with depth)
 - `ecotokens_duplicates` - detect near-duplicate code blocks
+- `ecotokens_rewrite` - paraphrase, retone, or translate a block of prose using a local model
 
 For Claude Code, Gemini CLI, Qwen Code, and Codex, `ecotokens install` registers this server automatically in each target's settings file (`mcpServers` in JSON settings, `[mcp_servers.ecotokens]` in Codex's `config.toml`).
 
@@ -739,6 +743,151 @@ Or update the config file directly (`~/.config/ecotokens/config.json`):
 ```
 
 Ollama must be running locally. The model is called with a 3-second timeout to avoid blocking the model.
+
+## Rewrite (local text transformation)
+
+`ecotokens rewrite` paraphrases, retones, adjusts reading level, or translates prose using your
+already-configured local model - entirely on your machine, with zero API cost. It's not a token
+*saving* feature (it transforms text rather than compressing it, and is excluded from savings
+reporting), but it reuses the same local-model plumbing as AI summarization.
+
+```bash
+echo "Please fix the login bug ASAP, it's blocking everyone." | ecotokens rewrite --mode tone --to formal
+ecotokens rewrite --mode reading-level --to grade-8 --file notes.md
+ecotokens rewrite --mode translate --to fr --file notes.md
+echo "$TEXT" | ecotokens rewrite --mode paraphrase --json
+```
+
+| Mode | `--to` | Notes |
+|------|--------|-------|
+| `paraphrase` | forbidden | Rewords while preserving meaning |
+| `tone` | required, free-form | e.g. `plain`, `formal`, `friendly` |
+| `reading-level` | required, free-form | e.g. `grade-8`, `expert` |
+| `translate` | required, language code/name | e.g. `fr`, `french`; a same-language target is a no-op |
+
+Fenced code, inline code, URLs, emails, numbers, and dates in the input are preserved
+byte-identically. Code-shaped or predominantly non-prose input is refused rather than transformed.
+On any model failure (unreachable, timeout, empty/truncated/corrupted response), the command
+**fails open**: it prints the original input unchanged and still exits `0`, so it's always safe to
+drop into a pipeline. Long documents are split on structure-aware boundaries (paragraphs, then
+sentences, then whitespace - never inside a fenced code block, table, or list) and reassembled;
+if any chunk fails, the whole document falls back untouched rather than emitting a partial mix.
+
+Available identically from the CLI, as the `ecotokens_rewrite` MCP tool (agents can call it
+mid-session), and - opt-in only - as an automatic pipeline stage (see below).
+
+### Diff audit trail (optional)
+
+Every transformation can be saved as a masked unified diff, so changes stay reviewable:
+
+```bash
+echo "$TEXT" | ecotokens rewrite --mode paraphrase --save-diff   # force on for one run
+echo "$TEXT" | ecotokens rewrite --mode paraphrase --no-save-diff  # force off, overrides config
+```
+
+Diffs go to `rewrite_diff_dir` (default: OS temp dir), are `0600`-permissioned, existing secret
+patterns are masked on both sides before diffing, and old diffs are pruned to `rewrite_diff_retention`
+(default 50, `0` disables pruning). Off by default. A write failure never blocks the transformed
+output - it just warns on stderr.
+
+### Automatic pipeline transformation (optional, off by default)
+
+With `rewrite_auto_enabled = true`, qualifying prose flowing through the normal filter pipeline is
+rewritten automatically before being handed to the agent - e.g. auto-translating command output.
+This is the one rewrite setting that adds latency to every qualifying interception, so it's
+deliberately off by default and gated behind several safeguards: only content classified as prose
+is touched (code, stack traces, diffs, and structured data always pass through untouched), content
+carrying a masked secret is never sent to the model, short content below `rewrite_auto_min_tokens`
+is skipped, and the stage has its own stricter timeout (`rewrite_auto_timeout_ms`) separate from
+`rewrite_timeout_ms`. Because rewriting can *expand* text where compression only shrinks it, any
+resulting token cost is tracked separately and shown as `rewrite_overhead_tokens` in `ecotokens gain`
+and `ecotokens gain --json` - never hidden inside the normal savings figures.
+
+### Configuration
+
+Update `~/.config/ecotokens/config.json` directly, or pass `--model`/`--save-diff`/`--no-save-diff`
+per invocation:
+
+```json
+{
+  "rewrite_model": "llama3.2:3b",
+  "rewrite_url": "http://localhost:11434",
+  "rewrite_timeout_ms": 30000,
+  "rewrite_context_tokens": 8192,
+  "rewrite_truncation_ratio": 0.5,
+  "rewrite_save_diff": false,
+  "rewrite_diff_dir": null,
+  "rewrite_diff_retention": 50,
+  "rewrite_auto_enabled": false,
+  "rewrite_auto_mode": "translate",
+  "rewrite_auto_target": "fr",
+  "rewrite_auto_min_tokens": 500,
+  "rewrite_auto_timeout_ms": 2000
+}
+```
+
+`rewrite_model` falls back to `ai_summary_model`, then to `llama3.2:3b`, and `rewrite_url` must
+resolve to localhost - the endpoint is validated before any request is issued, and text is never
+transmitted anywhere else unless you opt in to [Jev judgments](#jev-judgments-optional-off-by-default).
+
+## Jev judgments (optional, off by default)
+
+ecotokens can ask [TypeSafe](https://docs.typesafe.ai)'s Jev model for quick typed judgments
+(about 100 ms each) in the places where it otherwise relies on hand-tuned heuristics:
+
+| Where | What Jev decides | Built-in fallback |
+|-------|------------------|-------------------|
+| Rewrite gate | prose / code / stack trace / structured data / mixed, plus the source language for `translate` (one request) | regex and ratio classifier, stopword language detection |
+| Rewrite output check | is the output faithful to the input, in the target language, and is its first or last line model commentary (in any language)? | token-ratio truncation check, English-only preamble regex |
+| Generic filter (`jev_line_select_enabled`) | which lines between the kept head and tail report failures, errors, or identifiers you need | blind head+tail truncation |
+
+**Every judgment falls back to today's behaviour.** If Jev is disabled, has no key, is unreachable,
+times out, returns an error, or a response is missing an answer, the built-in heuristic runs
+exactly as before. After the first transport failure, Jev is skipped for the rest of the process
+and a single warning goes to stderr. Exact signals (valid JSON, diffs, Python tracebacks, Rust
+panics) are never sent to Jev. The structural rewrite checks (empty or truncated response, sentinel
+integrity) always run.
+
+**Privacy.** Enabling Jev sends excerpts of the text being judged to `api.typesafe.ai`. Every
+string is passed through the secret-masking patterns first, and each request is capped at
+`jev_max_input_chars`. The API key is read **only** from the `TYPESAFE_API_KEY` environment
+variable. It is never stored in `config.json` or printed. `ecotokens doctor` shows whether Jev is
+active.
+
+```bash
+export TYPESAFE_API_KEY=...
+```
+
+Instead of exporting it in your shell (hooks may not inherit it), you can put it in
+`~/.config/ecotokens/.env`, a `KEY=VALUE` file loaded at every ecotokens start. Variables already set
+in the real environment take precedence. Keep the file private (`chmod 600`).
+
+```
+TYPESAFE_API_KEY=...
+```
+
+```json
+{
+  "jev_enabled": true,
+  "jev_url": "https://api.typesafe.ai/v1/systemone",
+  "jev_timeout_ms": 1000,
+  "jev_max_input_chars": 32000,
+  "jev_line_select_enabled": false,
+  "jev_prose_min_prob": 0.9,
+  "jev_code_min_prob": 0.8,
+  "jev_language_min_confidence": 0.8,
+  "jev_verify_fail_below": 0.3,
+  "jev_commentary_min_prob": 0.8,
+  "jev_line_keep_min_prob": 0.05
+}
+```
+
+Diagrams and details of each integration point: [`docs/jev-integration.md`](docs/jev-integration.md).
+
+`jev_line_select_enabled` is a separate opt-in because generic-filter line selection runs on the
+interception path and adds one request to large generic outputs (up to 10 windows of 200 lines;
+anything larger keeps plain head+tail truncation). `jev_url` must use https. Build with
+`--no-default-features` and without the `jev` feature to compile Jev out entirely.
 
 ## Benchmarks
 

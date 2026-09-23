@@ -1,6 +1,6 @@
 # ecotokens Development Guidelines
 
-Auto-generated from all feature plans. Last updated: 2026-05-01
+Auto-generated from all feature plans. Last updated: 2026-08-16
 
 ## Active Technologies
 - Rust stable ≥ 1.75 + tantivy 0.22 (index read), similar 2.x (diff/similarity ratio), clap 4 (CLI), rmcp (MCP server), serde/serde_json (serialisation) (002-duplicate-detection)
@@ -9,6 +9,9 @@ Auto-generated from all feature plans. Last updated: 2026-05-01
 - JSONL existant (`~/.config/ecotokens/metrics.jsonl`) — extension par nouveau champ `hook_type` avec `#[serde(default)]` (008-posttooluse-native-tools)
 - Rust stable ≥ 1.75 (no nightly) + tantivy 0.22 (BM25), hnsw_rs 0.3.x (ANN index), candle (embedding), tree-sitter 0.24 (chunking), rmcp (MCP server) (009-semantic-search-embeddings)
 - Index tantivy sur disque + `hnsw_index.bin` (bincode) + `hnsw_meta.json` (009-semantic-search-embeddings)
+- Rust stable ≥ 1.75, edition 2021 + no new crates — reuses reqwest 0.12 (blocking), similar 2 (diff), clap 4, rmcp 1 (010-local-text-rewrite)
+- Existing SQLite metrics store + plain-text diff files in a configurable directory (010-local-text-rewrite)
+- Optional TypeSafe Jev judgments via `src/jev/` (HTTPS, reqwest blocking; `jev` feature) — no new crates; every use falls back to the existing heuristic
 
 - Rust stable (≥ 1.75, no nightly) (001-token-companion)
 
@@ -42,9 +45,9 @@ cargo test [ONLY COMMANDS FOR ACTIVE TECHNOLOGIES][ONLY COMMANDS FOR ACTIVE TECH
 Rust stable (≥ 1.75, no nightly): Follow standard conventions
 
 ## Recent Changes
+- 010-local-text-rewrite: Added `src/rewrite/` — local-LLM text transformation (CLI + MCP + opt-in pipeline stage), no new crates
 - 009-semantic-search-embeddings: Added Rust stable ≥ 1.75 (no nightly) + tantivy 0.22 (BM25), hnsw_rs 0.3.x (ANN index), candle (embedding), tree-sitter 0.24 (chunking), rmcp (MCP server)
 - 008-posttooluse-native-tools: Added Rust stable ≥ 1.75 (no nightly) + serde_json (parsing JSON stdin/stdout), clap 4 (nouvelle sous-commande), tantivy 0.22 (lookup index pour Read), existing filter modules
-- 004-savings-history-periods: Added [if applicable, e.g., PostgreSQL, CoreData, files or N/A]
 
 
 <!-- MANUAL ADDITIONS START -->

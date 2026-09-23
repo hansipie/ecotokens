@@ -134,7 +134,20 @@ pub fn detect_family(command: &str) -> CommandFamily {
     }
 }
 
+// Used by the library crate and tests; unused in the binary.
+#[allow(dead_code)]
 pub fn apply_filter(command: &str, output: &str) -> String {
+    apply_filter_with(command, output, None)
+}
+
+/// [`apply_filter`] with an optional Jev judge used for generic-family line
+/// selection (`generic::filter_generic_with_judge`). `None` is exactly
+/// [`apply_filter`].
+pub fn apply_filter_with(
+    command: &str,
+    output: &str,
+    jev: Option<crate::jev::JevContext<'_>>,
+) -> String {
     let ext = std::path::Path::new(command)
         .extension()
         .and_then(|e| e.to_str())
@@ -155,7 +168,10 @@ pub fn apply_filter(command: &str, output: &str) -> String {
         CommandFamily::Aws => aws::filter_aws(output),
         CommandFamily::Network => network::filter_network(command, output),
         CommandFamily::Db => db::filter_db(output),
-        CommandFamily::Generic => generic::filter_generic(output, 200, 51200),
+        CommandFamily::Generic => match jev {
+            Some(ctx) => generic::filter_generic_with_judge(output, 200, 51200, ctx),
+            None => generic::filter_generic(output, 200, 51200),
+        },
         CommandFamily::NativeRead => output.to_string(),
     }
 }
@@ -175,7 +191,16 @@ pub fn run_filter_pipeline_with_cwd(
     let filtered = if raw.len() < 200 {
         masked.clone()
     } else {
-        let mut f = apply_filter(command, &masked);
+        // Input is already masked here, so line selection never sends secrets.
+        let judge = if settings.jev_line_select_enabled {
+            crate::jev::judge_from_settings(&settings)
+        } else {
+            None
+        };
+        let jev = judge
+            .as_deref()
+            .map(|j| crate::jev::JevContext::new(j, &settings));
+        let mut f = apply_filter_with(command, &masked, jev);
         let masked_tokens = crate::tokens::count_tokens(&masked) as u32;
         let filtered_tokens = crate::tokens::count_tokens(&f) as u32;
         if f == masked || (masked_tokens > 0 && filtered_tokens >= masked_tokens) {
@@ -241,9 +266,148 @@ pub fn run_filter_pipeline_with_cwd(
             Some(masked),
             Some(filtered.clone()),
         )
-        .with_hook_type(hook_type);
+        .with_hook_type(hook_type.clone());
         let _ = crate::metrics::store::append_to(&path, &rec);
     }
 
+    // ── Automatic rewrite stage (opt-in, User Story 6) ──────────────────────
+    // Deliberately runs AFTER the anti-expansion clamp above and its metrics
+    // recording, never before: rewriting routinely *grows* text (paraphrase,
+    // translation), and the clamp above would silently discard any such
+    // transformation if this ran earlier (research.md §10). Off by default —
+    // `rewrite_auto_enabled` — so the default interception path is completely
+    // unaffected by this stage existing at all (FR-034, SC-010).
+    #[cfg(all(not(test), feature = "rewrite"))]
+    {
+        if settings.rewrite_auto_enabled && !redacted {
+            if let Some((rewritten, tokens_after_auto)) =
+                try_auto_rewrite(&filtered, tokens_after, &settings)
+            {
+                record_auto_rewrite_metrics(
+                    command,
+                    cwd,
+                    hook_type,
+                    tokens_after,
+                    tokens_after_auto,
+                );
+                return (rewritten, tokens_before, tokens_after_auto);
+            }
+        }
+    }
+
     (filtered, tokens_before, tokens_after)
+}
+
+/// Attempt the automatic prose-rewrite stage. Pre-gated by size threshold and
+/// content classification before any provider call (FR-035, FR-036); secret
+/// exclusion is the caller's `!redacted` check above (FR-039). Returns `None`
+/// on any gate rejection, config problem, or transformation failure — meaning
+/// "pass through unchanged," never a partial or corrupted result.
+#[cfg(all(not(test), feature = "rewrite"))]
+fn try_auto_rewrite(
+    text: &str,
+    tokens: u32,
+    settings: &crate::config::Settings,
+) -> Option<(String, u32)> {
+    if tokens < settings.rewrite_auto_min_tokens {
+        return None;
+    }
+    let judge = crate::jev::judge_from_settings(settings);
+    let jev = judge
+        .as_deref()
+        .map(|j| crate::jev::JevContext::new(j, settings));
+    if crate::rewrite::detect::classify_with(text, jev)
+        != crate::rewrite::detect::ContentKind::Prose
+    {
+        return None;
+    }
+
+    let mode_name = settings.rewrite_auto_mode.as_deref()?;
+    let mode =
+        crate::rewrite::modes::Mode::parse(mode_name, settings.rewrite_auto_target.as_deref())
+            .ok()?;
+
+    let model_name = settings
+        .rewrite_model
+        .clone()
+        .or_else(|| settings.ai_summary_model.clone())
+        .unwrap_or_else(|| "llama3.2:3b".to_string());
+    let provider = crate::rewrite::provider::OllamaProvider::new(
+        settings.rewrite_url.as_deref(),
+        model_name.clone(),
+    )
+    .ok()?;
+
+    let request = crate::rewrite::RewriteRequest {
+        text: text.to_string(),
+        mode,
+        model: model_name,
+        // Stricter interactive budget than the CLI/MCP surfaces: this stage
+        // runs *in addition to* existing filtering, not instead of it
+        // (FR-037).
+        timeout: std::time::Duration::from_millis(settings.rewrite_auto_timeout_ms),
+        origin: crate::rewrite::Origin::AutoPipeline,
+        truncation_ratio: settings.rewrite_truncation_ratio,
+        context_tokens: settings.rewrite_context_tokens,
+        save_diff: settings.rewrite_save_diff,
+        diff_dir: settings
+            .rewrite_diff_dir
+            .clone()
+            .unwrap_or_else(std::env::temp_dir),
+        diff_retention: settings.rewrite_diff_retention,
+    };
+
+    match crate::rewrite::rewrite_with_judge(request, &provider, jev) {
+        Ok(result) if result.status == crate::rewrite::Status::Transformed => {
+            Some((result.text, result.tokens_out))
+        }
+        Ok(result) => {
+            // Model unreachable, timeout, or unusable response — warn at
+            // most once per session, not once per interception (FR-038).
+            if let Some(reason) = result.reason {
+                crate::rewrite::provider::warn_auto_pipeline_unreachable_once(&reason);
+            }
+            None
+        }
+        Err(_) => None,
+    }
+}
+
+/// Emit the second `FilterMode::Rewritten` metrics row for an auto-stage
+/// transformation, distinct from the compression row already recorded above
+/// for the same interception (research.md §10). `hook_type` here is never
+/// `Cli`/`Mcp` — those origins record their own rows inside
+/// `rewrite::rewrite()` — which is exactly what lets `aggregate()` attribute
+/// this row to `AutoPipeline` overhead rather than excluding it outright
+/// (FR-041a, SC-012).
+#[cfg(all(not(test), feature = "rewrite"))]
+fn record_auto_rewrite_metrics(
+    command: &str,
+    cwd: Option<&std::path::Path>,
+    hook_type: crate::metrics::store::HookType,
+    tokens_before: u32,
+    tokens_after: u32,
+) {
+    let Some(path) = crate::metrics::store::metrics_path() else {
+        return;
+    };
+    let effective_cwd = cwd
+        .map(|p| p.to_path_buf())
+        .or_else(|| std::env::current_dir().ok());
+    let git_root = effective_cwd.as_deref().and_then(project_root_for_cwd);
+    let mut rec = crate::metrics::store::Interception::new(
+        command.to_string(),
+        detect_family(command),
+        git_root,
+        tokens_before,
+        tokens_after,
+        crate::metrics::store::FilterMode::Rewritten,
+        false,
+        0,
+        None,
+        None,
+    )
+    .with_hook_type(hook_type);
+    rec.savings_pct = 0.0;
+    let _ = crate::metrics::store::append_to(&path, &rec);
 }

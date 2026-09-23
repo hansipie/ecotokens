@@ -5,6 +5,53 @@ All notable changes to this project will be documented in this file.
 The format is based on [Keep a Changelog](https://keepachangelog.com/en/1.0.0/),
 and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0.html).
 
+## [0.27.0] - 2026-09-23
+
+### Added
+
+- **`~/.config/ecotokens/.env`**: optional `KEY=VALUE` file loaded into the process environment at startup (comments, `export`, and quoted values supported). Variables already set in the real environment win.
+- **Jev judgments (optional, off by default)**: TypeSafe's Jev model can replace fragile heuristics with fast typed judgments. Every use falls back to the existing heuristic when Jev is disabled, unconfigured, unreachable, times out, errors, or omits an answer.
+  - Rewrite gate: one Choice request classifies prose / code / stack trace / structured data / mixed and, for `translate`, detects the source language. It replaces the regex/ratio classifier and stopword language detection. Exact signals (JSON, diffs, Python tracebacks, Rust panics) never reach Jev.
+  - Rewrite output verification: Nouls check faithfulness and target language, and detect first/last-line model commentary in any language. A failed check falls back to the original text. The structural truncation and sentinel checks always run.
+  - Generic filter line selection (`jev_line_select_enabled`, separate opt-in): keeps the error-bearing lines that plain head+tail truncation would drop.
+  - Privacy: every string sent is masked with the existing secret patterns and capped at `jev_max_input_chars`. The API key is read only from `TYPESAFE_API_KEY`. `jev_url` must use https.
+  - Process-wide circuit breaker with a single stderr warning after the first transport failure.
+  - `ecotokens doctor` reports whether Jev is active. It never prints the key and makes no network call.
+  - New `jev` Cargo feature (in `default`) and 11 additive `jev_*` configuration keys, all with `#[serde(default)]`. No new crates.
+  - `ecotokens config --jev true|false` and `--jev-line-select true|false` toggle `jev_enabled` and `jev_line_select_enabled` without editing `config.json`.
+- **`ecotokens doctor` auto-watch check**: warns when `auto_watch` is enabled but the Claude Code session hooks are missing (in that state `SessionStart` never fires and the watcher silently never starts).
+
+### Changed
+
+- **Version**: bumped the crate to `0.27.0`.
+- **`ecotokens config --embed-provider`**: the value is now validated at parse time (`candle`, `ollama`, or `none`) and offered by shell completion, instead of accepting any string.
+- **Dependencies**: refreshed `Cargo.lock` (about 200 crates updated, including `rmcp` 1.5 → 1.8, `clap` 4.6.1 → 4.6.7 and `tokio` 1.52 → 1.53). No new direct dependencies.
+- **Debug log** (`debuglog = true`): string fields are now truncated to 4000 characters (`… [truncated N chars]`), so a single large filtered output can no longer bloat `debug.log`.
+
+### Fixed
+
+- **Debug log self-pollution**: events whose data references `ecotokens/debug.log` are no longer logged, so reading the log through ecotokens no longer makes it grow.
+- **Auto-watch after reinstall**: `ecotokens uninstall` removes the Claude Code session hooks, but `ecotokens install` did not restore them, so auto-watch stayed enabled yet never started. `install` now reinstalls the session hooks whenever `auto_watch` is enabled.
+
+## [0.26.0] - 2026-08-16
+
+### Added
+
+- **Local text rewrite**: `ecotokens rewrite` paraphrases, retones, adjusts reading level, or translates prose using your already-configured local model, entirely on-machine. Available identically from the CLI (`--mode`, `--to`, `--file`, `--model`, `--json`), as the `ecotokens_rewrite` MCP tool, and — opt-in only — as an automatic pipeline stage.
+  - Fenced code, inline code, URLs, emails, numbers, and dates are preserved byte-identically via sentinel extract/restore; code-shaped input is refused rather than transformed.
+  - Fails open on every model failure (unreachable, timeout, empty/truncated/corrupted response): the original input is emitted unchanged and the command still exits `0`.
+  - Long documents are split on structure-aware boundaries (paragraph → sentence → whitespace; fenced code, tables, and list groups are never split) and reassembled; any chunk failure falls back to the whole, untouched document rather than emitting a partial mix.
+  - Optional masked-diff audit trail (`--save-diff`/`--no-save-diff`/`rewrite_save_diff`) — existing secret-masking rules are applied to both sides before diffing, diffs are written `0600`, and old diffs are pruned to a configurable retention count.
+  - Optional automatic pipeline stage (`rewrite_auto_enabled`, off by default): rewrites qualifying prose flowing through the normal interception pipeline, gated by content classification (only prose — never code, stack traces, diffs, or structured data), a minimum token threshold, and secret-content exclusion, with its own stricter timeout and a once-per-session (not per-interception) unreachable-model warning.
+  - 13 new additive `rewrite_*` configuration keys, all with `#[serde(default)]` — existing config files load unchanged.
+  - New `rewrite` Cargo feature, enabled in `default`.
+- **Metrics**: new `FilterMode::Rewritten` interception mode. Local (`Cli`/`Mcp` origin) rewrites are recorded but excluded from savings aggregation — this feature transforms text rather than compressing it. Automatic-pipeline rewrites, which do add a real token cost, are surfaced separately as `rewrite_overhead_tokens` in `ecotokens gain` and `ecotokens gain --json`, never hidden inside the ordinary savings figures. MCP-originated rows use a new `mcp` hook type.
+
+### Changed
+
+- **Version**: bumped the crate to `0.26.0`.
+- **Configuration validation**: `config.json` is now validated at load time and every violation is reported as a single stderr warning (previously `validate()` was never called). New checks: `rewrite_url` must point to localhost, `rewrite_truncation_ratio` must be in `(0.0, 1.0)`, and `rewrite_auto_enabled` requires `rewrite_auto_mode` (plus `rewrite_auto_target` for modes that need one).
+
 ## [0.25.2] - 2026-07-29
 
 ### Changed

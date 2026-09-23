@@ -62,6 +62,7 @@ pub fn run() -> DoctorReport {
 }
 
 fn run_with_paths(paths: DoctorPaths) -> DoctorReport {
+    let settings = config::Settings::load();
     let checks = vec![
         check_path_binary(),
         check_config(paths.config_path.as_deref()),
@@ -86,9 +87,87 @@ fn run_with_paths(paths: DoctorPaths) -> DoctorReport {
             install::is_qwen_post_hook_installed,
             install::is_qwen_mcp_registered,
         ),
+        check_auto_watch(&settings, paths.claude_settings_path.as_deref()),
         check_metrics(paths.metrics_path.as_deref()),
+        check_jev(&settings, env::var(crate::jev::API_KEY_ENV).ok().as_deref()),
     ];
     DoctorReport { checks }
+}
+
+/// Flags an enabled auto-watch whose Claude Code session hooks are missing —
+/// in that state SessionStart never runs, so the watcher silently never starts.
+fn check_auto_watch(settings: &config::Settings, claude_settings: Option<&Path>) -> DoctorCheck {
+    let path = claude_settings.map(|p| p.display().to_string());
+    let (status, message) = if !settings.auto_watch {
+        (DoctorStatus::Ok, "auto-watch disabled".to_string())
+    } else if claude_settings.is_some_and(install::are_session_hooks_installed) {
+        (
+            DoctorStatus::Ok,
+            "auto-watch enabled and session hooks are installed".to_string(),
+        )
+    } else {
+        (
+            DoctorStatus::Warning,
+            "auto-watch is enabled but the Claude Code session hooks are missing; \
+             run `ecotokens auto-watch enable`"
+                .to_string(),
+        )
+    };
+    DoctorCheck {
+        name: "auto-watch",
+        status,
+        message,
+        path,
+    }
+}
+
+/// Reports whether Jev judgments are active. Never prints the API key and
+/// makes no network call; a disabled or unconfigured Jev is not a problem,
+/// the built-in heuristics simply stay in charge.
+pub fn check_jev(settings: &config::Settings, api_key: Option<&str>) -> DoctorCheck {
+    let has_key = api_key.is_some_and(|k| !k.trim().is_empty());
+    let (status, message) = if !cfg!(feature = "jev") {
+        (
+            DoctorStatus::Ok,
+            "Jev not compiled in; using built-in heuristics".to_string(),
+        )
+    } else if !settings.jev_enabled {
+        (
+            DoctorStatus::Ok,
+            "Jev disabled (jev_enabled = false); using built-in heuristics".to_string(),
+        )
+    } else if !has_key {
+        (
+            DoctorStatus::Warning,
+            format!(
+                "jev_enabled is true but {} is not set; using built-in heuristics",
+                crate::jev::API_KEY_ENV
+            ),
+        )
+    } else {
+        let url = settings
+            .jev_url
+            .as_deref()
+            .unwrap_or(crate::jev::DEFAULT_URL);
+        let line_select = if settings.jev_line_select_enabled {
+            "on"
+        } else {
+            "off"
+        };
+        (
+            DoctorStatus::Ok,
+            format!(
+                "Jev enabled ({url}); masked excerpts are sent to TypeSafe; \
+                 line selection {line_select}"
+            ),
+        )
+    };
+    DoctorCheck {
+        name: "Jev",
+        status,
+        message,
+        path: None,
+    }
 }
 
 fn check_path_binary() -> DoctorCheck {
@@ -319,6 +398,35 @@ mod tests {
         );
 
         assert_eq!(check.status, DoctorStatus::Warning);
+    }
+
+    #[test]
+    fn auto_watch_without_session_hooks_is_a_warning() {
+        let dir = tempdir().unwrap();
+        let settings_path = dir.path().join("settings.json");
+        std::fs::write(&settings_path, "{}").unwrap();
+        let settings = config::Settings {
+            auto_watch: true,
+            ..Default::default()
+        };
+
+        let check = check_auto_watch(&settings, Some(&settings_path));
+        assert_eq!(check.status, DoctorStatus::Warning);
+
+        install::install_session_hooks(&settings_path).unwrap();
+        let check = check_auto_watch(&settings, Some(&settings_path));
+        assert_eq!(check.status, DoctorStatus::Ok);
+    }
+
+    #[test]
+    fn auto_watch_disabled_is_ok_without_session_hooks() {
+        let dir = tempdir().unwrap();
+        let settings_path = dir.path().join("settings.json");
+        std::fs::write(&settings_path, "{}").unwrap();
+
+        let check = check_auto_watch(&config::Settings::default(), Some(&settings_path));
+
+        assert_eq!(check.status, DoctorStatus::Ok);
     }
 
     #[test]

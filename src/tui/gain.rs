@@ -368,6 +368,19 @@ fn render_stats(
             Span::raw(format!("   (model: {})", report.model_ref)),
         ]),
     ];
+    let text = if report.rewrite_overhead_tokens > 0 {
+        let mut text = text;
+        text.push(Line::from(vec![
+            Span::styled("Rewrite overhead: ", Style::default().fg(Color::Yellow)),
+            Span::raw(format!(
+                "{} tokens (automatic pipeline transformation)",
+                fmt_tok(report.rewrite_overhead_tokens)
+            )),
+        ]));
+        text
+    } else {
+        text
+    };
 
     let title = match last_updated {
         Some(ts) => format!(" ecotokens gain - updated {ts} UTC  [q] quit "),
@@ -908,6 +921,7 @@ fn render_details_panel(
             crate::metrics::store::FilterMode::Filtered => "filtered",
             crate::metrics::store::FilterMode::Passthrough => "passthrough",
             crate::metrics::store::FilterMode::Summarized => "summarized",
+            crate::metrics::store::FilterMode::Rewritten => "rewritten",
         }),
         Span::raw(format!("  Duration: {} ms", item.duration_ms)),
     ]));

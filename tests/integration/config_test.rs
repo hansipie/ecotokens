@@ -183,3 +183,48 @@ fn test_watch_log_created_when_debug_enabled() {
         "Log file should be created when debug is enabled"
     );
 }
+
+#[test]
+fn test_config_jev_toggle() {
+    let tmp = tempdir().expect("failed to create temp dir");
+    let config_home = tmp.path();
+
+    let read_json = || -> Value {
+        let output = Command::new(ecotokens())
+            .args(["config", "--json"])
+            .env("XDG_CONFIG_HOME", config_home)
+            .output()
+            .expect("failed to run ecotokens config");
+        assert!(output.status.success());
+        serde_json::from_slice(&output.stdout).expect("invalid json")
+    };
+
+    let v = read_json();
+    assert_eq!(v["jev_enabled"], false);
+    assert_eq!(v["jev_line_select_enabled"], false);
+
+    let output = Command::new(ecotokens())
+        .args(["config", "--jev", "true", "--jev-line-select", "true"])
+        .env("XDG_CONFIG_HOME", config_home)
+        .output()
+        .expect("failed to run ecotokens config");
+    assert!(output.status.success());
+    let stdout = String::from_utf8_lossy(&output.stdout);
+    assert!(stdout.contains("jev_enabled           : true"));
+    assert!(stdout.contains("jev_line_select       : true"));
+
+    let v = read_json();
+    assert_eq!(v["jev_enabled"], true);
+    assert_eq!(v["jev_line_select_enabled"], true);
+
+    let output = Command::new(ecotokens())
+        .args(["config", "--jev", "false"])
+        .env("XDG_CONFIG_HOME", config_home)
+        .output()
+        .expect("failed to run ecotokens config");
+    assert!(output.status.success());
+
+    let v = read_json();
+    assert_eq!(v["jev_enabled"], false);
+    assert_eq!(v["jev_line_select_enabled"], true);
+}

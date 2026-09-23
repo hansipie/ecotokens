@@ -1,6 +1,6 @@
 [package]
 name = "ecotokens"
-version = "0.25.2"
+version = "0.27.0"
 edition = "2021"
 description = "Token optimizer for AI coding assistants — hooks into Claude Code/Gemini CLI to compress shell outputs and track USD savings"
 license = "MIT"
@@ -11,10 +11,12 @@ categories = ["command-line-utilities", "development-tools"]
 exclude = ["assets/*.gif", "assets/picture.png", "assets/icon.png"]
 
 [features]
-default = ["embeddings", "ai-summary"]
+default = ["embeddings", "ai-summary", "rewrite", "jev"]
 exact-tokens = ["tiktoken-rs"]
 embeddings = []
 ai-summary = []
+rewrite = []
+jev = []
 cuda  = ["candle-core/cuda",  "candle-nn/cuda",  "candle-transformers/cuda"]
 metal = ["candle-core/metal", "candle-nn/metal", "candle-transformers/metal"]
 
@@ -314,3 +316,115 @@ path = "tests/unit/chunking_symbol_test.rs"
 [[test]]
 name = "semantic_search_test"
 path = "tests/integration/semantic_search_test.rs"
+
+[[test]]
+name = "rewrite_modes_test"
+path = "tests/rewrite/modes_test.rs"
+
+[[test]]
+name = "rewrite_provider_test"
+path = "tests/rewrite/provider_test.rs"
+
+[[test]]
+name = "rewrite_sanitize_test"
+path = "tests/rewrite/sanitize_test.rs"
+
+[[test]]
+name = "rewrite_cleanup_test"
+path = "tests/rewrite/cleanup_test.rs"
+
+[[test]]
+name = "rewrite_failure_test"
+path = "tests/rewrite/failure_test.rs"
+
+[[test]]
+name = "rewrite_detect_test"
+path = "tests/rewrite/detect_test.rs"
+
+[[test]]
+name = "rewrite_exclusion_test"
+path = "tests/metrics/rewrite_exclusion_test.rs"
+
+[[test]]
+name = "rewrite_test"
+path = "tests/integration/rewrite_test.rs"
+
+[[test]]
+name = "rewrite_failopen_test"
+path = "tests/integration/rewrite_failopen_test.rs"
+
+[[test]]
+name = "rewrite_input_test"
+path = "tests/integration/rewrite_input_test.rs"
+
+[[test]]
+name = "rewrite_auto_test"
+path = "tests/integration/rewrite_auto_test.rs"
+
+[[test]]
+name = "rewrite_live_test"
+path = "tests/integration/rewrite_live_test.rs"
+
+[[test]]
+name = "rewrite_overhead_test"
+path = "tests/metrics/rewrite_overhead_test.rs"
+
+[[test]]
+name = "rewrite_diff_test"
+path = "tests/rewrite/diff_test.rs"
+
+[[test]]
+name = "rewrite_diff_retention_test"
+path = "tests/rewrite/diff_retention_test.rs"
+
+[[test]]
+name = "rewrite_diff_integration_test"
+path = "tests/integration/rewrite_diff_test.rs"
+
+[[test]]
+name = "rewrite_mcp_test"
+path = "tests/integration/rewrite_mcp_test.rs"
+
+[[test]]
+name = "rewrite_chunk_test2"
+path = "tests/rewrite/chunk_test.rs"
+
+[[test]]
+name = "rewrite_chunk_structure_test"
+path = "tests/rewrite/chunk_structure_test.rs"
+
+[[test]]
+name = "rewrite_chunk_carryover_test"
+path = "tests/rewrite/chunk_carryover_test.rs"
+
+[[test]]
+name = "rewrite_chunk_integration_test"
+path = "tests/integration/rewrite_chunk_test.rs"
+
+[[test]]
+name = "rewrite_translate_test"
+path = "tests/integration/rewrite_translate_test.rs"
+
+[[test]]
+name = "jev_client_test"
+path = "tests/jev/client_test.rs"
+
+[[test]]
+name = "jev_detect_test"
+path = "tests/jev/detect_jev_test.rs"
+
+[[test]]
+name = "rewrite_jev_test"
+path = "tests/integration/rewrite_jev_test.rs"
+
+[[test]]
+name = "generic_jev_test"
+path = "tests/filter/generic_jev_test.rs"
+
+[[test]]
+name = "jev_live_test"
+path = "tests/integration/jev_live_test.rs"
+
+[[test]]
+name = "env_file_test"
+path = "tests/config/env_file_test.rs"

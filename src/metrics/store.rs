@@ -35,6 +35,7 @@ pub enum HookType {
     CodexPostToolUse,
     Pi,
     Cli,
+    Mcp,
     HermesTransformTerminalOutput,
     HermesTransformToolResult,
 }
@@ -48,6 +49,7 @@ impl HookType {
             HookType::CodexPreToolUse | HookType::CodexPostToolUse => "codex",
             HookType::Pi => "pi",
             HookType::Cli => "cli",
+            HookType::Mcp => "mcp",
             HookType::HermesTransformTerminalOutput | HookType::HermesTransformToolResult => {
                 "hermes"
             }
@@ -133,6 +135,11 @@ pub enum FilterMode {
     Filtered,
     Passthrough,
     Summarized,
+    /// A `ecotokens rewrite` transformation (CLI/MCP/AutoPipeline). `mode` is
+    /// already `TEXT`, so this is a new string value — no schema migration.
+    /// Excluded from savings aggregation for `Cli`/`Mcp` origin; `AutoPipeline`
+    /// origin is accumulated separately as overhead (data-model.md, FR-041/041a).
+    Rewritten,
 }
 
 #[derive(Debug, Clone, Serialize, Deserialize)]

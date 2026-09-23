@@ -127,6 +127,102 @@ pub struct Settings {
     /// Write command input/output to ~/.config/ecotokens/debug.log (default: false)
     #[serde(default)]
     pub debuglog: bool,
+
+    // ── Local text rewrite (010-local-text-rewrite) ─────────────────────────
+    /// Model used for rewrite transformations. Falls back to `ai_summary_model`,
+    /// then a built-in default, at call time.
+    #[serde(default)]
+    pub rewrite_model: Option<String>,
+    /// Ollama base URL for rewrite (defaults to "http://localhost:11434"). Must
+    /// resolve to the local machine (FR-019).
+    #[serde(default)]
+    pub rewrite_url: Option<String>,
+    /// Whole-operation timeout in milliseconds, including every chunk of a
+    /// long document (FR-018).
+    #[serde(default = "default_rewrite_timeout_ms")]
+    pub rewrite_timeout_ms: u64,
+    /// Assumed context window of the local model, in tokens. Chunking reserves
+    /// 25% for prompt overhead and response headroom.
+    #[serde(default = "default_rewrite_context_tokens")]
+    pub rewrite_context_tokens: u32,
+    /// A response shorter than this fraction of the input is treated as
+    /// truncation and triggers fallback (FR-011). Must be in (0.0, 1.0).
+    #[serde(default = "default_rewrite_truncation_ratio")]
+    pub rewrite_truncation_ratio: f32,
+    /// Save a diff of original vs transformed text. Off by default (FR-021).
+    #[serde(default)]
+    pub rewrite_save_diff: bool,
+    /// Directory receiving diffs. Defaults to the OS temp directory (FR-022).
+    #[serde(default)]
+    pub rewrite_diff_dir: Option<PathBuf>,
+    /// Maximum diffs retained; oldest pruned first. `0` disables pruning
+    /// (FR-027).
+    #[serde(default = "default_rewrite_diff_retention")]
+    pub rewrite_diff_retention: u32,
+    /// Enable automatic prose transformation in the interception pipeline.
+    /// Off by default — the interception path is otherwise untouched
+    /// (FR-033, FR-034).
+    #[serde(default)]
+    pub rewrite_auto_enabled: bool,
+    /// Content below this token count passes through the automatic stage with
+    /// no model call (FR-036).
+    #[serde(default = "default_rewrite_auto_min_tokens")]
+    pub rewrite_auto_min_tokens: u32,
+    /// Interactive budget for the automatic stage, stricter than
+    /// `rewrite_timeout_ms` (FR-037).
+    #[serde(default = "default_rewrite_auto_timeout_ms")]
+    pub rewrite_auto_timeout_ms: u64,
+    /// Mode used by the automatic stage. Required when `rewrite_auto_enabled`
+    /// is true (FR-033).
+    #[serde(default)]
+    pub rewrite_auto_mode: Option<String>,
+    /// Target used by the automatic stage, when `rewrite_auto_mode` requires
+    /// one (FR-033).
+    #[serde(default)]
+    pub rewrite_auto_target: Option<String>,
+
+    // ── TypeSafe Jev judgments (optional, heuristics remain the fallback) ──
+    /// Use Jev for content gating, rewrite verification, and (with
+    /// `jev_line_select_enabled`) generic-filter line selection. Requires the
+    /// `TYPESAFE_API_KEY` environment variable. Sends masked excerpts to the
+    /// TypeSafe API. Off by default.
+    #[serde(default)]
+    pub jev_enabled: bool,
+    /// Jev endpoint (defaults to `https://api.typesafe.ai/v1/systemone`). Must
+    /// use https.
+    #[serde(default)]
+    pub jev_url: Option<String>,
+    /// Per-request timeout for Jev calls, in milliseconds.
+    #[serde(default = "default_jev_timeout_ms")]
+    pub jev_timeout_ms: u64,
+    /// Upper bound on the characters of text sent in one Jev request.
+    #[serde(default = "default_jev_max_input_chars")]
+    pub jev_max_input_chars: usize,
+    /// Let Jev pick the error-bearing lines kept by the generic head+tail
+    /// filter. Separate opt-in: it runs on the interception hot path.
+    #[serde(default)]
+    pub jev_line_select_enabled: bool,
+    /// Minimum probability of `prose` before the auto-rewrite stage runs.
+    #[serde(default = "default_jev_prose_min_prob")]
+    pub jev_prose_min_prob: f64,
+    /// Minimum probability of `source_code` before a rewrite is refused.
+    #[serde(default = "default_jev_code_min_prob")]
+    pub jev_code_min_prob: f64,
+    /// Minimum confidence before a same-language translation is skipped.
+    #[serde(default = "default_jev_language_min_confidence")]
+    pub jev_language_min_confidence: f64,
+    /// A rewrite whose faithfulness (or target-language) probability is below
+    /// this falls back to the original text.
+    #[serde(default = "default_jev_verify_fail_below")]
+    pub jev_verify_fail_below: f64,
+    /// Minimum probability before a first/last response line is stripped as
+    /// model commentary.
+    #[serde(default = "default_jev_commentary_min_prob")]
+    pub jev_commentary_min_prob: f64,
+    /// Minimum per-line probability for a line to be kept by Jev line
+    /// selection.
+    #[serde(default = "default_jev_line_keep_min_prob")]
+    pub jev_line_keep_min_prob: f64,
 }
 
 #[derive(Debug, Clone, Default, Deserialize)]
@@ -160,6 +256,48 @@ fn default_ai_summary_timeout_ms() -> u64 {
 fn default_post_hook_depth() -> u32 {
     1
 }
+fn default_rewrite_timeout_ms() -> u64 {
+    30000
+}
+fn default_rewrite_context_tokens() -> u32 {
+    8192
+}
+fn default_rewrite_truncation_ratio() -> f32 {
+    0.5
+}
+fn default_rewrite_diff_retention() -> u32 {
+    50
+}
+fn default_rewrite_auto_min_tokens() -> u32 {
+    500
+}
+fn default_rewrite_auto_timeout_ms() -> u64 {
+    2000
+}
+fn default_jev_timeout_ms() -> u64 {
+    1000
+}
+fn default_jev_max_input_chars() -> usize {
+    32000
+}
+fn default_jev_prose_min_prob() -> f64 {
+    0.9
+}
+fn default_jev_code_min_prob() -> f64 {
+    0.8
+}
+fn default_jev_language_min_confidence() -> f64 {
+    0.8
+}
+fn default_jev_verify_fail_below() -> f64 {
+    0.3
+}
+fn default_jev_commentary_min_prob() -> f64 {
+    0.8
+}
+fn default_jev_line_keep_min_prob() -> f64 {
+    0.05
+}
 
 impl Default for Settings {
     fn default() -> Self {
@@ -183,6 +321,30 @@ impl Default for Settings {
             abbreviations_enabled: false,
             abbreviations_custom: HashMap::new(),
             debuglog: false,
+            rewrite_model: None,
+            rewrite_url: None,
+            rewrite_timeout_ms: default_rewrite_timeout_ms(),
+            rewrite_context_tokens: default_rewrite_context_tokens(),
+            rewrite_truncation_ratio: default_rewrite_truncation_ratio(),
+            rewrite_save_diff: false,
+            rewrite_diff_dir: None,
+            rewrite_diff_retention: default_rewrite_diff_retention(),
+            rewrite_auto_enabled: false,
+            rewrite_auto_min_tokens: default_rewrite_auto_min_tokens(),
+            rewrite_auto_timeout_ms: default_rewrite_auto_timeout_ms(),
+            rewrite_auto_mode: None,
+            rewrite_auto_target: None,
+            jev_enabled: false,
+            jev_url: None,
+            jev_timeout_ms: default_jev_timeout_ms(),
+            jev_max_input_chars: default_jev_max_input_chars(),
+            jev_line_select_enabled: false,
+            jev_prose_min_prob: default_jev_prose_min_prob(),
+            jev_code_min_prob: default_jev_code_min_prob(),
+            jev_language_min_confidence: default_jev_language_min_confidence(),
+            jev_verify_fail_below: default_jev_verify_fail_below(),
+            jev_commentary_min_prob: default_jev_commentary_min_prob(),
+            jev_line_keep_min_prob: default_jev_line_keep_min_prob(),
         }
     }
 }
@@ -248,6 +410,9 @@ impl Settings {
         // disable embeddings and must be preserved.
         if matches!(settings.embed_provider, EmbedProvider::Legacy) {
             settings.embed_provider = EmbedProvider::default();
+        }
+        if let Err(e) = settings.validate() {
+            eprintln!("ecotokens: warning: invalid configuration: {e}");
         }
         settings
     }
@@ -348,22 +513,76 @@ impl Settings {
         Self::load_from_paths(config_path, abbreviations_path, pricing_path)
     }
 
+    /// Modes accepting a `--to`/`_target` value, mirrored here as plain
+    /// strings rather than depending on `crate::rewrite::Mode` — settings.rs
+    /// must compile with `--no-default-features` (rewrite disabled).
+    fn rewrite_mode_requires_target(mode: &str) -> bool {
+        matches!(mode, "tone" | "reading-level" | "translate")
+    }
+
+    fn is_localhost_url(url: &str) -> bool {
+        url.parse::<reqwest::Url>()
+            .ok()
+            .and_then(|u| u.host_str().map(str::to_string))
+            .is_some_and(|host| {
+                matches!(host.as_str(), "localhost" | "127.0.0.1" | "::1" | "[::1]")
+            })
+    }
+
     // Exposed for callers that want to validate settings explicitly
-    // (tests, tooling, or future CLI checks) without enforcing it on load.
-    #[allow(dead_code)]
+    // (tests, tooling, or future CLI checks); also run at load time (see
+    // `load_from_paths`), where violations are reported rather than silently
+    // ignored (FR-019, FR-033, FR-011 — contracts/config-settings.md).
     pub fn validate(&self) -> Result<(), String> {
+        let mut errors = Vec::new();
+
         if !(10..=10000).contains(&self.summary_threshold_lines) {
-            return Err(format!(
+            errors.push(format!(
                 "summary_threshold_lines must be in [10, 10000], got {}",
                 self.summary_threshold_lines
             ));
         }
         if !(1024..=1048576).contains(&self.summary_threshold_bytes) {
-            return Err(format!(
+            errors.push(format!(
                 "summary_threshold_bytes must be in [1024, 1048576], got {}",
                 self.summary_threshold_bytes
             ));
         }
-        Ok(())
+
+        if let Some(url) = &self.rewrite_url {
+            if !Self::is_localhost_url(url) {
+                errors.push(format!(
+                    "rewrite_url must resolve to localhost, 127.0.0.1, or ::1, got: {url}"
+                ));
+            }
+        }
+        if !(self.rewrite_truncation_ratio > 0.0 && self.rewrite_truncation_ratio < 1.0) {
+            errors.push(format!(
+                "rewrite_truncation_ratio must be in (0.0, 1.0), got {}",
+                self.rewrite_truncation_ratio
+            ));
+        }
+        if self.rewrite_auto_enabled {
+            match &self.rewrite_auto_mode {
+                None => errors.push(
+                    "rewrite_auto_enabled is true but rewrite_auto_mode is not set".to_string(),
+                ),
+                Some(mode) => {
+                    if Self::rewrite_mode_requires_target(mode)
+                        && self.rewrite_auto_target.is_none()
+                    {
+                        errors.push(format!(
+                            "rewrite_auto_mode '{mode}' requires rewrite_auto_target, which is not set"
+                        ));
+                    }
+                }
+            }
+        }
+
+        if errors.is_empty() {
+            Ok(())
+        } else {
+            Err(errors.join("; "))
+        }
     }
 }

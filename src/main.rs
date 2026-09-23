@@ -22,9 +22,12 @@ mod embed;
 mod filter;
 mod hook;
 mod install;
+mod jev;
 mod masking;
 mod mcp;
 mod metrics;
+#[cfg(feature = "rewrite")]
+mod rewrite;
 mod search;
 mod tokens;
 mod trace;
@@ -147,11 +150,17 @@ enum Commands {
         /// Enable or disable debug logging to ~/.config/ecotokens/debug.log
         #[arg(long, value_name = "true|false")]
         debuglog: Option<bool>,
+        /// Enable or disable TypeSafe Jev judgments (requires TYPESAFE_API_KEY)
+        #[arg(long, value_name = "true|false")]
+        jev: Option<bool>,
+        /// Enable or disable Jev line selection in the generic filter
+        #[arg(long, value_name = "true|false")]
+        jev_line_select: Option<bool>,
         /// Set the default model used for cost calculations
         #[arg(long)]
         model: Option<String>,
         /// Set embed provider: candle, ollama, none
-        #[arg(long)]
+        #[arg(long, value_parser = ["candle", "ollama", "none"])]
         embed_provider: Option<String>,
         /// Model name for the embeddings provider (e.g. sentence-transformers/all-MiniLM-L6-v2)
         #[arg(long)]
@@ -300,6 +309,40 @@ enum Commands {
     Completions {
         /// Target shell
         shell: Shell,
+    },
+    /// Rewrite, retone, simplify, or translate prose using the local model
+    #[cfg(feature = "rewrite")]
+    Rewrite {
+        /// paraphrase | tone | reading-level | translate
+        //
+        // Deliberately a plain String, not a clap `value_parser`/`ValueEnum`
+        // restriction: clap validates possible-values at parse time and exits
+        // 2 on mismatch, which would override the contract's exit code 1 for
+        // "unknown mode" (contracts/cli-rewrite.md). Validation instead
+        // happens in `Mode::parse`, so shell completion for this flag is not
+        // wired into the generator — the exit-code contract takes priority.
+        #[arg(long, default_value = "paraphrase")]
+        mode: String,
+        /// Target for tone/reading-level/translate (forbidden for paraphrase)
+        #[arg(long = "to")]
+        to: Option<String>,
+        /// Read input from a file instead of stdin
+        #[arg(long)]
+        file: Option<PathBuf>,
+        /// Override the configured model
+        #[arg(long)]
+        model: Option<String>,
+        /// Whole-operation timeout in milliseconds
+        #[arg(long, default_value = "30000")]
+        timeout_ms: u64,
+        /// Force diff saving on for this run
+        #[arg(long)]
+        save_diff: bool,
+        /// Force diff saving off for this run (wins over config and --save-diff)
+        #[arg(long)]
+        no_save_diff: bool,
+        #[arg(long)]
+        json: bool,
     },
 }
 
@@ -795,6 +838,12 @@ fn cmd_gain(period: metrics::report::Period, json: bool, model: Option<String>, 
         if report.cost_avoided_usd > 0.0 {
             println!("Cost avoided   : ${:.4} USD", report.cost_avoided_usd);
         }
+        if report.rewrite_overhead_tokens > 0 {
+            println!(
+                "Rewrite overhead: {} tokens (automatic pipeline transformation)",
+                format_thousands(report.rewrite_overhead_tokens)
+            );
+        }
         if !report.by_agent.is_empty() {
             println!("By agent       :");
             let mut agents: Vec<_> = report.by_agent.iter().collect();
@@ -957,6 +1006,18 @@ fn cmd_install(
             Err(e) => {
                 eprintln!("install error (mcp server): {e}");
                 std::process::exit(1);
+            }
+        }
+        // `uninstall` removes the session hooks too, so a reinstall must restore
+        // them when auto-watch is enabled, otherwise SessionStart never fires.
+        let settings = config::Settings::load();
+        if settings.auto_watch && !install::are_session_hooks_installed(&claude_path) {
+            match install::install_session_hooks(&claude_path) {
+                Ok(()) => print_install_item("ok", "session hooks", &claude_path),
+                Err(e) => {
+                    eprintln!("install error (claude session hooks): {e}");
+                    std::process::exit(1);
+                }
             }
         }
     }
@@ -1487,10 +1548,13 @@ fn cmd_uninstall(target: String) {
     }
 }
 
+#[allow(clippy::too_many_arguments)]
 fn cmd_config(
     json: bool,
     debug: Option<bool>,
     debuglog: Option<bool>,
+    jev: Option<bool>,
+    jev_line_select: Option<bool>,
     model: Option<String>,
     embed_provider: Option<String>,
     embed_model: Option<String>,
@@ -1511,6 +1575,28 @@ fn cmd_config(
     if let Some(d) = debuglog {
         settings.debuglog = d;
         dirty = true;
+    }
+
+    if let Some(v) = jev {
+        settings.jev_enabled = v;
+        dirty = true;
+        let has_key =
+            matches!(std::env::var(crate::jev::API_KEY_ENV), Ok(k) if !k.trim().is_empty());
+        if v && !has_key {
+            eprintln!(
+                "warning: {} not set; Jev calls will fall back to heuristics",
+                crate::jev::API_KEY_ENV
+            );
+        }
+    }
+
+    if let Some(v) = jev_line_select {
+        settings.jev_line_select_enabled = v;
+        dirty = true;
+    }
+
+    if jev_line_select == Some(true) && !settings.jev_enabled {
+        eprintln!("warning: jev_line_select_enabled has no effect while jev_enabled is false");
     }
 
     if let Some(ref m) = model {
@@ -1617,6 +1703,11 @@ fn cmd_config(
                 .unwrap_or("http://localhost:11434 (default)")
         );
         println!("abbreviations_enabled : {}", settings.abbreviations_enabled);
+        println!("jev_enabled           : {}", settings.jev_enabled);
+        println!(
+            "jev_line_select       : {}",
+            settings.jev_line_select_enabled
+        );
 
         let watch_store = config::SessionStore::load();
         let active_sessions: u32 = watch_store.0.values().map(|e| e.sessions).sum();
@@ -2959,6 +3050,141 @@ fn cmd_completions(shell: Shell) {
     generate(shell, &mut cmd, name, &mut std::io::stdout());
 }
 
+#[cfg(feature = "rewrite")]
+#[allow(clippy::too_many_arguments)]
+fn cmd_rewrite(
+    mode: String,
+    to: Option<String>,
+    file: Option<PathBuf>,
+    model: Option<String>,
+    timeout_ms: u64,
+    save_diff: bool,
+    no_save_diff: bool,
+    json: bool,
+) {
+    let stdin_is_tty = std::io::IsTerminal::is_terminal(&std::io::stdin());
+
+    // Stdin tty-ness alone cannot distinguish "explicitly piped content" from
+    // "non-interactive but empty" (e.g. `< /dev/null`, or any headless/CI
+    // invocation with `--file` and no redirection) — a pure tty check would
+    // wrongly reject the common non-interactive `--file` usage. So when a
+    // file is given and stdin is not a terminal, drain stdin (safe: a
+    // non-terminal stream always reaches EOF, it cannot block forever) and
+    // only treat it as "both supplied" if it actually carried bytes.
+    let stdin_bytes = if stdin_is_tty {
+        Vec::new()
+    } else {
+        let mut buf = Vec::new();
+        let _ = std::io::stdin().read_to_end(&mut buf);
+        buf
+    };
+
+    let text = match &file {
+        Some(_) if !stdin_bytes.is_empty() => {
+            eprintln!("ecotokens: error: supply input via stdin OR --file, not both");
+            std::process::exit(2);
+        }
+        Some(path) => match std::fs::read_to_string(path) {
+            Ok(s) => s,
+            Err(e) => {
+                eprintln!("ecotokens: error: could not read {}: {e}", path.display());
+                std::process::exit(2);
+            }
+        },
+        None if stdin_is_tty => {
+            eprintln!("ecotokens: error: no input — pipe text via stdin or pass --file <PATH>");
+            std::process::exit(2);
+        }
+        None => match String::from_utf8(stdin_bytes) {
+            Ok(s) => s,
+            Err(_) => {
+                eprintln!("ecotokens: error: input is not valid UTF-8");
+                std::process::exit(2);
+            }
+        },
+    };
+
+    let parsed_mode = match rewrite::modes::Mode::parse(&mode, to.as_deref()) {
+        Ok(m) => m,
+        Err(e) => {
+            eprintln!("ecotokens: error: {e}");
+            std::process::exit(1);
+        }
+    };
+
+    let settings = config::Settings::load();
+    let model_name = model
+        .or_else(|| settings.rewrite_model.clone())
+        .or_else(|| settings.ai_summary_model.clone())
+        .unwrap_or_else(|| "llama3.2:3b".to_string());
+
+    let provider = match rewrite::provider::OllamaProvider::new(
+        settings.rewrite_url.as_deref(),
+        model_name.clone(),
+    ) {
+        Ok(p) => p,
+        Err(e) => {
+            eprintln!("ecotokens: error: {e}");
+            std::process::exit(1);
+        }
+    };
+
+    // Precedence per contracts/config-settings.md:
+    // --no-save-diff > --save-diff > rewrite_save_diff > default (false).
+    let effective_save_diff = if no_save_diff {
+        false
+    } else if save_diff {
+        true
+    } else {
+        settings.rewrite_save_diff
+    };
+    let diff_dir = settings
+        .rewrite_diff_dir
+        .clone()
+        .unwrap_or_else(std::env::temp_dir);
+
+    let request = rewrite::RewriteRequest {
+        text,
+        mode: parsed_mode,
+        model: model_name,
+        timeout: std::time::Duration::from_millis(timeout_ms),
+        origin: rewrite::Origin::Cli,
+        truncation_ratio: settings.rewrite_truncation_ratio,
+        context_tokens: settings.rewrite_context_tokens,
+        save_diff: effective_save_diff,
+        diff_dir,
+        diff_retention: settings.rewrite_diff_retention,
+    };
+
+    let judge = jev::judge_from_settings(&settings);
+    let jev_ctx = judge.as_deref().map(|j| jev::JevContext::new(j, &settings));
+    let result = match rewrite::rewrite_with_judge(request, &provider, jev_ctx) {
+        Ok(r) => r,
+        Err(e) => {
+            eprintln!("ecotokens: error: {e}");
+            std::process::exit(1);
+        }
+    };
+
+    if let Some(reason) = &result.reason {
+        eprintln!("ecotokens: {reason}");
+    }
+
+    if json {
+        // `RewriteResult` already carries every field contracts/cli-rewrite.md
+        // requires, including `diff_path` — serialize it directly.
+        println!(
+            "{}",
+            serde_json::to_string_pretty(&result).unwrap_or_default()
+        );
+    } else {
+        print!("{}", result.text);
+        if !result.text.ends_with('\n') {
+            println!();
+        }
+    }
+}
+
 fn parse_version(v: &str) -> Option<(u32, u32, u32)> {
     let mut parts = v.splitn(3, '.');
     let major = parts.next()?.parse().ok()?;
@@ -3047,6 +3273,7 @@ fn cmd_update(check: bool) {
 }
 
 fn main() {
+    config::env_file::load();
     let cli = Cli::parse();
     match cli.command {
         Commands::Hook => hook::handle(),
@@ -3090,6 +3317,8 @@ fn main() {
             json,
             debug,
             debuglog,
+            jev,
+            jev_line_select,
             model,
             embed_provider,
             embed_model,
@@ -3098,6 +3327,8 @@ fn main() {
             json,
             debug,
             debuglog,
+            jev,
+            jev_line_select,
             model,
             embed_provider,
             embed_model,
@@ -3194,6 +3425,26 @@ fn main() {
             AbbreviationsAction::List => cmd_abbreviations_list(),
         },
         Commands::Completions { shell } => cmd_completions(shell),
+        #[cfg(feature = "rewrite")]
+        Commands::Rewrite {
+            mode,
+            to,
+            file,
+            model,
+            timeout_ms,
+            save_diff,
+            no_save_diff,
+            json,
+        } => cmd_rewrite(
+            mode,
+            to,
+            file,
+            model,
+            timeout_ms,
+            save_diff,
+            no_save_diff,
+            json,
+        ),
         Commands::McpServer { index_dir } => {
             let idx_dir = index_dir.unwrap_or_else(default_index_dir);
             let rt = tokio::runtime::Builder::new_current_thread()

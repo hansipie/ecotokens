@@ -1259,3 +1259,56 @@ fn hermes_uninstall_end_to_end_with_hermes_home() {
         "le dossier plugin doit être supprimé après uninstall"
     );
 }
+
+// ── Auto-watch: reinstall must restore Claude Code session hooks ────────────
+
+fn run_claude_install(home: &TempDir, auto_watch: bool) -> std::path::PathBuf {
+    let config_dir = home.path().join(".config").join("ecotokens");
+    std::fs::create_dir_all(&config_dir).unwrap();
+    std::fs::write(
+        config_dir.join("config.json"),
+        format!("{{\"auto_watch\": {auto_watch}}}"),
+    )
+    .unwrap();
+
+    // State left behind by `ecotokens uninstall`: empty session hook arrays.
+    let settings = temp_claude_settings(home);
+    std::fs::write(
+        &settings,
+        r#"{"hooks":{"SessionStart":[],"SessionEnd":[]}}"#,
+    )
+    .unwrap();
+
+    let out = Command::new(ecotokens_bin())
+        .args(["install", "--target", "claude"])
+        .env("HOME", home.path())
+        .env("XDG_CONFIG_HOME", home.path().join(".config"))
+        .output()
+        .expect("failed to run ecotokens install --target claude");
+    assert!(
+        out.status.success(),
+        "install failed: {}",
+        String::from_utf8_lossy(&out.stderr)
+    );
+    settings
+}
+
+#[test]
+fn claude_install_restores_session_hooks_when_auto_watch_enabled() {
+    let home = TempDir::new().unwrap();
+    let settings = run_claude_install(&home, true);
+    assert!(
+        are_session_hooks_installed(&settings),
+        "session hooks must be reinstalled when auto_watch is enabled"
+    );
+}
+
+#[test]
+fn claude_install_skips_session_hooks_when_auto_watch_disabled() {
+    let home = TempDir::new().unwrap();
+    let settings = run_claude_install(&home, false);
+    assert!(
+        !are_session_hooks_installed(&settings),
+        "session hooks must not be installed when auto_watch is disabled"
+    );
+}

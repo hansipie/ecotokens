@@ -1,3 +1,4 @@
+pub mod env_file;
 pub mod models;
 pub mod session_store;
 pub mod settings;
