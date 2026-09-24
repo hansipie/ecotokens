@@ -21,7 +21,7 @@ On one developer workstation, ecotokens recorded **19 928 hook executions** betw
 | Commands with savings | 5 735 / 19 928, or 28.8% |
 | Biggest command family | `grep`, with 55 383 168 tokens saved |
 
-[Claude Code](https://claude.ai/code), [Gemini CLI](https://github.com/google-gemini/gemini-cli), [Qwen Code](https://github.com/QwenLM/qwen-code), [Pi](https://pi.dev), [Hermes](https://hermes.dev), and Codex can all dump massive command outputs and native tool results into your context window. ecotokens sits in front of those outputs, removes the noise, preserves the important bits, and records the before/after savings locally.
+[Claude Code](https://claude.ai/code), Codex, [Hermes](https://hermes.dev), [Pi](https://pi.dev), [Gemini CLI](https://github.com/google-gemini/gemini-cli), and [Qwen Code](https://github.com/QwenLM/qwen-code) can all dump massive command outputs and native tool results into your context window. ecotokens sits in front of those outputs, removes the noise, preserves the important bits, and records the before/after savings locally.
 
 Built on a *"set it and forget it!"* philosophy: one install command, zero configuration, then automatic compression for shell commands, file reads, grep/search results, directory listings, and code-intelligence workflows.
 
@@ -38,7 +38,7 @@ Full methodology and per-family breakdown: [`docs/BENCHMARKS.md`](docs/BENCHMARK
 | **PreToolUse hook** | Intercepts every shell (`Bash`) command before its output reaches the model - filters, compresses, and records savings |
 | **PostToolUse hook** | Intercepts native tool results (`Read`/`read_file`, `Grep`/`search_file_content`, `Glob`/`list_directory`) - outline-based compression for source files, grep trimming, glob denoising |
 | **Gain dashboard** | Interactive TUI - token savings by command family or project, sparkline, diff view, history log |
-| **Multi-agent support** | Works with Claude Code, Gemini CLI, Qwen Code, Pi, Hermes, and Codex out of the box |
+| **Multi-agent support** | Works with Claude Code, Codex, Hermes, Pi, Gemini CLI, and Qwen Code out of the box |
 | **Precision guarantees** | Errors, failures, and stack traces are never removed; secrets are redacted before filtering |
 | **Code intelligence** | BM25 + vector search (Candle zero-config or Ollama), symbol lookup, call graph tracing, near-duplicate detection |
 | **MCP server** | Exposes code-intelligence tools over stdio (`ecotokens mcp-server`) and auto-registers in agent settings on install |
@@ -68,7 +68,7 @@ ecotokens installs hooks that intercept tool outputs before they reach the model
 3. Returns the compressed result to the model
 4. Records the savings under the `native_read`, `grep`, or `fs` family
 
-Claude Code uses the `PreToolUse` + `PostToolUse` hooks (`~/.claude/settings.json`). Gemini CLI uses the `BeforeTool` + `AfterTool` hooks (`~/.gemini/settings.json`). Qwen Code uses the `PreToolUse` + `PostToolUse` hooks (`~/.qwen/settings.json`). Pi uses a TypeScript extension (`~/.pi/agent/extensions/ecotokens.ts`) that intercepts `tool_call` (bash pre-exec) and `tool_result` (read/grep/find/ls post-exec) events in-process. Hermes uses a plugin that sends outputs through `filter-output` via `HermesTransformTerminalOutput` and `HermesTransformToolResult` hook types. Codex uses `PreToolUse` + `PostToolUse` hooks in `~/.codex/hooks.json` and registers the MCP server in `~/.codex/config.toml`.
+Claude Code uses the `PreToolUse` + `PostToolUse` hooks (`~/.claude/settings.json`). Codex uses `PreToolUse` + `PostToolUse` hooks in `~/.codex/hooks.json` and registers the MCP server in `~/.codex/config.toml`. Hermes uses a plugin that sends outputs through `filter-output` via `HermesTransformTerminalOutput` and `HermesTransformToolResult` hook types. Pi uses a TypeScript extension (`~/.pi/agent/extensions/ecotokens.ts`) that intercepts `tool_call` (bash pre-exec) and `tool_result` (read/grep/find/ls post-exec) events in-process. Gemini CLI uses the `BeforeTool` + `AfterTool` hooks (`~/.gemini/settings.json`). Qwen Code uses the `PreToolUse` + `PostToolUse` hooks (`~/.qwen/settings.json`).
 
 For a focused view of the runtime path, see [`docs/hook-filter-metrics-flow.md`](docs/hook-filter-metrics-flow.md).
 
@@ -141,42 +141,18 @@ In addition to hook installation, this also registers an MCP server entry in `~/
 }
 ```
 
-### Gemini CLI
-
-Requires [Gemini CLI](https://github.com/google-gemini/gemini-cli) ≥ 0.1.0.
+### Codex
 
 ```bash
 cargo install --path .
-ecotokens install --target gemini
+ecotokens install --target codex
 ```
 
-This writes `BeforeTool` and `AfterTool` hook entries into `~/.gemini/settings.json`. The `AfterTool` hook intercepts `read_file`, `search_file_content`, and `list_directory` results.
+This installs three things:
 
-It also registers the ecotokens MCP server in `~/.gemini/settings.json`.
-
-### Qwen Code
-
-Requires [Qwen Code](https://github.com/QwenLM/qwen-code).
-
-```bash
-cargo install --path .
-ecotokens install --target qwen
-```
-
-This writes `PreToolUse` and `PostToolUse` hook entries into `~/.qwen/settings.json`. The `PostToolUse` hook intercepts `read_file`, `search_files`, and `list_dir` results.
-
-It also registers the ecotokens MCP server in `~/.qwen/settings.json`.
-
-### Pi
-
-Requires [Pi](https://pi.dev) (`@mariozechner/pi-coding-agent` ≥ 0.62.0).
-
-```bash
-cargo install --path .
-ecotokens install --target pi
-```
-
-This writes a TypeScript extension to `~/.pi/agent/extensions/ecotokens.ts`. Pi auto-discovers it on next startup (or `/reload` inside an active session). The extension intercepts bash commands before execution and filters native tool results (`read`, `grep`, `find`, `ls`) after execution.
+- **Plugin** (`~/.codex/plugins/ecotokens/.codex-plugin/plugin.json`) — identifies ecotokens to Codex
+- **Hooks** (`~/.codex/hooks.json`) — `PreToolUse` (bash pre-exec filtering) and `PostToolUse` (bash post-exec filtering)
+- **MCP server** (`~/.codex/config.toml`) — registers `ecotokens mcp-server` under `[mcp_servers.ecotokens]`
 
 ### Hermes
 
@@ -226,18 +202,42 @@ ecotokens install --target hermes --enable-plugin
 
 The plugin is fail-open: any error, timeout, or empty output returns the original content unchanged.
 
-### Codex
+### Pi
+
+Requires [Pi](https://pi.dev) (`@mariozechner/pi-coding-agent` ≥ 0.62.0).
 
 ```bash
 cargo install --path .
-ecotokens install --target codex
+ecotokens install --target pi
 ```
 
-This installs three things:
+This writes a TypeScript extension to `~/.pi/agent/extensions/ecotokens.ts`. Pi auto-discovers it on next startup (or `/reload` inside an active session). The extension intercepts bash commands before execution and filters native tool results (`read`, `grep`, `find`, `ls`) after execution.
 
-- **Plugin** (`~/.codex/plugins/ecotokens/.codex-plugin/plugin.json`) — identifies ecotokens to Codex
-- **Hooks** (`~/.codex/hooks.json`) — `PreToolUse` (bash pre-exec filtering) and `PostToolUse` (bash post-exec filtering)
-- **MCP server** (`~/.codex/config.toml`) — registers `ecotokens mcp-server` under `[mcp_servers.ecotokens]`
+### Gemini CLI
+
+Requires [Gemini CLI](https://github.com/google-gemini/gemini-cli) ≥ 0.1.0.
+
+```bash
+cargo install --path .
+ecotokens install --target gemini
+```
+
+This writes `BeforeTool` and `AfterTool` hook entries into `~/.gemini/settings.json`. The `AfterTool` hook intercepts `read_file`, `search_file_content`, and `list_directory` results.
+
+It also registers the ecotokens MCP server in `~/.gemini/settings.json`.
+
+### Qwen Code
+
+Requires [Qwen Code](https://github.com/QwenLM/qwen-code).
+
+```bash
+cargo install --path .
+ecotokens install --target qwen
+```
+
+This writes `PreToolUse` and `PostToolUse` hook entries into `~/.qwen/settings.json`. The `PostToolUse` hook intercepts `read_file`, `search_files`, and `list_dir` results.
+
+It also registers the ecotokens MCP server in `~/.qwen/settings.json`.
 
 ### All targets at once
 
@@ -245,7 +245,7 @@ This installs three things:
 ecotokens install --target all
 ```
 
-`--target all` covers Claude Code, Gemini CLI, Qwen Code, Pi, Hermes, and Codex in a single command.
+`--target all` covers Claude Code, Codex, Hermes, Pi, Gemini CLI, and Qwen Code in a single command.
 
 ### With AI summarization
 
@@ -262,11 +262,11 @@ This writes `ai_summary_enabled` and `ai_summary_model` to `~/.config/ecotokens/
 
 ```bash
 ecotokens uninstall                    # Claude Code
+ecotokens uninstall --target codex     # Codex
+ecotokens uninstall --target hermes    # Hermes
+ecotokens uninstall --target pi        # Pi
 ecotokens uninstall --target gemini    # Gemini CLI
 ecotokens uninstall --target qwen      # Qwen Code
-ecotokens uninstall --target pi        # Pi
-ecotokens uninstall --target hermes    # Hermes
-ecotokens uninstall --target codex     # Codex
 ecotokens uninstall --target all       # all targets
 ```
 
@@ -291,9 +291,9 @@ Uninstall Claude Code
 | Command | Description |
 |---------|-------------|
 | `ecotokens install` | Install the PreToolUse + PostToolUse hooks and register the MCP server entry in `~/.claude/settings.json` |
+| `ecotokens install --target codex` | Install the Codex plugin, `PreToolUse`/`PostToolUse` hooks in `~/.codex/hooks.json`, and MCP server in `~/.codex/config.toml` |
 | `ecotokens install --target hermes` | Install the Hermes plugin in `~/.hermes/plugins/` |
 | `ecotokens install --target hermes --enable-plugin` | Install and add to `plugins.enabled` in `~/.hermes/config.yaml` directly |
-| `ecotokens install --target codex` | Install the Codex plugin, `PreToolUse`/`PostToolUse` hooks in `~/.codex/hooks.json`, and MCP server in `~/.codex/config.toml` |
 | `ecotokens uninstall` | Remove all hooks (PreToolUse, PostToolUse, SessionStart, SessionEnd where supported) and the MCP server entry |
 | `ecotokens filter -- CMD [ARGS]` | Run a command, filter its output, record metrics |
 | `ecotokens filter --cwd DIR -- CMD [ARGS]` | Same, with an explicit working directory |
@@ -323,7 +323,7 @@ Uninstall Claude Code
 | `ecotokens trace callees SYMBOL` | Find callees of a symbol |
 | `ecotokens watch [--path DIR]` | Watch a directory and keep the index up to date |
 | `ecotokens mcp-server [--index-dir DIR]` | Start the stdio MCP server exposing search/outline/symbol/trace/duplicates tools |
-| `ecotokens auto-watch enable` | Start watch automatically on each Claude Code, Qwen Code, Pi, Hermes or Codex session |
+| `ecotokens auto-watch enable` | Start watch automatically on each Claude Code, Codex, Hermes, Pi or Qwen Code session |
 | `ecotokens auto-watch disable` | Disable automatic watch |
 | `ecotokens abbreviations enable` | Replace common words with abbreviations in filtered outputs + inject a matching instruction at SessionStart |
 | `ecotokens abbreviations disable` | Turn abbreviations off (default) |
@@ -428,7 +428,7 @@ ecotokens watch --stop             # stop the background process
 
 > **Note:** Background logs are only written if global `debug` is enabled (`ecotokens config --debug true`).
 
-### Auto-watch *(Claude Code, Qwen Code, Pi, Hermes, Codex)*
+### Auto-watch *(Claude Code, Codex, Hermes, Pi, Qwen Code)*
 
 `ecotokens auto-watch` integrates with agent session lifecycles to start and stop the watcher automatically where both lifecycle events are available.
 
@@ -444,10 +444,10 @@ Support by agent:
 | Agent | Mechanism | Notes |
 |-------|-----------|-------|
 | Claude Code | `SessionStart` / `SessionEnd` shell hooks in `~/.claude/settings.json` | Installed by `auto-watch enable` |
-| Qwen Code | `SessionStart` / `SessionEnd` shell hooks in `~/.qwen/settings.json` | Installed automatically if Qwen hook is present |
-| Pi | `session_start` / `session_end` events in the TypeScript extension | Built into the Pi extension |
-| Hermes | `on_session_start` / `on_session_end` plugin hooks | Built into the Hermes plugin; install first with `ecotokens install --target hermes` |
 | Codex | — | Session hooks not yet supported; auto-watch not available for Codex |
+| Hermes | `on_session_start` / `on_session_end` plugin hooks | Built into the Hermes plugin; install first with `ecotokens install --target hermes` |
+| Pi | `session_start` / `session_end` events in the TypeScript extension | Built into the Pi extension |
+| Qwen Code | `SessionStart` / `SessionEnd` shell hooks in `~/.qwen/settings.json` | Installed automatically if Qwen hook is present |
 | Gemini CLI | — | Gemini does not expose session lifecycle hooks |
 
 ## Word abbreviations
@@ -481,7 +481,7 @@ Keep the feature flag in `~/.config/ecotokens/config.json`
 
 ## Bonus Tools
 
-### MCP server (Claude Code, Gemini CLI, Qwen Code, Codex)
+### MCP server (Claude Code, Codex, Gemini CLI, Qwen Code)
 
 `ecotokens mcp-server` starts a stdio MCP server backed by the ecotokens index and trace engines.
 
@@ -500,7 +500,7 @@ Exposed tools:
 - `ecotokens_duplicates` - detect near-duplicate code blocks
 - `ecotokens_rewrite` - paraphrase, retone, or translate a block of prose using a local model
 
-For Claude Code, Gemini CLI, Qwen Code, and Codex, `ecotokens install` registers this server automatically in each target's settings file (`mcpServers` in JSON settings, `[mcp_servers.ecotokens]` in Codex's `config.toml`).
+For Claude Code, Codex, Gemini CLI, and Qwen Code, `ecotokens install` registers this server automatically in each target's settings file (`mcpServers` in JSON settings, `[mcp_servers.ecotokens]` in Codex's `config.toml`).
 
 ### Search command
 
@@ -969,9 +969,10 @@ Filtering is aggressive on noise, conservative on signal:
 ## Requirements
 
 - Rust ≥ 1.75 (stable)
-- One or more of: Claude Code (with hook support), Gemini CLI ≥ 0.1.0, Qwen Code, Pi ≥ 0.62.0
+- One or more of: Claude Code (with hook support), Codex, Hermes, Pi ≥ 0.62.0, Gemini CLI ≥ 0.1.0, Qwen Code
 - Internet access on first use (Candle downloads `all-MiniLM-L6-v2` ~90 MB from HuggingFace Hub; cached locally after that)
 - Ollama (optional, for AI summarization and/or Ollama-backed embeddings)
+- A [TypeSafe](https://docs.typesafe.ai) API key in the `TYPESAFE_API_KEY` environment variable (optional, for [Jev judgments](#jev-judgments-optional-off-by-default) and the [model router](#model-router-optional-off-by-default)); without it, every Jev use falls back to the existing heuristic
 
 ## Contributing
 
