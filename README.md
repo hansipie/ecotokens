@@ -385,7 +385,7 @@ ecotokens gain --history --json                         # same, as JSON
 
 Cost avoided is computed from the input price you set with `ecotokens gain price --input <USD per 1M tokens> --output <USD per 1M tokens>`. Without a price it shows `n/a` (`null` in `--json`). Running `ecotokens gain price` with no flag shows the current values.
 
-Interactive TUI showing token savings per command family and per project, with a sparkline. The `--period` flag filters both the stats and the history panels.
+Interactive TUI showing token savings per command family and per project, with a sparkline. The `--period` flag filters both the stats and the history panels. All terminal views (gain, jev, game, outline, trace, watch) are described in [`docs/TUI.md`](docs/TUI.md).
 
 **Keybindings:**
 
