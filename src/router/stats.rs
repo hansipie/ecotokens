@@ -136,9 +136,7 @@ pub fn summarize(path: &Path, settings: &Settings) -> io::Result<Summary> {
         s.input_tokens += input.max(0) as u64;
         s.output_tokens += output.max(0) as u64;
     }
-    if s.jev_requests > 0 {
-        s.avg_latency_ms = latency_total / s.jev_requests;
-    }
+    s.avg_latency_ms = latency_total.checked_div(s.jev_requests).unwrap_or(0);
     s.cost_usd = cost_usd(s.input_tokens, s.output_tokens, settings);
     Ok(s)
 }
