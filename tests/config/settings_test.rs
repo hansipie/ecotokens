@@ -16,10 +16,12 @@ fn default_values_when_no_config_file() {
 
 #[test]
 fn valid_config_round_trips() {
-    let mut s = Settings::default();
-    s.exclusions = vec!["grep".to_string()];
-    s.debug = true;
-    s.summary_threshold_lines = 200;
+    let s = Settings {
+        exclusions: vec!["grep".to_string()],
+        debug: true,
+        summary_threshold_lines: 200,
+        ..Default::default()
+    };
 
     let json = serde_json::to_string(&s).unwrap();
     let s2: Settings = serde_json::from_str(&json).unwrap();
@@ -30,22 +32,28 @@ fn valid_config_round_trips() {
 
 #[test]
 fn rejects_threshold_lines_below_10() {
-    let mut s = Settings::default();
-    s.summary_threshold_lines = 5;
+    let s = Settings {
+        summary_threshold_lines: 5,
+        ..Default::default()
+    };
     assert!(s.validate().is_err());
 }
 
 #[test]
 fn rejects_threshold_lines_above_10000() {
-    let mut s = Settings::default();
-    s.summary_threshold_lines = 20000;
+    let s = Settings {
+        summary_threshold_lines: 20000,
+        ..Default::default()
+    };
     assert!(s.validate().is_err());
 }
 
 #[test]
 fn rejects_threshold_bytes_below_1024() {
-    let mut s = Settings::default();
-    s.summary_threshold_bytes = 512;
+    let s = Settings {
+        summary_threshold_bytes: 512,
+        ..Default::default()
+    };
     assert!(s.validate().is_err());
 }
 
@@ -68,9 +76,11 @@ fn deserialization_with_missing_fields_uses_defaults() {
 
 #[test]
 fn price_round_trips_through_json() {
-    let mut s = Settings::default();
-    s.price_input_usd_per_mtok = Some(3.0);
-    s.price_output_usd_per_mtok = Some(15.0);
+    let s = Settings {
+        price_input_usd_per_mtok: Some(3.0),
+        price_output_usd_per_mtok: Some(15.0),
+        ..Default::default()
+    };
     let json = serde_json::to_string(&s).unwrap();
     let s2: Settings = serde_json::from_str(&json).unwrap();
     assert_eq!(s2.price_input_usd_per_mtok, Some(3.0));
@@ -120,8 +130,10 @@ fn embed_provider_candle_by_default() {
 
 #[test]
 fn embed_provider_none_roundtrip() {
-    let mut s = Settings::default();
-    s.embed_provider = EmbedProvider::None;
+    let s = Settings {
+        embed_provider: EmbedProvider::None,
+        ..Default::default()
+    };
     let json = serde_json::to_string(&s).unwrap();
     let s2: Settings = serde_json::from_str(&json).unwrap();
     assert_eq!(s2.embed_provider, EmbedProvider::None);
@@ -142,10 +154,12 @@ fn embed_provider_ollama_deserializes_to_ollama() {
 
 #[test]
 fn embed_provider_ollama_roundtrip() {
-    let mut s = Settings::default();
-    s.embed_provider = EmbedProvider::Ollama {
-        url: "http://localhost:11434".to_string(),
-        model: "qwen3-embedding:latest".to_string(),
+    let s = Settings {
+        embed_provider: EmbedProvider::Ollama {
+            url: "http://localhost:11434".to_string(),
+            model: "qwen3-embedding:latest".to_string(),
+        },
+        ..Default::default()
     };
     let json = serde_json::to_string(&s).unwrap();
     let s2: Settings = serde_json::from_str(&json).unwrap();

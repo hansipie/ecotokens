@@ -149,7 +149,7 @@ fn uninstall_removes_mcp_entry_from_claude_json() {
     assert!(
         !cv["mcpServers"]
             .as_object()
-            .map_or(false, |m| m.contains_key("ecotokens")),
+            .is_some_and(|m| m.contains_key("ecotokens")),
         "mcpServers.ecotokens should be removed from ~/.claude.json after uninstall"
     );
 }
@@ -184,7 +184,7 @@ fn uninstall_preserves_other_mcp_entries() {
     assert!(
         !cv["mcpServers"]
             .as_object()
-            .map_or(false, |m| m.contains_key("ecotokens")),
+            .is_some_and(|m| m.contains_key("ecotokens")),
         "ecotokens MCP entry should be gone"
     );
 }

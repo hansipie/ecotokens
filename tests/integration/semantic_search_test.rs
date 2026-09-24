@@ -1,5 +1,4 @@
 use ecotokens::search::query::SearchResult;
-use serde_json;
 
 #[cfg(test)]
 mod tests {
@@ -134,7 +133,7 @@ pub fn propagate(x: i32) -> Result<i32, String> {
                 match listener.accept() {
                     Ok((mut stream, _)) => {
                         let mut buf = [0u8; 4096];
-                        stream.read(&mut buf).expect("read embedding request");
+                        let _n = stream.read(&mut buf).expect("read embedding request");
                         server_requests.fetch_add(1, Ordering::SeqCst);
                         let body = r#"{"embedding":[0.1,0.2,0.3,0.4]}"#;
                         write!(
