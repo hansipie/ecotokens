@@ -17,6 +17,7 @@ pub mod markdown;
 pub mod network;
 pub mod python;
 
+#[cfg_attr(test, allow(unused_imports))]
 pub use cwd::project_root_for_cwd;
 
 use crate::metrics::store::CommandFamily;

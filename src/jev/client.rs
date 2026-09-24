@@ -78,6 +78,10 @@ impl Judge for HttpJudge {
             .map(|(a, _)| a)
     }
 
+    fn records_stats(&self) -> bool {
+        true
+    }
+
     fn ask_with_usage(
         &self,
         state: Value,

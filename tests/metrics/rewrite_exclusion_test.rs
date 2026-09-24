@@ -54,7 +54,7 @@ fn base_items() -> Vec<Interception> {
 #[test]
 fn rewrite_rows_do_not_alter_the_report() {
     let before_items = base_items();
-    let before = aggregate(&before_items, Period::All, "claude-sonnet-5");
+    let before = aggregate(&before_items, Period::All);
     // Compare via parsed JSON values (order-independent), not raw strings —
     // HashMap key order is not stable across the two aggregate() calls.
     let before_json: serde_json::Value =
@@ -69,7 +69,7 @@ fn rewrite_rows_do_not_alter_the_report() {
     // the main sums too, but must surface via rewrite_overhead_tokens.
     after_items.push(rewrite_row(300, 500, HookType::PostToolUse));
 
-    let after = aggregate(&after_items, Period::All, "claude-sonnet-5");
+    let after = aggregate(&after_items, Period::All);
     let mut after_for_compare = after.clone();
     after_for_compare.rewrite_overhead_tokens = 0;
     let after_json: serde_json::Value =
@@ -88,10 +88,10 @@ fn rewrite_rows_do_not_alter_the_report() {
 #[test]
 fn rewrite_rows_are_excluded_from_total_interceptions() {
     let mut items = base_items();
-    let before_count = aggregate(&items, Period::All, "claude-sonnet-5").total_interceptions;
+    let before_count = aggregate(&items, Period::All).total_interceptions;
     items.push(rewrite_row(100, 50, HookType::Cli));
     items.push(rewrite_row(100, 200, HookType::PostToolUse));
-    let after_count = aggregate(&items, Period::All, "claude-sonnet-5").total_interceptions;
+    let after_count = aggregate(&items, Period::All).total_interceptions;
     assert_eq!(before_count, after_count);
 }
 
@@ -100,7 +100,7 @@ fn rewrite_rows_are_excluded_from_by_family_and_by_agent() {
     let mut items = base_items();
     items.push(rewrite_row(100, 300, HookType::Cli));
     items.push(rewrite_row(100, 300, HookType::PostToolUse));
-    let report = aggregate(&items, Period::All, "claude-sonnet-5");
+    let report = aggregate(&items, Period::All);
     assert!(!report.by_family.contains_key("generic"));
     assert!(!report.by_agent.values().any(|_| false)); // sanity: no panic
     let total_by_family_tokens: u64 = report.by_family.values().map(|s| s.tokens_before).sum();

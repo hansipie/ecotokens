@@ -10,6 +10,7 @@
 #![cfg_attr(not(feature = "jev"), allow(dead_code))]
 
 pub mod client;
+pub mod stats;
 
 use std::collections::{BTreeMap, HashMap, VecDeque};
 use std::sync::atomic::{AtomicUsize, Ordering};
@@ -237,6 +238,12 @@ pub trait Judge: Send + Sync {
     ) -> Result<(Answers, Option<Usage>), JevError> {
         self.ask(state, questions, timeout).map(|a| (a, None))
     }
+
+    /// Whether calls through this judge are logged to the Jev stats table.
+    /// Only the production judge is; test doubles stay off the user's disk.
+    fn records_stats(&self) -> bool {
+        false
+    }
 }
 
 /// A judge together with the settings holding its decision thresholds.
@@ -257,46 +264,66 @@ impl<'a> JevContext<'a> {
         remaining.map_or(own, |r| own.min(r))
     }
 
+    #[allow(dead_code)]
     pub fn ask(
         &self,
         state: Value,
         questions: Questions,
         timeout: Duration,
     ) -> Result<Answers, JevError> {
+        self.ask_for(stats::Purpose::Other, state, questions, timeout)
+    }
+
+    /// [`JevContext::ask`], tagged with why it is asked, so the call shows up
+    /// under that purpose in the Jev stats.
+    pub fn ask_for(
+        &self,
+        purpose: stats::Purpose,
+        state: Value,
+        questions: Questions,
+        timeout: Duration,
+    ) -> Result<Answers, JevError> {
         let logging = self.settings.debug || self.settings.debuglog;
-        if !logging {
-            return self.judge.ask(state, questions, timeout);
-        }
-        let logger = crate::debuglog::DebugLogger::new(true);
+        let logger = crate::debuglog::DebugLogger::new(logging);
         let uid = crate::debuglog::gen_uid();
-        logger.log(
-            &uid,
-            "jev",
-            "request",
-            &serde_json::json!({
-                "state": state,
-                "questions": questions,
-                "timeout_ms": timeout.as_millis() as u64,
-            }),
-        );
+        if logging {
+            logger.log(
+                &uid,
+                "jev",
+                "request",
+                &serde_json::json!({
+                    "purpose": purpose.as_str(),
+                    "state": state,
+                    "questions": questions,
+                    "timeout_ms": timeout.as_millis() as u64,
+                }),
+            );
+        }
         let start = std::time::Instant::now();
-        let result = self.judge.ask(state, questions, timeout);
+        let result = self.judge.ask_with_usage(state, questions, timeout);
         let elapsed_ms = start.elapsed().as_millis() as u64;
-        let data = match &result {
-            Ok(answers) => serde_json::json!({
-                "ok": true,
-                "elapsed_ms": elapsed_ms,
-                "answers": answers.to_log_value(),
-            }),
-            Err(e) => serde_json::json!({
-                "ok": false,
-                "elapsed_ms": elapsed_ms,
-                "error": e.to_string(),
-                "trips_breaker": e.trips_breaker(),
-            }),
-        };
-        logger.log(&uid, "jev", "response", &data);
-        result
+        if self.judge.records_stats() {
+            let usage = result.as_ref().ok().and_then(|(_, u)| *u);
+            let call = stats::CallRecord::from_result(purpose, &result, elapsed_ms, usage);
+            stats::record_default(&call);
+        }
+        if logging {
+            let data = match &result {
+                Ok((answers, _)) => serde_json::json!({
+                    "ok": true,
+                    "elapsed_ms": elapsed_ms,
+                    "answers": answers.to_log_value(),
+                }),
+                Err(e) => serde_json::json!({
+                    "ok": false,
+                    "elapsed_ms": elapsed_ms,
+                    "error": e.to_string(),
+                    "trips_breaker": e.trips_breaker(),
+                }),
+            };
+            logger.log(&uid, "jev", "response", &data);
+        }
+        result.map(|(answers, _)| answers)
     }
 }
 

@@ -131,6 +131,23 @@ pub fn handle_prompt() {
     let (routing, output) = process(&input.prompt, &settings, judge.as_deref(), &marker);
     if let (Some(routing), Some(path)) = (routing, super::stats::router_db_path()) {
         let _ = super::stats::record(&path, &routing);
+        if !matches!(routing.decision, Decision::Skipped | Decision::JevDown) {
+            let ok = routing.error.is_none() && !routing.service_failure;
+            let _ = crate::jev::stats::record(
+                &path,
+                &crate::jev::stats::CallRecord {
+                    purpose: crate::jev::stats::Purpose::Router,
+                    ok,
+                    error_kind: (!ok).then_some("error"),
+                    http_status: None,
+                    latency_ms: routing.latency_ms,
+                    usage: routing.usage,
+                    agent: (routing.decision == Decision::Delegated)
+                        .then(|| routing.size.map(|s| s.agent_name().to_string()))
+                        .flatten(),
+                },
+            );
+        }
     }
     if let Some(output) = output {
         print!("{output}");

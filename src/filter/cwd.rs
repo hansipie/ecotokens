@@ -6,14 +6,17 @@ use std::time::{Duration, Instant};
 /// Short TTL for the per-directory project-root cache — long enough to spare a
 /// long-running process (daemon/watch) repeated `git` spawns, short enough that
 /// a repo appearing/moving is picked up quickly.
+#[cfg_attr(test, allow(dead_code))]
 const CACHE_TTL: Duration = Duration::from_secs(5);
 
 #[allow(clippy::type_complexity)]
+#[cfg_attr(test, allow(dead_code))]
 fn cache() -> &'static Mutex<HashMap<PathBuf, (Option<String>, Instant)>> {
     static CACHE: OnceLock<Mutex<HashMap<PathBuf, (Option<String>, Instant)>>> = OnceLock::new();
     CACHE.get_or_init(|| Mutex::new(HashMap::new()))
 }
 
+#[cfg_attr(test, allow(dead_code))]
 pub fn project_root_for_cwd(dir: &Path) -> Option<String> {
     if let Ok(guard) = cache().lock() {
         if let Some((val, at)) = guard.get(dir) {
@@ -31,6 +34,7 @@ pub fn project_root_for_cwd(dir: &Path) -> Option<String> {
     result
 }
 
+#[cfg_attr(test, allow(dead_code))]
 fn compute_project_root(dir: &Path) -> Option<String> {
     let git_root = std::process::Command::new("git")
         .args(["rev-parse", "--show-toplevel"])
@@ -53,6 +57,7 @@ fn compute_project_root(dir: &Path) -> Option<String> {
     }
 }
 
+#[cfg_attr(test, allow(dead_code))]
 fn is_temporary_path(path: &std::path::Path) -> bool {
     let temp_dir = std::env::temp_dir();
     if path.starts_with(&temp_dir) {

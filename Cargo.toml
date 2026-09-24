@@ -448,3 +448,15 @@ path = "tests/router/stats_test.rs"
 [[test]]
 name = "router_install_test"
 path = "tests/router/install_prompt_test.rs"
+
+[[test]]
+name = "jev_stats_test"
+path = "tests/jev/stats_test.rs"
+
+[[test]]
+name = "jev_context_stats_test"
+path = "tests/jev/context_stats_test.rs"
+
+[[test]]
+name = "jev_tui_test"
+path = "tests/tui/jev_test.rs"

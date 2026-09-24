@@ -39,26 +39,46 @@ fn setup_similarity_fixture() -> (TempDir, TempDir) {
 
 #[test]
 fn test_threshold_filters_low_similarity() {
-    let (_src, idx) = setup_similarity_fixture();
+    let (src, idx) = setup_similarity_fixture();
 
-    let output = Command::new(ecotokens_bin())
-        .args([
-            "duplicates",
-            "--threshold",
-            "75",
-            "--index-dir",
-            &idx.path().to_string_lossy(),
-        ])
-        .env("ECOTOKENS_BATCH", "1")
-        .output()
-        .expect("ecotokens duplicates should run");
+    let groups_at = |threshold: &str| -> Vec<serde_json::Value> {
+        let output = Command::new(ecotokens_bin())
+            .args([
+                "duplicates",
+                "--threshold",
+                threshold,
+                "--json",
+                "--index-dir",
+                &idx.path().to_string_lossy(),
+            ])
+            .current_dir(src.path())
+            .env("ECOTOKENS_BATCH", "1")
+            .output()
+            .expect("ecotokens duplicates should run");
+        assert!(
+            output.status.success(),
+            "{}",
+            String::from_utf8_lossy(&output.stderr)
+        );
+        let parsed: serde_json::Value =
+            serde_json::from_slice(&output.stdout).expect("valid duplicates JSON");
+        parsed["groups"].as_array().expect("groups array").clone()
+    };
 
-    let stdout = String::from_utf8_lossy(&output.stdout);
-    // The 100% similar group should appear
-    assert!(
-        stdout.contains("100") || stdout.contains("group") || stdout.contains("duplicate"),
-        "should show 100% similar group: {stdout}"
-    );
+    let low = groups_at("0");
+    let high = groups_at("75");
+    assert_eq!(low.len(), 1, "at threshold 0 all four files should group");
+    assert_eq!(low[0]["segments"].as_array().unwrap().len(), 4);
+    assert_eq!(high.len(), 1, "only the exact pair should remain");
+    let mut files: Vec<&str> = high[0]["segments"]
+        .as_array()
+        .unwrap()
+        .iter()
+        .map(|segment| segment["file_path"].as_str().unwrap())
+        .collect();
+    files.sort_unstable();
+    assert_eq!(files, ["a.rs", "b.rs"]);
+    assert_eq!(high[0]["similarity"]["value"], 100.0);
 }
 
 #[test]

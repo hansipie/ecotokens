@@ -3,6 +3,7 @@ use regex::Regex;
 use serde_json::json;
 
 use super::modes::Mode;
+use crate::jev::stats::Purpose;
 use crate::jev::{JevContext, Question, Questions};
 
 /// A span extracted before prompting and restored afterward, so the model
@@ -336,7 +337,9 @@ pub fn judge_response(
         "first_line": first,
         "last_line": last,
     });
-    let answers = ctx.ask(state, questions, timeout).ok()?;
+    let answers = ctx
+        .ask_for(Purpose::Verify, state, questions, timeout)
+        .ok()?;
     let s = ctx.settings;
 
     let faithful = answers.noul(FAITHFUL_Q)?;

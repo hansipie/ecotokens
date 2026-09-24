@@ -228,3 +228,65 @@ fn test_config_jev_toggle() {
     assert_eq!(v["jev_enabled"], false);
     assert_eq!(v["jev_line_select_enabled"], true);
 }
+
+fn run_gain_price(config_home: &std::path::Path, args: &[&str]) -> std::process::Output {
+    Command::new(ecotokens())
+        .args(["gain", "price"])
+        .args(args)
+        .env("XDG_CONFIG_HOME", config_home)
+        .output()
+        .expect("failed to run ecotokens gain price")
+}
+
+#[test]
+fn test_gain_price_sets_input_and_output() {
+    let tmp = tempdir().expect("failed to create temp dir");
+
+    let out = run_gain_price(tmp.path(), &["--input", "3", "--output", "15"]);
+    assert!(out.status.success());
+    let stdout = String::from_utf8_lossy(&out.stdout);
+    assert!(stdout.contains("input $3"), "{stdout}");
+    assert!(stdout.contains("output $15"), "{stdout}");
+
+    // A partial update keeps the other side.
+    let out = run_gain_price(tmp.path(), &["--input", "2.5"]);
+    assert!(out.status.success());
+    let stdout = String::from_utf8_lossy(&out.stdout);
+    assert!(stdout.contains("input $2.5"), "{stdout}");
+    assert!(stdout.contains("output $15"), "{stdout}");
+
+    // No flag: display only.
+    let out = run_gain_price(tmp.path(), &[]);
+    assert!(String::from_utf8_lossy(&out.stdout).contains("input $2.5"));
+
+    let out = Command::new(ecotokens())
+        .args(["config", "--json"])
+        .env("XDG_CONFIG_HOME", tmp.path())
+        .output()
+        .unwrap();
+    let v: Value = serde_json::from_slice(&out.stdout).unwrap();
+    assert_eq!(v["price_input_usd_per_mtok"], 2.5);
+    assert_eq!(v["price_output_usd_per_mtok"], 15.0);
+}
+
+#[test]
+fn test_gain_price_rejects_negative() {
+    let tmp = tempdir().expect("failed to create temp dir");
+    let out = run_gain_price(tmp.path(), &["--input=-1"]);
+    assert!(!out.status.success());
+    assert!(String::from_utf8_lossy(&out.stderr).contains("non-negative"));
+}
+
+#[test]
+fn test_gain_json_cost_is_null_without_price() {
+    let tmp = tempdir().expect("failed to create temp dir");
+    let out = Command::new(ecotokens())
+        .args(["gain", "--json"])
+        .env("XDG_CONFIG_HOME", tmp.path())
+        .env("XDG_DATA_HOME", tmp.path())
+        .env("HOME", tmp.path())
+        .output()
+        .unwrap();
+    let v: Value = serde_json::from_slice(&out.stdout).expect("gain --json output");
+    assert!(v["cost_avoided_usd"].is_null());
+}

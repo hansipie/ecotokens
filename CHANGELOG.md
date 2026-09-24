@@ -9,11 +9,25 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ### Added
 
+- **Shell completion post-install / post-uninstall steps**: `ecotokens install` now installs or refreshes the completion script for the shell in `$SHELL` (bash: `$XDG_DATA_HOME/bash-completion/completions/ecotokens`, zsh: `$XDG_DATA_HOME/zsh/site-functions/_ecotokens`, fish: `$XDG_CONFIG_HOME/fish/completions/ecotokens.fish`); `ecotokens uninstall` removes ecotokens completion scripts for all three shells. Idempotent, leaves non-ecotokens files untouched, and failures only warn.
 - **Model router (optional, off by default)**: `ecotokens router on|off|status|try|price`. A new `UserPromptSubmit` hook (`ecotokens hook-prompt`) asks Jev to size each Claude Code message (tiny / everyday / large / hardest) and whether it is a follow-up that only makes sense in the conversation, in one request. When the size confidence is at least `router_min_confidence` (0.6), the main session is told to hand the job to one of four helper agents written to `~/.claude/agents/` (`router-tiny` → haiku, `router-everyday` → sonnet, `router-large` → opus, `router-hardest` → fable). Each helper ends its reply with a line naming its model.
   - Fail-open: when the router is off, has no key, gets a slash or `!` command, hits an error, or is past its `router_timeout_ms` (default 800 ms), the hook prints nothing. Timeouts and transport failures write an on-disk marker that pauses Jev calls for 5 minutes. Claude Code's hook `timeout` follows the setting.
   - `router status` shows messages per size and per decision, Jev requests, input/output tokens, average latency, and a cost estimate once `jev_usd_per_mtok_input/output` are set with `router price`. Decisions are logged in `~/.config/ecotokens/router.db`, and message text is never stored.
   - Only agent files carrying the ecotokens marker are written or removed. `ecotokens uninstall` also removes the hook and the helpers. `ecotokens doctor` gains a **Router** line.
   - The Jev client now reads `usage.input_tokens/output_tokens` (`Judge::ask_with_usage`, `client::parse_usage`).
+- **`ecotokens jev` — detailed Jev usage view**: a TUI (also `--json`, and plain text when not a terminal; `--period all|today|week|month`) showing calls, success and heuristic-fallback rates, average and p95 latency, tokens, cost estimate, calls by purpose (`filter_lines`, `classify`, `code_gate`, `verify`, `router`), failures by kind/HTTP status, a calls-over-time sparkline and the recent call log. Press `v` in `ecotokens gain` to open it.
+  - Every request to the Jev service (filter, rewrite, router) is now logged as one row in the `jev_calls` table of `~/.config/ecotokens/router.db` (purpose, outcome, latency, tokens; never the content). `ECOTOKENS_JEV_DB` overrides the file. Test doubles do not write to it.
+
+### Changed
+
+- **BREAKING: cost calculation no longer uses a model price list.** The built-in model catalog, `ecotokens config --model`, `ecotokens gain --model`, the `default_model` setting and `~/.config/ecotokens/pricing.json` are removed (old keys in `config.json` are ignored). Enter the price yourself with `ecotokens gain price --input X --output Y` (USD per million tokens). Without a price, `gain` shows cost avoided as `n/a` and `gain --json` reports `cost_avoided_usd: null`. `model_ref` is dropped from `gain --json`.
+- `ecotokens router price` (and `gain price`) now reject negative, NaN and infinite values.
+- **Shell completion**: `ecotokens rewrite --mode` now completes `paraphrase`, `tone`, `reading-level` and `translate` and lists them in `--help`. The values are only advertised, not enforced by clap, so an unknown mode still exits with code 1 (not clap's 2) as the CLI contract requires.
+- **`--json` help text**: every `--json` flag now has a description (`Output as JSON`) in `--help` and in generated completion scripts.
+
+### Documentation
+
+- Added `docs/test-audit.md` and `docs/test-audit.csv`: a per-function inventory of the test suite (execution status, assessment, first assertion).
 
 ## [0.27.0] - 2026-09-23
 

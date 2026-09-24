@@ -173,6 +173,10 @@ fn yes_no(b: bool) -> &'static str {
 }
 
 pub fn price(input: Option<f64>, output: Option<f64>) -> std::io::Result<()> {
+    for (flag, value) in [("--input", input), ("--output", output)] {
+        crate::config::validate_price(flag, value)
+            .map_err(|e| std::io::Error::new(std::io::ErrorKind::InvalidInput, e))?;
+    }
     let mut settings = Settings::load();
     if input.is_some() {
         settings.jev_usd_per_mtok_input = input;
@@ -183,14 +187,10 @@ pub fn price(input: Option<f64>, output: Option<f64>) -> std::io::Result<()> {
     settings.save()?;
     println!(
         "Jev price: input {} · output {} (USD per million tokens)",
-        fmt_price(settings.jev_usd_per_mtok_input),
-        fmt_price(settings.jev_usd_per_mtok_output)
+        crate::config::fmt_price(settings.jev_usd_per_mtok_input),
+        crate::config::fmt_price(settings.jev_usd_per_mtok_output)
     );
     Ok(())
-}
-
-fn fmt_price(p: Option<f64>) -> String {
-    p.map_or_else(|| "unset".into(), |v| format!("${v}"))
 }
 
 /// Sizes messages live, without recording and whether or not the router is

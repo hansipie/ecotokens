@@ -6,6 +6,7 @@ use serde_json::json;
 
 use super::modes::LANGUAGES;
 use crate::config::Settings;
+use crate::jev::stats::Purpose;
 use crate::jev::{ChoiceAnswer, JevContext, Question, Questions};
 
 /// Conservative heuristic: does `text` look predominantly like source code
@@ -297,6 +298,7 @@ pub fn detect_source_language(text: &str) -> Option<&'static str> {
 /// *not* `Prose` when uncertain: a missed transformation is invisible, a
 /// corrupted code block or trace is not.
 #[derive(Debug, Clone, Copy, PartialEq, Eq)]
+#[cfg_attr(test, allow(dead_code))]
 pub enum ContentKind {
     Prose,
     Code,
@@ -304,6 +306,7 @@ pub enum ContentKind {
     Diagnostic,
 }
 
+#[cfg_attr(test, allow(dead_code))]
 fn is_diagnostic(text: &str) -> bool {
     if text.contains("Traceback (most recent call last)") {
         return true;
@@ -318,6 +321,7 @@ fn is_diagnostic(text: &str) -> bool {
     stack_frame_re.is_match(text)
 }
 
+#[cfg_attr(test, allow(dead_code))]
 fn is_structured_data(text: &str) -> bool {
     let trimmed = text.trim();
     if (trimmed.starts_with('{') || trimmed.starts_with('['))
@@ -352,6 +356,7 @@ fn is_structured_data(text: &str) -> bool {
 /// and `Prose`, so it is intentionally cheap to fail: short fragments,
 /// symbol-heavy text, and anything without ordinary sentence punctuation are
 /// rejected rather than guessed at.
+#[cfg_attr(test, allow(dead_code))]
 fn looks_like_prose(text: &str) -> bool {
     let words: Vec<&str> = text.split_whitespace().collect();
     if words.len() < 5 {
@@ -373,6 +378,7 @@ fn looks_like_prose(text: &str) -> bool {
 /// narrowest, highest-confidence non-prose signals are checked first, and
 /// anything that doesn't clear the permissive prose sanity check falls back
 /// to `Structured` — a safe non-prose bucket — rather than `Prose`.
+#[cfg_attr(test, allow(dead_code))]
 pub fn classify(text: &str) -> ContentKind {
     let trimmed = text.trim();
     if trimmed.is_empty() {
@@ -401,6 +407,7 @@ const LANGUAGE_Q: &str = "language";
 const LANGUAGE_UNCLEAR: &str = "mixed_or_unclear";
 
 /// Exact, certain signals that need no judgment: checked before any Jev call.
+#[cfg_attr(test, allow(dead_code))]
 fn deterministic_kind(trimmed: &str) -> Option<ContentKind> {
     if trimmed.is_empty() {
         return Some(ContentKind::Structured);
@@ -475,6 +482,7 @@ fn capitalize(s: &str) -> String {
         .unwrap_or_default()
 }
 
+#[cfg_attr(test, allow(dead_code))]
 fn kind_from_answer(answer: &ChoiceAnswer, s: &Settings) -> ContentKind {
     match answer.choice.as_str() {
         "prose" if answer.prob("prose") >= s.jev_prose_min_prob => ContentKind::Prose,
@@ -499,6 +507,7 @@ fn language_from_answer(answer: &ChoiceAnswer, s: &Settings) -> Option<&'static 
 /// no judge, a failed call, or a missing answer falls back to [`classify`].
 /// `Prose` requires `jev_prose_min_prob`, keeping the "not prose when
 /// uncertain" bias explicit.
+#[cfg_attr(test, allow(dead_code))]
 pub fn classify_with(text: &str, jev: Option<JevContext<'_>>) -> ContentKind {
     let trimmed = text.trim();
     if let Some(kind) = deterministic_kind(trimmed) {
@@ -508,7 +517,12 @@ pub fn classify_with(text: &str, jev: Option<JevContext<'_>>) -> ContentKind {
         return classify(text);
     };
     let questions: Questions = [(KIND_Q.to_string(), kind_question())].into();
-    match ctx.ask(json!({ "text": trimmed }), questions, ctx.timeout(None)) {
+    match ctx.ask_for(
+        Purpose::Classify,
+        json!({ "text": trimmed }),
+        questions,
+        ctx.timeout(None),
+    ) {
         Ok(answers) => answers
             .choice(KIND_Q)
             .map(|a| kind_from_answer(a, ctx.settings))
@@ -557,7 +571,8 @@ pub fn rewrite_gate(
         questions.insert(LANGUAGE_Q.to_string(), language_question());
     }
     let answers = ctx
-        .ask(
+        .ask_for(
+            Purpose::CodeGate,
             json!({ "text": text.trim() }),
             questions,
             ctx.timeout(remaining),

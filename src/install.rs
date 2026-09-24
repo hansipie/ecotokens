@@ -974,3 +974,111 @@ pub fn uninstall_pi(extension_path: &Path) -> InstallResult {
     }
     Ok(())
 }
+
+// ---------------------------------------------------------------------------
+// Shell completion script (post-install / post-uninstall step)
+// ---------------------------------------------------------------------------
+
+/// Shells for which ecotokens can install a user-level completion script.
+#[derive(Debug, Clone, Copy, PartialEq, Eq)]
+pub enum CompletionShell {
+    Bash,
+    Zsh,
+    Fish,
+}
+
+impl CompletionShell {
+    pub const ALL: [CompletionShell; 3] = [Self::Bash, Self::Zsh, Self::Fish];
+
+    /// Detect the shell from a `$SHELL`-style value (e.g. `/usr/bin/zsh`).
+    pub fn detect(shell_env: Option<&str>) -> Option<Self> {
+        let name = Path::new(shell_env?).file_name()?.to_str()?;
+        match name {
+            "bash" => Some(Self::Bash),
+            "zsh" => Some(Self::Zsh),
+            "fish" => Some(Self::Fish),
+            _ => None,
+        }
+    }
+
+    pub fn name(self) -> &'static str {
+        match self {
+            Self::Bash => "bash",
+            Self::Zsh => "zsh",
+            Self::Fish => "fish",
+        }
+    }
+}
+
+/// Outcome of writing a completion script.
+#[derive(Debug, Clone, Copy, PartialEq, Eq)]
+pub enum CompletionStatus {
+    Created,
+    Updated,
+    Unchanged,
+}
+
+/// User-level completion file location for `shell`, given the XDG base dirs.
+pub fn completion_path_for(
+    shell: CompletionShell,
+    data_home: &Path,
+    config_home: &Path,
+) -> std::path::PathBuf {
+    match shell {
+        CompletionShell::Bash => data_home
+            .join("bash-completion")
+            .join("completions")
+            .join("ecotokens"),
+        CompletionShell::Zsh => data_home
+            .join("zsh")
+            .join("site-functions")
+            .join("_ecotokens"),
+        CompletionShell::Fish => config_home
+            .join("fish")
+            .join("completions")
+            .join("ecotokens.fish"),
+    }
+}
+
+/// Completion file location honouring `XDG_DATA_HOME` / `XDG_CONFIG_HOME`.
+pub fn default_completion_path(shell: CompletionShell) -> Option<std::path::PathBuf> {
+    let xdg = |var: &str| {
+        std::env::var_os(var)
+            .map(std::path::PathBuf::from)
+            .filter(|p| p.is_absolute())
+    };
+    let home = dirs::home_dir();
+    let data = xdg("XDG_DATA_HOME").or_else(|| home.as_ref().map(|h| h.join(".local/share")))?;
+    let config = xdg("XDG_CONFIG_HOME").or_else(|| home.as_ref().map(|h| h.join(".config")))?;
+    Some(completion_path_for(shell, &data, &config))
+}
+
+/// Write (or refresh) the completion script at `path`. Idempotent.
+pub fn install_completion_script(path: &Path, script: &str) -> std::io::Result<CompletionStatus> {
+    let status = match std::fs::read_to_string(path) {
+        Ok(existing) if existing == script => return Ok(CompletionStatus::Unchanged),
+        Ok(_) => CompletionStatus::Updated,
+        Err(e) if e.kind() == std::io::ErrorKind::NotFound => CompletionStatus::Created,
+        // Unreadable / non-UTF8 file: refuse to overwrite something we cannot verify.
+        Err(e) => return Err(e),
+    };
+    if let Some(parent) = path.parent() {
+        std::fs::create_dir_all(parent)?;
+    }
+    std::fs::write(path, script)?;
+    Ok(status)
+}
+
+/// Remove the completion script at `path` if it exists and is an ecotokens
+/// script. Returns whether a file was removed.
+pub fn uninstall_completion_script(path: &Path) -> std::io::Result<bool> {
+    match std::fs::read_to_string(path) {
+        Ok(content) if content.contains("ecotokens") => {
+            std::fs::remove_file(path)?;
+            Ok(true)
+        }
+        Ok(_) => Ok(false),
+        Err(e) if e.kind() == std::io::ErrorKind::NotFound => Ok(false),
+        Err(e) => Err(e),
+    }
+}

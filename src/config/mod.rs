@@ -1,10 +1,24 @@
 pub mod env_file;
-pub mod models;
 pub mod session_store;
 pub mod settings;
 
 pub use session_store::SessionStore;
 pub use settings::Settings;
+
+/// Rejects a price (USD per million tokens) that is negative, NaN or infinite.
+pub fn validate_price(flag: &str, value: Option<f64>) -> Result<(), String> {
+    match value {
+        Some(v) if !v.is_finite() || v < 0.0 => Err(format!(
+            "{flag} must be a finite, non-negative number of USD per million tokens (got {v})"
+        )),
+        _ => Ok(()),
+    }
+}
+
+/// Formats an optional price as `$<v>` or `unset`.
+pub fn fmt_price(price: Option<f64>) -> String {
+    price.map_or_else(|| "unset".into(), |v| format!("${v}"))
+}
 
 use std::io::Write;
 use std::path::{Path, PathBuf};

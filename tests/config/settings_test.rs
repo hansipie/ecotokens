@@ -1,6 +1,5 @@
 use ecotokens::config::settings::EmbedProvider;
 use ecotokens::config::Settings;
-use std::collections::HashMap;
 
 #[test]
 fn default_values_when_no_config_file() {
@@ -10,7 +9,8 @@ fn default_values_when_no_config_file() {
     assert!(s.masking_enabled);
     assert!(!s.exact_token_counting);
     assert!(!s.debug);
-    assert_eq!(s.default_model, "claude-sonnet-5");
+    assert_eq!(s.price_input_usd_per_mtok, None);
+    assert_eq!(s.price_output_usd_per_mtok, None);
     assert!(s.exclusions.is_empty());
 }
 
@@ -56,13 +56,6 @@ fn valid_settings_pass_validation() {
 }
 
 #[test]
-fn model_pricing_has_known_models() {
-    let s = Settings::default();
-    assert!(s.model_pricing.contains_key("claude-sonnet-5"));
-    assert!(s.model_pricing.contains_key("claude-opus-5"));
-}
-
-#[test]
 fn deserialization_with_missing_fields_uses_defaults() {
     let json = r#"{"exclusions": ["ls"]}"#;
     let s: Settings = serde_json::from_str(json).unwrap();
@@ -71,38 +64,45 @@ fn deserialization_with_missing_fields_uses_defaults() {
     assert!(s.masking_enabled);
 }
 
-// ── Pricing resource file ──────────────────────────────────────────────────────
+// ── User-entered pricing ───────────────────────────────────────────────────────
 
 #[test]
-fn model_pricing_not_in_serialized_json() {
-    let s = Settings::default();
+fn price_round_trips_through_json() {
+    let mut s = Settings::default();
+    s.price_input_usd_per_mtok = Some(3.0);
+    s.price_output_usd_per_mtok = Some(15.0);
     let json = serde_json::to_string(&s).unwrap();
-    assert!(
-        !json.contains("model_pricing"),
-        "model_pricing ne doit pas apparaître dans config.json"
-    );
+    let s2: Settings = serde_json::from_str(&json).unwrap();
+    assert_eq!(s2.price_input_usd_per_mtok, Some(3.0));
+    assert_eq!(s2.price_output_usd_per_mtok, Some(15.0));
 }
 
 #[test]
-fn pricing_json_overrides_builtin() {
+fn legacy_model_keys_and_pricing_json_are_ignored() {
     let dir = tempfile::tempdir().unwrap();
     let config_path = dir.path().join("config.json");
     let abbrev_path = dir.path().join("abbreviations.json");
-    let pricing_path = dir.path().join("pricing.json");
+    std::fs::write(
+        &config_path,
+        r#"{"default_model": "claude-opus-5", "model_pricing": {"x": {"input_usd_per_1m": 1.0, "output_usd_per_1m": 2.0}}}"#,
+    )
+    .unwrap();
+    std::fs::write(dir.path().join("pricing.json"), "{}").unwrap();
 
-    std::fs::write(&config_path, "{}").unwrap();
-    let custom: HashMap<&str, serde_json::Value> = HashMap::from([(
-        "claude-sonnet-5",
-        serde_json::json!({"input_usd_per_1m": 0.01, "output_usd_per_1m": 0.02}),
-    )]);
-    std::fs::write(&pricing_path, serde_json::to_string(&custom).unwrap()).unwrap();
+    let s = Settings::load_from_paths_pub(&config_path, &abbrev_path);
+    assert_eq!(s.price_input_usd_per_mtok, None);
+    assert_eq!(s.price_output_usd_per_mtok, None);
+}
 
-    let s = Settings::load_from_paths_pub(&config_path, &abbrev_path, &pricing_path);
-    let price = s.model_pricing.get("claude-sonnet-5").unwrap();
-    assert!((price.input_usd_per_1m - 0.01).abs() < f64::EPSILON);
-    assert!((price.output_usd_per_1m - 0.02).abs() < f64::EPSILON);
-    // Les modèles non overridés restent présents depuis le built-in
-    assert!(s.model_pricing.contains_key("claude-opus-5"));
+#[test]
+fn validate_price_rejects_negative_and_non_finite() {
+    use ecotokens::config::validate_price;
+    assert!(validate_price("--input", None).is_ok());
+    assert!(validate_price("--input", Some(0.0)).is_ok());
+    assert!(validate_price("--input", Some(3.5)).is_ok());
+    assert!(validate_price("--input", Some(-1.0)).is_err());
+    assert!(validate_price("--output", Some(f64::NAN)).is_err());
+    assert!(validate_price("--output", Some(f64::INFINITY)).is_err());
 }
 
 // ── T072t — Tests embed_provider (CLI --embed-provider) ───────────────────────

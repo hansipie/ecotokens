@@ -193,7 +193,8 @@ pub fn filter_generic_with_judge(
         return fallback();
     }
 
-    let Ok(answers) = ctx.ask(
+    let Ok(answers) = ctx.ask_for(
+        crate::jev::stats::Purpose::FilterLines,
         serde_json::Value::Object(state),
         questions,
         ctx.timeout(None),

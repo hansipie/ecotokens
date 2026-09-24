@@ -44,6 +44,7 @@ Full methodology and per-family breakdown: [`docs/BENCHMARKS.md`](docs/BENCHMARK
 | **MCP server** | Exposes code-intelligence tools over stdio (`ecotokens mcp-server`) and auto-registers in agent settings on install |
 | **AI summarization** *(optional)* | Large outputs compressed by a local Ollama model instead of being truncated |
 | **Word abbreviations** *(optional)* | Replace common words with shorter forms (`function`→`fn`, `configuration`→`config`, …) in narrative text, and nudge the model to do the same via a SessionStart instruction |
+| **Model router** *(optional)* | Claude Code only: a `UserPromptSubmit` hook has Jev size each message (tiny / everyday / large / hardest) and delegates it to a helper agent on a matching model (Haiku / Sonnet / Opus / Fable), so small jobs stop running on the biggest model. Fail-open, see [Model router](#model-router-optional-off-by-default) |
 | **Zero config** | One `ecotokens install` command - works automatically from there |
 
 > Full compatibility matrix: [harness feature matrix](docs/harness-feature-matrix.md)
@@ -299,14 +300,16 @@ Uninstall Claude Code
 | `ecotokens filter-output --command LABEL --exit-code N` | Filter captured output read from stdin and record metrics (used by Hermes hooks) |
 | `ecotokens filter-output ... --hook-type transform-tool-result` | Same, attributed to the `transform_tool_result` hook in metrics |
 | `ecotokens hook-post` | PostToolUse handler - intercept native tool results (Read, Grep, Glob) |
+| `ecotokens hook-prompt` | UserPromptSubmit handler - size the message and route it to a helper agent (used by the router hook, not run by hand) |
 | `ecotokens gain` | Interactive TUI dashboard - savings by family or project |
 | `ecotokens gain --period PERIOD` | Filter TUI to a time window (`all`, `today`, `week`, `month`) |
 | `ecotokens gain --history` | Print a savings summary table for 24h / 7 days / 30 days |
 | `ecotokens gain --json` | JSON report |
+| `ecotokens jev [--period PERIOD] [--json]` | TUI with detailed Jev usage - calls, fallbacks, latency, tokens, cost, recent calls (also `v` in `gain`) |
 | `ecotokens game [--period PERIOD]` | Space Invaders mini-game - filtered commands spawn enemies scaled by tokens saved |
 | `ecotokens config [--debug true\|false]` | Show or update global configuration (including debug mode) |
 | `ecotokens doctor [--json]` | Diagnose PATH, config, hook, MCP, and metrics setup without mutating files |
-| `ecotokens config --model MODEL` | Set the default model used for cost calculations (empty or unknown value lists available models) |
+| `ecotokens gain price --input X --output Y` | Set the model price in USD per million tokens, used for the cost avoided figure of `gain` (cost stays `n/a` until set) |
 | `ecotokens config --embed-provider candle\|ollama\|none` | Set the embedding backend (`candle` = local BERT, `ollama` = Ollama HTTP API, `none` = BM25 only) |
 | `ecotokens config --embed-model MODEL` | Set the embedding model (e.g. `qwen3-embedding:latest` for Ollama, or a HuggingFace ID for Candle) |
 | `ecotokens config --embed-url URL` | Set the Ollama base URL (default: `http://localhost:11434`) |
@@ -333,6 +336,11 @@ Uninstall Claude Code
 | `ecotokens clear --project PATH` | Delete interceptions for a specific project (use `"[undefined]"` for entries without a git root) |
 | `ecotokens completions SHELL` | Generate a shell completion script (`bash`, `zsh`, `fish`, `powershell`, `elvish`) |
 | `ecotokens rewrite --mode MODE [--to TARGET]` | Paraphrase, retone, adjust reading level, or translate text using a local model |
+| `ecotokens router on [--timeout-ms N]` | Turn the model router on: `UserPromptSubmit` hook plus `router-*` helper agents in `~/.claude` (Claude Code only, needs `TYPESAFE_API_KEY`) |
+| `ecotokens router off` | Turn the router off and remove its hook and helper agents |
+| `ecotokens router status [--json]` | Messages per size and decision, Jev requests, tokens, latency and estimated cost |
+| `ecotokens router try MESSAGE... [--json] [--timeout-ms N]` | Size sample messages with Jev (live, not recorded, works while the router is off) |
+| `ecotokens router price --input USD --output USD` | Set the Jev price per million tokens used for cost estimates |
 
 ## Shell completions
 
@@ -350,20 +358,32 @@ ecotokens completions fish > ~/.config/fish/completions/ecotokens.fish
 ecotokens completions powershell >> $PROFILE
 ```
 
+`ecotokens install` installs or updates the completion script for your current shell automatically (user-level XDG paths; for zsh, add `~/.local/share/zsh/site-functions` to `fpath`), and `ecotokens uninstall` removes it. Only bash, zsh and fish are installed automatically; use `ecotokens completions elvish|powershell` for the others. Enumerated values such as `rewrite --mode` and `config --embed-provider` are completed too.
+
+The scripts are written to these locations:
+
+| Shell | Path |
+|-------|------|
+| bash | `$XDG_DATA_HOME/bash-completion/completions/ecotokens` |
+| zsh | `$XDG_DATA_HOME/zsh/site-functions/_ecotokens` |
+| fish | `$XDG_CONFIG_HOME/fish/completions/ecotokens.fish` |
+
+`$XDG_DATA_HOME` defaults to `~/.local/share` and `$XDG_CONFIG_HOME` to `~/.config`. Re-running `install` is idempotent, and `uninstall` removes the script for every supported shell. If the script cannot be written, `install` prints a warning and carries on: the failure does not abort the installation.
+
 Reload your shell (or open a new terminal) to activate completions.
 
 ## Gain dashboard
 
 ```
-ecotokens gain                                          # all time, uses default model from config
+ecotokens gain                                          # all time
 ecotokens gain --period today                           # today only
 ecotokens gain --period week                            # last 7 days
-ecotokens gain --period month --model claude-sonnet-5 # last 30 days, override model
+ecotokens gain --period month                           # last 30 days
 ecotokens gain --history                                # summary table: 24h / 7d / 30d
 ecotokens gain --history --json                         # same, as JSON
 ```
 
-The model used for cost calculations defaults to the value set with `ecotokens config --model` (or `claude-sonnet-5` if not configured). Pass `--model` to override for a single invocation.
+Cost avoided is computed from the input price you set with `ecotokens gain price --input <USD per 1M tokens> --output <USD per 1M tokens>`. Without a price it shows `n/a` (`null` in `--json`). Running `ecotokens gain price` with no flag shows the current values.
 
 Interactive TUI showing token savings per command family and per project, with a sparkline. The `--period` flag filters both the stats and the history panels.
 
@@ -555,7 +575,8 @@ Output includes:
 hook_installed        : true
 debug                 : false
 debuglog              : false
-default_model         : claude-sonnet-5
+price_input_usd_per_mtok  : unset
+price_output_usd_per_mtok : unset
 exclusions            : []
 embed_provider        : candle model=sentence-transformers/all-MiniLM-L6-v2
 ai_summary_enabled    : false
@@ -595,27 +616,17 @@ Each entry contains a short `uid` to correlate the input and output phases of th
 
 Logged payloads go through the same secret masking as intercepted output, and the file is created `0600` (owner-only). It still contains file contents and command output, so review it before attaching it to a bug report.
 
-### Default model for cost calculations
+### Price for cost calculations
 
-The model selected here determines the per-token price used in gain reports:
+`gain` has no built-in price list. Enter the price of the model you use, in USD per million tokens:
 
 ```bash
-ecotokens config --model claude-opus-4-7    # set default model
-ecotokens config --model ""                 # list available models
-ecotokens config --model unknown-model      # unknown model → lists available models
+ecotokens gain price --input 3 --output 15   # set both
+ecotokens gain price --input 2.5             # update only the input price
+ecotokens gain price                         # show the current prices
 ```
 
-The model name must be present in the built-in pricing table (or added via `~/.config/ecotokens/pricing.json`). Passing an empty value or an unrecognised name prints the full list and exits.
-
-See the full list of built-in models and prices in [docs/models.md](docs/models.md).
-
-Override any entry or add a new model by creating `~/.config/ecotokens/pricing.json`:
-
-```json
-{
-  "my-custom-model": { "input_usd_per_1m": 0.50, "output_usd_per_1m": 2.00 }
-}
-```
+The saved-token cost uses the input price. Values must be finite and non-negative. This is separate from `ecotokens router price`, which sets the Jev price.
 
 ### Word abbreviations *(optional)*
 

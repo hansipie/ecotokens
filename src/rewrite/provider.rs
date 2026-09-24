@@ -184,6 +184,7 @@ impl RewriteProvider for StubProvider {
 /// qualifying interception (FR-038) — CLI/MCP invocations already report
 /// their own fallback reason on every call via `RewriteResult::reason`, so
 /// this exists only for the silent, always-on auto-rewrite path.
+#[cfg_attr(test, allow(dead_code))]
 pub struct WarnOnce(AtomicBool);
 
 impl Default for WarnOnce {
@@ -192,6 +193,7 @@ impl Default for WarnOnce {
     }
 }
 
+#[cfg_attr(test, allow(dead_code))]
 impl WarnOnce {
     pub const fn new() -> Self {
         Self(AtomicBool::new(false))
@@ -214,8 +216,10 @@ impl WarnOnce {
 /// Process-wide instance backing the automatic pipeline's once-per-session
 /// warning (FR-038). `WarnOnce` itself is the independently-testable unit —
 /// see `tests/rewrite/provider_test.rs`.
+#[cfg_attr(test, allow(dead_code))]
 static AUTO_PIPELINE_WARNED: WarnOnce = WarnOnce::new();
 
+#[cfg_attr(test, allow(dead_code))]
 pub fn warn_auto_pipeline_unreachable_once(message: &str) -> bool {
     AUTO_PIPELINE_WARNED.warn(message)
 }

@@ -364,8 +364,10 @@ fn render_stats(
         ]),
         Line::from(vec![
             Span::styled("Cost avoided: ", Style::default().fg(Color::Cyan)),
-            Span::raw(format!("${:.4} USD", report.cost_avoided_usd)),
-            Span::raw(format!("   (model: {})", report.model_ref)),
+            Span::raw(match report.cost_avoided_usd {
+                Some(cost) => format!("${cost:.4} USD"),
+                None => "n/a (run: ecotokens gain price --input <usd/Mtok>)".to_string(),
+            }),
         ]),
     ];
     let text = if report.rewrite_overhead_tokens > 0 {
@@ -808,7 +810,7 @@ fn render_project_detail<'a>(
     )
 }
 
-fn fmt_tok(n: u64) -> String {
+pub fn fmt_tok(n: u64) -> String {
     let s = n.to_string();
     let mut out = String::with_capacity(s.len() + s.len() / 3);
     for (i, c) in s.chars().rev().enumerate() {

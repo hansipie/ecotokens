@@ -17,7 +17,7 @@ fn draw_gain(
     detail_mode: DetailMode,
     selected_project: Option<usize>,
 ) -> String {
-    let report = aggregate(items, Period::All, "sonnet");
+    let report = aggregate(items, Period::All);
     let backend = TestBackend::new(width, height);
     let mut terminal = Terminal::new(backend).unwrap();
     terminal
@@ -64,23 +64,20 @@ fn make_interception(tokens_before: u32, tokens_after: u32, family: CommandFamil
 
 #[test]
 fn aggregate_history_empty_returns_zeros() {
-    let report = aggregate_history(&[], "sonnet");
+    let report = aggregate_history(&[]);
     assert_eq!(report.day.total_interceptions, 0);
     assert_eq!(report.week.total_interceptions, 0);
     assert_eq!(report.month.total_interceptions, 0);
-    assert_eq!(report.day.cost_avoided_usd, 0.0);
-    assert_eq!(report.model_ref, "sonnet");
 }
 
 #[test]
 fn aggregate_history_json_has_expected_keys() {
-    let report = aggregate_history(&[], "sonnet");
+    let report = aggregate_history(&[]);
     let json = serde_json::to_string(&report).unwrap();
     let v: serde_json::Value = serde_json::from_str(&json).unwrap();
     assert!(v["day"].is_object(), "should have 'day' key: {json}");
     assert!(v["week"].is_object(), "should have 'week' key: {json}");
     assert!(v["month"].is_object(), "should have 'month' key: {json}");
-    assert_eq!(v["model_ref"], "sonnet");
 }
 
 #[test]
@@ -92,7 +89,7 @@ fn aggregate_history_counts_by_period() {
     item_old.timestamp = (Utc::now() - chrono::Duration::days(20)).to_rfc3339();
 
     let items = vec![item_recent, item_old];
-    let report = aggregate_history(&items, "sonnet");
+    let report = aggregate_history(&items);
 
     assert_eq!(
         report.month.total_interceptions, 2,
@@ -169,7 +166,7 @@ fn gain_renders_since_label() {
 
 #[test]
 fn gain_renders_without_panic_on_empty_data() {
-    let report = aggregate(&[], Period::All, "sonnet");
+    let report = aggregate(&[], Period::All);
     let backend = TestBackend::new(100, 25);
     let mut terminal = Terminal::new(backend).unwrap();
     terminal
@@ -211,7 +208,7 @@ fn gain_sparkline_present_adaptive() {
             item
         })
         .collect();
-    let report = aggregate(&items, Period::All, "sonnet");
+    let report = aggregate(&items, Period::All);
     let backend = TestBackend::new(100, 30);
     let mut terminal = Terminal::new(backend).unwrap();
     terminal
@@ -241,6 +238,19 @@ fn gain_sparkline_present_adaptive() {
         content.contains("Savings"),
         "sparkline block title should be present: {content:?}"
     );
+    let sparkline_body: String = terminal
+        .backend()
+        .buffer()
+        .content
+        .iter()
+        .skip(27 * 100)
+        .take(2 * 100)
+        .map(|cell| cell.symbol())
+        .collect();
+    assert!(
+        sparkline_body.chars().any(|c| "▁▂▃▄▅▆▇█".contains(c)),
+        "sparkline should render bars for the 14 days of savings: {sparkline_body:?}"
+    );
 }
 
 #[test]
@@ -250,7 +260,7 @@ fn gain_shows_family_breakdown() {
         make_interception(2000, 500, CommandFamily::Cargo),
         make_interception(500, 400, CommandFamily::Generic),
     ];
-    let report = aggregate(&items, Period::All, "sonnet");
+    let report = aggregate(&items, Period::All);
     let backend = TestBackend::new(100, 30);
     let mut terminal = Terminal::new(backend).unwrap();
     terminal
@@ -286,7 +296,7 @@ fn gain_shows_family_breakdown() {
 #[test]
 fn gain_detail_no_content_shows_fallback() {
     let items = vec![make_interception(1000, 400, CommandFamily::Git)];
-    let report = aggregate(&items, Period::All, "sonnet");
+    let report = aggregate(&items, Period::All);
     let backend = TestBackend::new(120, 35);
     let mut terminal = Terminal::new(backend).unwrap();
     terminal
@@ -354,7 +364,7 @@ fn gain_diff_mode_renders_diff_markers() {
     item.content_before = Some("line one\nline two\nline three\n".to_string());
     item.content_after = Some("line one\nline TWO\nline three\n".to_string());
     let items = vec![item];
-    let report = aggregate(&items, Period::All, "sonnet");
+    let report = aggregate(&items, Period::All);
     let backend = TestBackend::new(120, 40);
     let mut terminal = Terminal::new(backend).unwrap();
     terminal
@@ -397,7 +407,7 @@ fn gain_detail_mode_supports_scroll() {
     item.content_before = Some("before".to_string());
     item.content_after = Some("after".to_string());
     let items = vec![item];
-    let report = aggregate(&items, Period::All, "sonnet");
+    let report = aggregate(&items, Period::All);
     let backend = TestBackend::new(48, 18);
     let mut terminal = Terminal::new(backend).unwrap();
     let mut scroll = 6;
@@ -439,7 +449,7 @@ fn gain_log_mode_renders_history() {
     let items: Vec<Interception> = (0..5)
         .map(|_| make_interception(1000, 400, CommandFamily::Git))
         .collect();
-    let report = aggregate(&items, Period::All, "sonnet");
+    let report = aggregate(&items, Period::All);
     let backend = TestBackend::new(120, 40);
     let mut terminal = Terminal::new(backend).unwrap();
     terminal
@@ -495,7 +505,7 @@ fn gain_project_log_mode_renders_history() {
             item
         })
         .collect();
-    let report = aggregate(&items, Period::All, "sonnet");
+    let report = aggregate(&items, Period::All);
     let backend = TestBackend::new(120, 40);
     let mut terminal = Terminal::new(backend).unwrap();
     terminal
@@ -538,7 +548,7 @@ fn gain_project_history_panel_refreshes_between_draws() {
     item2.command = "git log -n 1".to_string();
 
     let items_first = vec![item1.clone()];
-    let report_first = aggregate(&items_first, Period::All, "sonnet");
+    let report_first = aggregate(&items_first, Period::All);
 
     let backend = TestBackend::new(140, 40);
     let mut terminal = Terminal::new(backend).unwrap();
@@ -573,7 +583,7 @@ fn gain_project_history_panel_refreshes_between_draws() {
     );
 
     let items_second = vec![item1, item2];
-    let report_second = aggregate(&items_second, Period::All, "sonnet");
+    let report_second = aggregate(&items_second, Period::All);
     terminal
         .draw(|frame| {
             render_gain(

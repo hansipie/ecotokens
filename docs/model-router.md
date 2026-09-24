@@ -68,7 +68,7 @@ Each request used about 555 input and 66 output tokens.
 | `ecotokens router off` | clears the flag, removes the hook entry and the agents ecotokens wrote |
 | `ecotokens router status [--json]` | per-size and per-decision counts, Jev requests, tokens, average latency, cost |
 | `ecotokens router try MSG… [--json] [--timeout-ms N]` | sizes messages live without recording them, even while the router is off |
-| `ecotokens router price --input X --output Y` | Jev price in USD per million tokens. TypeSafe publishes none, so cost stays blank until you set one |
+| `ecotokens router price --input X --output Y` | Jev price in USD per million tokens. TypeSafe publishes none, so cost stays blank until you set one. Separate from `ecotokens gain price` |
 
 | Setting | Default | Role |
 | --- | --- | --- |
