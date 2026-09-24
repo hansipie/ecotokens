@@ -210,6 +210,13 @@ impl JevError {
     }
 }
 
+/// Token counts from the response's `usage` object.
+#[derive(Debug, Clone, Copy, Default, PartialEq, Eq)]
+pub struct Usage {
+    pub input_tokens: u64,
+    pub output_tokens: u64,
+}
+
 /// Source of typed judgments. Implemented by [`client::HttpJudge`]
 /// (production) and [`StubJudge`] (deterministic, for tests).
 pub trait Judge: Send + Sync {
@@ -219,6 +226,17 @@ pub trait Judge: Send + Sync {
         questions: Questions,
         timeout: Duration,
     ) -> Result<Answers, JevError>;
+
+    /// Like [`Judge::ask`], plus the token usage when the judge reports it
+    /// (used for cost tracking). Judges without usage return `None`.
+    fn ask_with_usage(
+        &self,
+        state: Value,
+        questions: Questions,
+        timeout: Duration,
+    ) -> Result<(Answers, Option<Usage>), JevError> {
+        self.ask(state, questions, timeout).map(|a| (a, None))
+    }
 }
 
 /// A judge together with the settings holding its decision thresholds.

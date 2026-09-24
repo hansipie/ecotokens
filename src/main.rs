@@ -28,6 +28,7 @@ mod mcp;
 mod metrics;
 #[cfg(feature = "rewrite")]
 mod rewrite;
+mod router;
 mod search;
 mod tokens;
 mod trace;
@@ -66,6 +67,13 @@ enum Commands {
     HookCodex,
     /// Intercept a Codex Bash tool result via PostToolUse hook (reads JSON from stdin)
     HookPostCodex,
+    /// Model router: size a Claude Code message with Jev via UserPromptSubmit hook (reads JSON from stdin)
+    HookPrompt,
+    /// Model router: Jev sizes each message and small jobs go to cheaper helper agents
+    Router {
+        #[command(subcommand)]
+        action: RouterAction,
+    },
     /// Execute a command, filter its output, record metrics
     Filter {
         #[arg(last = true)]
@@ -343,6 +351,41 @@ enum Commands {
         no_save_diff: bool,
         #[arg(long)]
         json: bool,
+    },
+}
+
+#[derive(Subcommand)]
+enum RouterAction {
+    /// Turn the router on: hook + helper agents in ~/.claude
+    On {
+        /// Max time Jev may add to each message, in ms (saved as router_timeout_ms)
+        #[arg(long)]
+        timeout_ms: Option<u64>,
+    },
+    /// Turn the router off and remove the hook and helper agents
+    Off,
+    /// Show messages per size, decisions and what Jev has cost
+    Status {
+        #[arg(long)]
+        json: bool,
+    },
+    /// Size sample messages with Jev (live, not recorded, works while off)
+    Try {
+        /// Messages to size
+        #[arg(required = true)]
+        messages: Vec<String>,
+        #[arg(long)]
+        json: bool,
+        /// Override router_timeout_ms for this run
+        #[arg(long)]
+        timeout_ms: Option<u64>,
+    },
+    /// Set the Jev price used for cost estimates (USD per million tokens)
+    Price {
+        #[arg(long)]
+        input: Option<f64>,
+        #[arg(long)]
+        output: Option<f64>,
     },
 }
 
@@ -1298,8 +1341,19 @@ fn cmd_uninstall(target: String) {
         let had_post_hook = install::is_post_hook_installed(&claude_path);
         let had_mcp = install::is_mcp_registered(&claude_path);
         let had_session = install::are_session_hooks_installed(&claude_path);
+        let had_router = install::is_prompt_hook_installed(&claude_path);
         match install::uninstall_hook(&claude_path, &claude_json) {
             Ok(()) => {
+                if had_router {
+                    print_install_item("removed", "router hook", &claude_path);
+                }
+                if let Some(dir) = router::agents::default_agents_dir() {
+                    if let Ok(removed) = router::agents::remove_agents(&dir) {
+                        for path in removed {
+                            print_install_item("removed", "router agent", &path);
+                        }
+                    }
+                }
                 if had_hook {
                     print_install_item("removed", "hook", &claude_path);
                 }
@@ -1312,7 +1366,7 @@ fn cmd_uninstall(target: String) {
                 if had_session {
                     print_install_item("removed", "session hooks", &claude_path);
                 }
-                if !had_hook && !had_post_hook && !had_mcp && !had_session {
+                if !had_hook && !had_post_hook && !had_mcp && !had_session && !had_router {
                     print_install_note("nothing to uninstall");
                 }
             }
@@ -1545,6 +1599,29 @@ fn cmd_uninstall(target: String) {
         if !had_plugin && !had_hook && !had_post && !had_mcp {
             print_install_note("nothing to uninstall");
         }
+    }
+}
+
+fn cmd_router(action: RouterAction) {
+    let settings_path = default_settings_path();
+    let Some(agents_dir) = router::agents::default_agents_dir() else {
+        eprintln!("error: cannot locate the home directory");
+        std::process::exit(1);
+    };
+    let result = match action {
+        RouterAction::On { timeout_ms } => router::cli::on(&settings_path, &agents_dir, timeout_ms),
+        RouterAction::Off => router::cli::off(&settings_path, &agents_dir),
+        RouterAction::Status { json } => router::cli::status(&settings_path, &agents_dir, json),
+        RouterAction::Try {
+            messages,
+            json,
+            timeout_ms,
+        } => std::process::exit(router::cli::try_messages(&messages, json, timeout_ms)),
+        RouterAction::Price { input, output } => router::cli::price(input, output),
+    };
+    if let Err(e) = result {
+        eprintln!("router error: {e}");
+        std::process::exit(1);
     }
 }
 
@@ -3286,6 +3363,8 @@ fn main() {
         Commands::HookPostQwen => hook::handle_post_qwen(),
         Commands::HookCodex => hook::handle_codex(),
         Commands::HookPostCodex => hook::handle_post_codex(),
+        Commands::HookPrompt => router::hook::handle_prompt(),
+        Commands::Router { action } => cmd_router(action),
         Commands::Filter {
             args,
             debug,

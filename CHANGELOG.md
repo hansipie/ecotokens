@@ -5,6 +5,16 @@ All notable changes to this project will be documented in this file.
 The format is based on [Keep a Changelog](https://keepachangelog.com/en/1.0.0/),
 and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0.html).
 
+## [Unreleased]
+
+### Added
+
+- **Model router (optional, off by default)**: `ecotokens router on|off|status|try|price`. A new `UserPromptSubmit` hook (`ecotokens hook-prompt`) asks Jev to size each Claude Code message (tiny / everyday / large / hardest) and whether it is a follow-up that only makes sense in the conversation, in one request. When the size confidence is at least `router_min_confidence` (0.6), the main session is told to hand the job to one of four helper agents written to `~/.claude/agents/` (`router-tiny` → haiku, `router-everyday` → sonnet, `router-large` → opus, `router-hardest` → fable). Each helper ends its reply with a line naming its model.
+  - Fail-open: when the router is off, has no key, gets a slash or `!` command, hits an error, or is past its `router_timeout_ms` (default 800 ms), the hook prints nothing. Timeouts and transport failures write an on-disk marker that pauses Jev calls for 5 minutes. Claude Code's hook `timeout` follows the setting.
+  - `router status` shows messages per size and per decision, Jev requests, input/output tokens, average latency, and a cost estimate once `jev_usd_per_mtok_input/output` are set with `router price`. Decisions are logged in `~/.config/ecotokens/router.db`, and message text is never stored.
+  - Only agent files carrying the ecotokens marker are written or removed. `ecotokens uninstall` also removes the hook and the helpers. `ecotokens doctor` gains a **Router** line.
+  - The Jev client now reads `usage.input_tokens/output_tokens` (`Judge::ask_with_usage`, `client::parse_usage`).
+
 ## [0.27.0] - 2026-09-23
 
 ### Added

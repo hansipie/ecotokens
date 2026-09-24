@@ -1,7 +1,7 @@
 use ecotokens::config::Settings;
 use ecotokens::doctor::{check_jev, DoctorStatus};
 use ecotokens::jev::client::{
-    build_request, parse_response, prepare_state, sample_text, HttpJudge,
+    build_request, parse_response, parse_usage, prepare_state, sample_text, HttpJudge,
 };
 use ecotokens::jev::{judge_from_parts, JevError, Question, Questions, MODEL};
 use serde_json::json;
@@ -160,4 +160,13 @@ fn doctor_reports_jev_state_without_leaking_the_key() {
     assert_eq!(on.status, DoctorStatus::Ok);
     assert!(on.message.contains("enabled"));
     assert!(!on.message.contains("secret-key"));
+}
+
+#[test]
+fn parse_usage_reads_token_counts() {
+    let body = r#"{"answers":{},"usage":{"input_tokens":552,"output_tokens":66}}"#;
+    let u = parse_usage(body).unwrap();
+    assert_eq!((u.input_tokens, u.output_tokens), (552, 66));
+    assert!(parse_usage(r#"{"answers":{}}"#).is_none());
+    assert!(parse_usage("not json").is_none());
 }

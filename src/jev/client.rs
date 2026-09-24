@@ -4,7 +4,7 @@ use std::time::Duration;
 
 use serde_json::{json, Value};
 
-use super::{Answer, Answers, ChoiceAnswer, JevError, Judge, Questions, DEFAULT_URL, MODEL};
+use super::{Answer, Answers, ChoiceAnswer, JevError, Judge, Questions, Usage, DEFAULT_URL, MODEL};
 
 /// Production judge: one blocking HTTPS request per [`Judge::ask`], no
 /// retries (hook latency budget). Every string in `state` is masked and the
@@ -50,6 +50,12 @@ impl HttpJudge {
 static BREAKER_OPEN: AtomicBool = AtomicBool::new(false);
 static UNAVAILABLE_WARNED: AtomicBool = AtomicBool::new(false);
 
+/// Closes the breaker again. Only for `ecotokens router try`, where each
+/// sample must be judged on its own even if an earlier one failed.
+pub fn reset_breaker() {
+    BREAKER_OPEN.store(false, Ordering::SeqCst);
+}
+
 /// Prints the fallback warning to stderr at most once per process.
 pub fn warn_unavailable_once(message: &str) -> bool {
     let first = UNAVAILABLE_WARNED
@@ -68,6 +74,16 @@ impl Judge for HttpJudge {
         questions: Questions,
         timeout: Duration,
     ) -> Result<Answers, JevError> {
+        self.ask_with_usage(state, questions, timeout)
+            .map(|(a, _)| a)
+    }
+
+    fn ask_with_usage(
+        &self,
+        state: Value,
+        questions: Questions,
+        timeout: Duration,
+    ) -> Result<(Answers, Option<Usage>), JevError> {
         if BREAKER_OPEN.load(Ordering::SeqCst) {
             return Err(JevError::Unavailable);
         }
@@ -88,7 +104,7 @@ impl HttpJudge {
         state: Value,
         questions: &Questions,
         timeout: Duration,
-    ) -> Result<Answers, JevError> {
+    ) -> Result<(Answers, Option<Usage>), JevError> {
         let body = build_request(&prepare_state(state, self.max_input_chars), questions);
         let client = reqwest::blocking::Client::builder()
             .timeout(timeout)
@@ -125,7 +141,7 @@ impl HttpJudge {
                 return Err(JevError::BadResponse(format!("missing answer '{id}'")));
             }
         }
-        Ok(answers)
+        Ok((answers, parse_usage(&text)))
     }
 }
 
@@ -235,6 +251,17 @@ pub fn parse_response(body: &str) -> Result<Answers, JevError> {
         }
     }
     Ok(out)
+}
+
+/// Reads `usage.input_tokens` / `usage.output_tokens`; `None` when the body
+/// has no usable `usage` object.
+pub fn parse_usage(body: &str) -> Option<Usage> {
+    let json: Value = serde_json::from_str(body).ok()?;
+    let usage = json.get("usage")?;
+    Some(Usage {
+        input_tokens: usage.get("input_tokens")?.as_u64()?,
+        output_tokens: usage.get("output_tokens")?.as_u64()?,
+    })
 }
 
 fn parse_choice(a: &Value) -> Option<ChoiceAnswer> {

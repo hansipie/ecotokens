@@ -223,6 +223,32 @@ pub struct Settings {
     /// selection.
     #[serde(default = "default_jev_line_keep_min_prob")]
     pub jev_line_keep_min_prob: f64,
+    /// Jev input price in USD per million tokens, for cost estimates in
+    /// `ecotokens router status`. TypeSafe publishes no price, so unset by
+    /// default (tokens only).
+    #[serde(default)]
+    pub jev_usd_per_mtok_input: Option<f64>,
+    /// Jev output price in USD per million tokens (see above).
+    #[serde(default)]
+    pub jev_usd_per_mtok_output: Option<f64>,
+
+    // ── Model router (UserPromptSubmit hook, sized by Jev) ──
+    /// Size every Claude Code message with Jev and hand small jobs to a
+    /// cheaper helper agent. Independent of `jev_enabled`. Toggled by
+    /// `ecotokens router on|off`. Off by default.
+    #[serde(default)]
+    pub router_enabled: bool,
+    /// Jev timeout for the router, in milliseconds. The hook runs before the
+    /// message is sent, so this is kept short.
+    #[serde(default = "default_router_timeout_ms")]
+    pub router_timeout_ms: u64,
+    /// Below this size confidence the main session handles the message.
+    #[serde(default = "default_router_min_confidence")]
+    pub router_min_confidence: f64,
+    /// At or above this probability that the message only makes sense inside
+    /// the conversation, the main session handles it.
+    #[serde(default = "default_router_followup_min_prob")]
+    pub router_followup_min_prob: f64,
 }
 
 #[derive(Debug, Clone, Default, Deserialize)]
@@ -298,6 +324,15 @@ fn default_jev_commentary_min_prob() -> f64 {
 fn default_jev_line_keep_min_prob() -> f64 {
     0.05
 }
+fn default_router_timeout_ms() -> u64 {
+    800
+}
+fn default_router_min_confidence() -> f64 {
+    0.6
+}
+fn default_router_followup_min_prob() -> f64 {
+    0.5
+}
 
 impl Default for Settings {
     fn default() -> Self {
@@ -345,6 +380,12 @@ impl Default for Settings {
             jev_verify_fail_below: default_jev_verify_fail_below(),
             jev_commentary_min_prob: default_jev_commentary_min_prob(),
             jev_line_keep_min_prob: default_jev_line_keep_min_prob(),
+            jev_usd_per_mtok_input: None,
+            jev_usd_per_mtok_output: None,
+            router_enabled: false,
+            router_timeout_ms: default_router_timeout_ms(),
+            router_min_confidence: default_router_min_confidence(),
+            router_followup_min_prob: default_router_followup_min_prob(),
         }
     }
 }

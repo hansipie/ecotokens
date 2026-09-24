@@ -219,6 +219,7 @@ pub fn uninstall_hook(settings_path: &Path, claude_json_path: &Path) -> InstallR
         remove_hook_generic(&mut v, "PostToolUse", POST_HOOK_COMMAND);
         remove_hook_generic(&mut v, "SessionStart", SESSION_START_COMMAND);
         remove_hook_generic(&mut v, "SessionEnd", SESSION_END_COMMAND);
+        remove_prompt_hook_entry(&mut v);
         remove_ecotokens_mcp_server(&mut v);
         write_settings(settings_path, &v)?;
     }
@@ -265,6 +266,71 @@ pub fn uninstall_session_hooks(settings_path: &Path) -> InstallResult {
     remove_hook_generic(&mut v, "SessionStart", SESSION_START_COMMAND);
     remove_hook_generic(&mut v, "SessionEnd", SESSION_END_COMMAND);
     write_settings(settings_path, &v)
+}
+
+// ============================================================================
+// Claude Code UserPromptSubmit hook (model router, `ecotokens router on|off`)
+// ============================================================================
+
+const PROMPT_HOOK_COMMAND: &str = "ecotokens hook-prompt";
+
+/// Install the UserPromptSubmit hook (idempotent). `timeout_secs` is Claude
+/// Code's hard stop, on top of the router's own Jev timeout, so a stuck hook
+/// can never hold a message back for long. An existing entry is replaced so
+/// the timeout follows the setting. No matcher: the event has none.
+pub fn install_prompt_hook(settings_path: &Path, timeout_secs: u64) -> InstallResult {
+    let mut v = read_settings_checked(settings_path)?;
+    remove_hook_generic(&mut v, "UserPromptSubmit", PROMPT_HOOK_COMMAND);
+    let mut hooks = v["hooks"]["UserPromptSubmit"]
+        .as_array()
+        .cloned()
+        .unwrap_or_default();
+    hooks.push(serde_json::json!({
+        "hooks": [{
+            "type": "command",
+            "command": PROMPT_HOOK_COMMAND,
+            "timeout": timeout_secs
+        }]
+    }));
+    v["hooks"]["UserPromptSubmit"] = serde_json::Value::Array(hooks);
+    write_settings(settings_path, &v)
+}
+
+pub fn is_prompt_hook_installed(settings_path: &Path) -> bool {
+    has_hook_command(
+        &read_settings(settings_path),
+        "UserPromptSubmit",
+        PROMPT_HOOK_COMMAND,
+    )
+}
+
+/// Removes our entry, and the event key itself when nothing else is left.
+fn remove_prompt_hook_entry(v: &mut serde_json::Value) -> bool {
+    if v["hooks"]["UserPromptSubmit"].is_null() {
+        return false;
+    }
+    let changed = remove_hook_generic(v, "UserPromptSubmit", PROMPT_HOOK_COMMAND);
+    let empty = v["hooks"]["UserPromptSubmit"]
+        .as_array()
+        .is_some_and(|a| a.is_empty());
+    if empty {
+        if let Some(hooks) = v["hooks"].as_object_mut() {
+            hooks.remove("UserPromptSubmit");
+        }
+    }
+    changed
+}
+
+/// Remove the UserPromptSubmit hook (idempotent, keeps third-party entries).
+pub fn uninstall_prompt_hook(settings_path: &Path) -> InstallResult {
+    if !settings_path.exists() {
+        return Ok(());
+    }
+    let mut v = read_settings_checked(settings_path)?;
+    if remove_prompt_hook_entry(&mut v) {
+        write_settings(settings_path, &v)?;
+    }
+    Ok(())
 }
 
 /// Get the default Claude Code settings path: ~/.claude/settings.json

@@ -428,3 +428,23 @@ path = "tests/integration/jev_live_test.rs"
 [[test]]
 name = "env_file_test"
 path = "tests/config/env_file_test.rs"
+
+[[test]]
+name = "router_decide_test"
+path = "tests/router/decide_test.rs"
+
+[[test]]
+name = "router_hook_test"
+path = "tests/router/hook_test.rs"
+
+[[test]]
+name = "router_agents_test"
+path = "tests/router/agents_test.rs"
+
+[[test]]
+name = "router_stats_test"
+path = "tests/router/stats_test.rs"
+
+[[test]]
+name = "router_install_test"
+path = "tests/router/install_prompt_test.rs"

@@ -14,6 +14,7 @@ pub mod mcp;
 pub mod metrics;
 #[cfg(feature = "rewrite")]
 pub mod rewrite;
+pub mod router;
 pub mod search;
 pub mod tokens;
 pub mod trace;

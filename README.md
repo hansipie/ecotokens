@@ -889,6 +889,44 @@ interception path and adds one request to large generic outputs (up to 10 window
 anything larger keeps plain head+tail truncation). `jev_url` must use https. Build with
 `--no-default-features` and without the `jev` feature to compile Jev out entirely.
 
+## Model router (optional, off by default)
+
+The router has Jev size up every message you send to Claude Code, so small jobs run on a smaller,
+cheaper model instead of the biggest one. It needs `TYPESAFE_API_KEY` (see
+[Jev judgments](#jev-judgments-optional-off-by-default)), but it does not need `jev_enabled`.
+
+```bash
+ecotokens router on          # hook + helper agents, then restart Claude Code
+ecotokens router status      # messages per size, decisions, Jev tokens and cost
+ecotokens router off         # removes the hook and the helper agents
+ecotokens router try "rename foo to bar" "write a launch post"   # live check, not recorded
+```
+
+| Size | For | Helper agent | Model |
+|------|-----|--------------|-------|
+| tiny | a lookup, a rename, a one-line answer | `router-tiny` | Haiku |
+| everyday | a normal email, post or short document | `router-everyday` | Sonnet |
+| large | a multi-step build, research, a full report | `router-large` | Opus |
+| hardest | strategy, or anything where a wrong call is expensive | `router-hardest` | Fable |
+
+Claude Code cannot switch the main session's model for each message, so the router works through a
+`UserPromptSubmit` hook. The hook asks Jev one question (which size is the smallest that can do
+this job well?) and, in the same request, whether the message is a short reply that only makes
+sense inside the conversation. When Jev is at least 60% sure, and the message is not such a
+reply, the hook tells the main session to hand the job to that size's helper agent and relay the
+answer. Each helper ends its reply with one line naming the model that did the work. The main
+model still reads the message and does the handoff, so the saving is on the work itself.
+
+The router never blocks a message. If it is off, has no key, times out, or anything goes wrong,
+the hook prints nothing and the message goes through untouched. After a timeout or a network
+failure, Jev is not asked again for 5 minutes. Jev currently answers in about 2 to 3 seconds, and
+every message waits up to `router_timeout_ms` (default 800 ms). Set it with
+`ecotokens router on --timeout-ms 3000` if you accept that delay in exchange for routing. See
+[docs/model-router.md](docs/model-router.md) for the details.
+
+**Privacy.** While the router is on, every message you type is sent (masked) to TypeSafe to be
+sized. Keep it off for private work.
+
 ## Benchmarks
 
 Measured on a real developer workstation from 2026-03-06 to 2026-05-27 (19 928 hook executions):

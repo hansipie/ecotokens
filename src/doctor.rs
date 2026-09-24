@@ -90,6 +90,11 @@ fn run_with_paths(paths: DoctorPaths) -> DoctorReport {
         check_auto_watch(&settings, paths.claude_settings_path.as_deref()),
         check_metrics(paths.metrics_path.as_deref()),
         check_jev(&settings, env::var(crate::jev::API_KEY_ENV).ok().as_deref()),
+        check_router(
+            &settings,
+            env::var(crate::jev::API_KEY_ENV).ok().as_deref(),
+            paths.claude_settings_path.as_deref(),
+        ),
     ];
     DoctorReport { checks }
 }
@@ -167,6 +172,44 @@ pub fn check_jev(settings: &config::Settings, api_key: Option<&str>) -> DoctorCh
         status,
         message,
         path: None,
+    }
+}
+
+/// Reports the model router state (no network call, key never printed).
+pub fn check_router(
+    settings: &config::Settings,
+    api_key: Option<&str>,
+    claude_settings: Option<&Path>,
+) -> DoctorCheck {
+    let has_key = api_key.is_some_and(|k| !k.trim().is_empty());
+    let hook = claude_settings.is_some_and(install::is_prompt_hook_installed);
+    let (status, message) = if !settings.router_enabled {
+        (DoctorStatus::Ok, "model router off".to_string())
+    } else if !cfg!(feature = "jev") || !has_key {
+        (
+            DoctorStatus::Warning,
+            format!(
+                "model router on but {} is not set; messages are not routed",
+                crate::jev::API_KEY_ENV
+            ),
+        )
+    } else if !hook {
+        (
+            DoctorStatus::Warning,
+            "model router on but the UserPromptSubmit hook is missing; run `ecotokens router on`"
+                .to_string(),
+        )
+    } else {
+        (
+            DoctorStatus::Ok,
+            "model router on; every message is sent (masked) to TypeSafe to be sized".to_string(),
+        )
+    };
+    DoctorCheck {
+        name: "Router",
+        status,
+        message,
+        path: claude_settings.map(|p| p.display().to_string()),
     }
 }
 
