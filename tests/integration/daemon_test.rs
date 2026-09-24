@@ -17,13 +17,13 @@ fn test_watch_sends_reindexed_event_on_file_change() {
     let idx_dir = index_dir.path().to_path_buf();
 
     let handle = std::thread::spawn(move || {
-        let _ = watch_directory(
+        watch_directory(
             &watch_path,
             &idx_dir,
             EmbedProvider::None,
             event_tx,
             stop_rx,
-        );
+        )
     });
 
     std::thread::sleep(Duration::from_millis(200));
@@ -36,15 +36,13 @@ fn test_watch_sends_reindexed_event_on_file_change() {
 
     // L'événement doit avoir un timestamp non-vide
     assert!(!event.timestamp.is_empty(), "timestamp vide");
-    // Le statut doit être re-indexed ou error (pas ignored pour .rs)
-    assert!(
-        event.status == "re-indexed" || event.status.starts_with("error"),
-        "statut inattendu pour .rs : {}",
-        event.status
-    );
+    assert_eq!(event.status, "re-indexed", "échec de la réindexation");
 
     let _ = stop_tx.send(());
-    let _ = handle.join();
+    handle
+        .join()
+        .expect("watcher panicked")
+        .expect("watcher failed");
 }
 
 /// Vérifie que le watcher s'arrête proprement sur signal stop.
@@ -95,13 +93,13 @@ fn test_watch_debounces_rapid_changes() {
     let idx_dir = index_dir.path().to_path_buf();
 
     let handle = std::thread::spawn(move || {
-        let _ = watch_directory(
+        watch_directory(
             &watch_path,
             &idx_dir,
             EmbedProvider::None,
             event_tx,
             stop_rx,
-        );
+        )
     });
 
     std::thread::sleep(Duration::from_millis(200));
@@ -113,17 +111,24 @@ fn test_watch_debounces_rapid_changes() {
         std::thread::sleep(Duration::from_millis(10));
     }
 
-    // On doit recevoir au moins 1 événement (debounce agrège les modifications)
+    // Les cinq écritures dans la fenêtre de debounce doivent donner un seul événement.
     let event = event_rx
         .recv_timeout(Duration::from_secs(4))
         .expect("au moins un événement attendu");
 
+    assert_eq!(event.status, "re-indexed", "échec de la réindexation");
+    assert_eq!(event.path, file);
     assert!(
-        event.status == "re-indexed" || event.status.starts_with("error"),
-        "statut inattendu : {}",
-        event.status
+        matches!(
+            event_rx.recv_timeout(Duration::from_millis(900)),
+            Err(mpsc::RecvTimeoutError::Timeout)
+        ),
+        "les écritures rapprochées doivent être regroupées en un événement"
     );
 
     let _ = stop_tx.send(());
-    let _ = handle.join();
+    handle
+        .join()
+        .expect("watcher panicked")
+        .expect("watcher failed");
 }

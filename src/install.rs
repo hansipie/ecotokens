@@ -219,6 +219,7 @@ pub fn uninstall_hook(settings_path: &Path, claude_json_path: &Path) -> InstallR
         remove_hook_generic(&mut v, "PostToolUse", POST_HOOK_COMMAND);
         remove_hook_generic(&mut v, "SessionStart", SESSION_START_COMMAND);
         remove_hook_generic(&mut v, "SessionEnd", SESSION_END_COMMAND);
+        remove_prompt_hook_entry(&mut v);
         remove_ecotokens_mcp_server(&mut v);
         write_settings(settings_path, &v)?;
     }
@@ -265,6 +266,71 @@ pub fn uninstall_session_hooks(settings_path: &Path) -> InstallResult {
     remove_hook_generic(&mut v, "SessionStart", SESSION_START_COMMAND);
     remove_hook_generic(&mut v, "SessionEnd", SESSION_END_COMMAND);
     write_settings(settings_path, &v)
+}
+
+// ============================================================================
+// Claude Code UserPromptSubmit hook (model router, `ecotokens router on|off`)
+// ============================================================================
+
+const PROMPT_HOOK_COMMAND: &str = "ecotokens hook-prompt";
+
+/// Install the UserPromptSubmit hook (idempotent). `timeout_secs` is Claude
+/// Code's hard stop, on top of the router's own Jev timeout, so a stuck hook
+/// can never hold a message back for long. An existing entry is replaced so
+/// the timeout follows the setting. No matcher: the event has none.
+pub fn install_prompt_hook(settings_path: &Path, timeout_secs: u64) -> InstallResult {
+    let mut v = read_settings_checked(settings_path)?;
+    remove_hook_generic(&mut v, "UserPromptSubmit", PROMPT_HOOK_COMMAND);
+    let mut hooks = v["hooks"]["UserPromptSubmit"]
+        .as_array()
+        .cloned()
+        .unwrap_or_default();
+    hooks.push(serde_json::json!({
+        "hooks": [{
+            "type": "command",
+            "command": PROMPT_HOOK_COMMAND,
+            "timeout": timeout_secs
+        }]
+    }));
+    v["hooks"]["UserPromptSubmit"] = serde_json::Value::Array(hooks);
+    write_settings(settings_path, &v)
+}
+
+pub fn is_prompt_hook_installed(settings_path: &Path) -> bool {
+    has_hook_command(
+        &read_settings(settings_path),
+        "UserPromptSubmit",
+        PROMPT_HOOK_COMMAND,
+    )
+}
+
+/// Removes our entry, and the event key itself when nothing else is left.
+fn remove_prompt_hook_entry(v: &mut serde_json::Value) -> bool {
+    if v["hooks"]["UserPromptSubmit"].is_null() {
+        return false;
+    }
+    let changed = remove_hook_generic(v, "UserPromptSubmit", PROMPT_HOOK_COMMAND);
+    let empty = v["hooks"]["UserPromptSubmit"]
+        .as_array()
+        .is_some_and(|a| a.is_empty());
+    if empty {
+        if let Some(hooks) = v["hooks"].as_object_mut() {
+            hooks.remove("UserPromptSubmit");
+        }
+    }
+    changed
+}
+
+/// Remove the UserPromptSubmit hook (idempotent, keeps third-party entries).
+pub fn uninstall_prompt_hook(settings_path: &Path) -> InstallResult {
+    if !settings_path.exists() {
+        return Ok(());
+    }
+    let mut v = read_settings_checked(settings_path)?;
+    if remove_prompt_hook_entry(&mut v) {
+        write_settings(settings_path, &v)?;
+    }
+    Ok(())
 }
 
 /// Get the default Claude Code settings path: ~/.claude/settings.json
@@ -907,4 +973,112 @@ pub fn uninstall_pi(extension_path: &Path) -> InstallResult {
         std::fs::remove_file(extension_path)?;
     }
     Ok(())
+}
+
+// ---------------------------------------------------------------------------
+// Shell completion script (post-install / post-uninstall step)
+// ---------------------------------------------------------------------------
+
+/// Shells for which ecotokens can install a user-level completion script.
+#[derive(Debug, Clone, Copy, PartialEq, Eq)]
+pub enum CompletionShell {
+    Bash,
+    Zsh,
+    Fish,
+}
+
+impl CompletionShell {
+    pub const ALL: [CompletionShell; 3] = [Self::Bash, Self::Zsh, Self::Fish];
+
+    /// Detect the shell from a `$SHELL`-style value (e.g. `/usr/bin/zsh`).
+    pub fn detect(shell_env: Option<&str>) -> Option<Self> {
+        let name = Path::new(shell_env?).file_name()?.to_str()?;
+        match name {
+            "bash" => Some(Self::Bash),
+            "zsh" => Some(Self::Zsh),
+            "fish" => Some(Self::Fish),
+            _ => None,
+        }
+    }
+
+    pub fn name(self) -> &'static str {
+        match self {
+            Self::Bash => "bash",
+            Self::Zsh => "zsh",
+            Self::Fish => "fish",
+        }
+    }
+}
+
+/// Outcome of writing a completion script.
+#[derive(Debug, Clone, Copy, PartialEq, Eq)]
+pub enum CompletionStatus {
+    Created,
+    Updated,
+    Unchanged,
+}
+
+/// User-level completion file location for `shell`, given the XDG base dirs.
+pub fn completion_path_for(
+    shell: CompletionShell,
+    data_home: &Path,
+    config_home: &Path,
+) -> std::path::PathBuf {
+    match shell {
+        CompletionShell::Bash => data_home
+            .join("bash-completion")
+            .join("completions")
+            .join("ecotokens"),
+        CompletionShell::Zsh => data_home
+            .join("zsh")
+            .join("site-functions")
+            .join("_ecotokens"),
+        CompletionShell::Fish => config_home
+            .join("fish")
+            .join("completions")
+            .join("ecotokens.fish"),
+    }
+}
+
+/// Completion file location honouring `XDG_DATA_HOME` / `XDG_CONFIG_HOME`.
+pub fn default_completion_path(shell: CompletionShell) -> Option<std::path::PathBuf> {
+    let xdg = |var: &str| {
+        std::env::var_os(var)
+            .map(std::path::PathBuf::from)
+            .filter(|p| p.is_absolute())
+    };
+    let home = dirs::home_dir();
+    let data = xdg("XDG_DATA_HOME").or_else(|| home.as_ref().map(|h| h.join(".local/share")))?;
+    let config = xdg("XDG_CONFIG_HOME").or_else(|| home.as_ref().map(|h| h.join(".config")))?;
+    Some(completion_path_for(shell, &data, &config))
+}
+
+/// Write (or refresh) the completion script at `path`. Idempotent.
+pub fn install_completion_script(path: &Path, script: &str) -> std::io::Result<CompletionStatus> {
+    let status = match std::fs::read_to_string(path) {
+        Ok(existing) if existing == script => return Ok(CompletionStatus::Unchanged),
+        Ok(_) => CompletionStatus::Updated,
+        Err(e) if e.kind() == std::io::ErrorKind::NotFound => CompletionStatus::Created,
+        // Unreadable / non-UTF8 file: refuse to overwrite something we cannot verify.
+        Err(e) => return Err(e),
+    };
+    if let Some(parent) = path.parent() {
+        std::fs::create_dir_all(parent)?;
+    }
+    std::fs::write(path, script)?;
+    Ok(status)
+}
+
+/// Remove the completion script at `path` if it exists and is an ecotokens
+/// script. Returns whether a file was removed.
+pub fn uninstall_completion_script(path: &Path) -> std::io::Result<bool> {
+    match std::fs::read_to_string(path) {
+        Ok(content) if content.contains("ecotokens") => {
+            std::fs::remove_file(path)?;
+            Ok(true)
+        }
+        Ok(_) => Ok(false),
+        Err(e) if e.kind() == std::io::ErrorKind::NotFound => Ok(false),
+        Err(e) => Err(e),
+    }
 }

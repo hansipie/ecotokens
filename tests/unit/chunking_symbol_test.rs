@@ -85,7 +85,7 @@ mod tests {
             "120 lines should produce ≥2 chunks of 50 lines"
         );
         for c in &chunks {
-            assert!(c.content.len() > 0, "chunk content should not be empty");
+            assert!(!c.content.is_empty(), "chunk content should not be empty");
         }
     }
 

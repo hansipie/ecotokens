@@ -3,9 +3,10 @@ use ecotokens::config::Settings;
 use std::collections::HashMap;
 
 fn enabled_settings() -> Settings {
-    let mut s = Settings::default();
-    s.abbreviations_enabled = true;
-    s
+    Settings {
+        abbreviations_enabled: true,
+        ..Default::default()
+    }
 }
 
 #[test]
@@ -113,8 +114,10 @@ fn abbreviations_disabled_in_default_settings() {
 
 #[test]
 fn settings_json_omits_custom_abbreviations() {
-    let mut s = Settings::default();
-    s.abbreviations_enabled = true;
+    let mut s = Settings {
+        abbreviations_enabled: true,
+        ..Default::default()
+    };
     s.abbreviations_custom.insert("foobar".into(), "fb".into());
     let json = serde_json::to_string(&s).unwrap();
     assert!(json.contains("\"abbreviations_enabled\":true"));

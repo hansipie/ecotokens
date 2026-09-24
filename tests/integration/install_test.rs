@@ -149,7 +149,7 @@ fn uninstall_removes_mcp_entry_from_claude_json() {
     assert!(
         !cv["mcpServers"]
             .as_object()
-            .map_or(false, |m| m.contains_key("ecotokens")),
+            .is_some_and(|m| m.contains_key("ecotokens")),
         "mcpServers.ecotokens should be removed from ~/.claude.json after uninstall"
     );
 }
@@ -184,7 +184,7 @@ fn uninstall_preserves_other_mcp_entries() {
     assert!(
         !cv["mcpServers"]
             .as_object()
-            .map_or(false, |m| m.contains_key("ecotokens")),
+            .is_some_and(|m| m.contains_key("ecotokens")),
         "ecotokens MCP entry should be gone"
     );
 }
@@ -1258,4 +1258,144 @@ fn hermes_uninstall_end_to_end_with_hermes_home() {
         !plugin_dir.exists(),
         "le dossier plugin doit être supprimé après uninstall"
     );
+}
+
+// ── Auto-watch: reinstall must restore Claude Code session hooks ────────────
+
+fn run_claude_install(home: &TempDir, auto_watch: bool) -> std::path::PathBuf {
+    let config_dir = home.path().join(".config").join("ecotokens");
+    std::fs::create_dir_all(&config_dir).unwrap();
+    std::fs::write(
+        config_dir.join("config.json"),
+        format!("{{\"auto_watch\": {auto_watch}}}"),
+    )
+    .unwrap();
+
+    // State left behind by `ecotokens uninstall`: empty session hook arrays.
+    let settings = temp_claude_settings(home);
+    std::fs::write(
+        &settings,
+        r#"{"hooks":{"SessionStart":[],"SessionEnd":[]}}"#,
+    )
+    .unwrap();
+
+    let out = Command::new(ecotokens_bin())
+        .args(["install", "--target", "claude"])
+        .env("HOME", home.path())
+        .env("XDG_CONFIG_HOME", home.path().join(".config"))
+        .output()
+        .expect("failed to run ecotokens install --target claude");
+    assert!(
+        out.status.success(),
+        "install failed: {}",
+        String::from_utf8_lossy(&out.stderr)
+    );
+    settings
+}
+
+#[test]
+fn claude_install_restores_session_hooks_when_auto_watch_enabled() {
+    let home = TempDir::new().unwrap();
+    let settings = run_claude_install(&home, true);
+    assert!(
+        are_session_hooks_installed(&settings),
+        "session hooks must be reinstalled when auto_watch is enabled"
+    );
+}
+
+#[test]
+fn claude_install_skips_session_hooks_when_auto_watch_disabled() {
+    let home = TempDir::new().unwrap();
+    let settings = run_claude_install(&home, false);
+    assert!(
+        !are_session_hooks_installed(&settings),
+        "session hooks must not be installed when auto_watch is disabled"
+    );
+}
+
+// --- Shell completion post-install / post-uninstall steps ---
+
+#[test]
+fn completion_shell_detection() {
+    use ecotokens::install::CompletionShell;
+    assert_eq!(
+        CompletionShell::detect(Some("/usr/bin/zsh")),
+        Some(CompletionShell::Zsh)
+    );
+    assert_eq!(
+        CompletionShell::detect(Some("/bin/bash")),
+        Some(CompletionShell::Bash)
+    );
+    assert_eq!(
+        CompletionShell::detect(Some("/usr/bin/fish")),
+        Some(CompletionShell::Fish)
+    );
+    assert_eq!(CompletionShell::detect(Some("/bin/tcsh")), None);
+    assert_eq!(CompletionShell::detect(None), None);
+}
+
+#[test]
+fn completion_install_is_idempotent_and_updates() {
+    use ecotokens::install::{
+        completion_path_for, install_completion_script, CompletionShell, CompletionStatus,
+    };
+    let dir = TempDir::new().unwrap();
+    let path = completion_path_for(CompletionShell::Fish, dir.path(), dir.path());
+    assert_eq!(
+        install_completion_script(&path, "# ecotokens v1").unwrap(),
+        CompletionStatus::Created
+    );
+    assert_eq!(
+        install_completion_script(&path, "# ecotokens v1").unwrap(),
+        CompletionStatus::Unchanged
+    );
+    assert_eq!(
+        install_completion_script(&path, "# ecotokens v2").unwrap(),
+        CompletionStatus::Updated
+    );
+    assert_eq!(std::fs::read_to_string(&path).unwrap(), "# ecotokens v2");
+}
+
+#[test]
+fn completion_uninstall_removes_only_ecotokens_script() {
+    use ecotokens::install::{
+        completion_path_for, install_completion_script, uninstall_completion_script,
+        CompletionShell,
+    };
+    let dir = TempDir::new().unwrap();
+    let path = completion_path_for(CompletionShell::Bash, dir.path(), dir.path());
+    // Missing file: no-op.
+    assert!(!uninstall_completion_script(&path).unwrap());
+    install_completion_script(&path, "complete -F _ecotokens ecotokens").unwrap();
+    assert!(uninstall_completion_script(&path).unwrap());
+    assert!(!path.exists());
+    assert!(!uninstall_completion_script(&path).unwrap());
+    // Third-party file at the same location is left alone.
+    std::fs::create_dir_all(path.parent().unwrap()).unwrap();
+    std::fs::write(&path, "# something else").unwrap();
+    assert!(!uninstall_completion_script(&path).unwrap());
+    assert!(path.exists());
+}
+
+#[test]
+fn cli_install_and_uninstall_manage_completion_script() {
+    let home = TempDir::new().unwrap();
+    let run = |sub: &str| {
+        Command::new(ecotokens_bin())
+            .args([sub, "--target", "gemini"])
+            .env("HOME", home.path())
+            .env("SHELL", "/bin/fish")
+            .env("XDG_DATA_HOME", home.path().join("data"))
+            .env("XDG_CONFIG_HOME", home.path().join("config"))
+            .output()
+            .unwrap()
+    };
+    let script = home.path().join("config/fish/completions/ecotokens.fish");
+    assert!(run("install").status.success());
+    assert!(script.exists(), "completion script should be installed");
+    assert!(run("install").status.success(), "re-install is idempotent");
+    assert!(script.exists());
+    assert!(run("uninstall").status.success());
+    assert!(!script.exists(), "completion script should be removed");
+    assert!(run("uninstall").status.success(), "re-uninstall is a no-op");
 }

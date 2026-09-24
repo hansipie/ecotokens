@@ -1,5 +1,4 @@
 use std::process::Command;
-use tempfile::TempDir;
 
 mod helpers;
 use helpers::ecotokens;
@@ -16,29 +15,29 @@ fn filter_with_unreadable_command_exits_cleanly() {
         .expect("ecotokens itself should not crash");
 
     let stderr = String::from_utf8_lossy(&out.stderr);
+    assert_eq!(out.status.code(), Some(1), "missing command should fail");
     assert!(
-        !stderr.contains("thread") || !stderr.contains("panicked"),
+        !stderr.contains("panicked"),
         "should not produce a Rust panic, got: {stderr}"
     );
 }
 
 #[test]
 fn filter_passes_through_original_content_on_error() {
-    let tmp = TempDir::new().unwrap();
-    let fixture = tmp.path().join("data.txt");
-    std::fs::write(&fixture, "important output line\n").unwrap();
-
+    let original = "important output line\n";
     let out = Command::new(ecotokens())
-        .args(["filter", "--", "cat", fixture.to_str().unwrap()])
+        .args([
+            "filter",
+            "--",
+            "sh",
+            "-c",
+            "printf 'important output line\\n'; exit 7",
+        ])
         .output()
         .expect("filter should run");
 
-    assert!(out.status.success(), "filter of cat should succeed");
-    let stdout = String::from_utf8_lossy(&out.stdout);
-    assert!(
-        stdout.contains("important output line"),
-        "content should be passed through: {stdout}"
-    );
+    assert_eq!(out.status.code(), Some(7), "command failure must propagate");
+    assert_eq!(out.stdout, original.as_bytes(), "stdout must remain intact");
 }
 
 #[test]

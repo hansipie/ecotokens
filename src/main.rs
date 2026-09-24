@@ -22,9 +22,13 @@ mod embed;
 mod filter;
 mod hook;
 mod install;
+mod jev;
 mod masking;
 mod mcp;
 mod metrics;
+#[cfg(feature = "rewrite")]
+mod rewrite;
+mod router;
 mod search;
 mod tokens;
 mod trace;
@@ -63,6 +67,13 @@ enum Commands {
     HookCodex,
     /// Intercept a Codex Bash tool result via PostToolUse hook (reads JSON from stdin)
     HookPostCodex,
+    /// Model router: size a Claude Code message with Jev via UserPromptSubmit hook (reads JSON from stdin)
+    HookPrompt,
+    /// Model router: Jev sizes each message and small jobs go to cheaper helper agents
+    Router {
+        #[command(subcommand)]
+        action: RouterAction,
+    },
     /// Execute a command, filter its output, record metrics
     Filter {
         #[arg(last = true)]
@@ -102,13 +113,22 @@ enum Commands {
             conflicts_with = "history"
         )]
         period: metrics::report::Period,
+        /// Output as JSON
         #[arg(long)]
         json: bool,
-        #[arg(long)]
-        model: Option<String>,
         /// Show savings for last 24h, 7 days, and 30 days at once
         #[arg(long)]
         history: bool,
+        #[command(subcommand)]
+        action: Option<GainAction>,
+    },
+    /// Show detailed Jev usage: calls, fallbacks, latency, tokens and cost
+    Jev {
+        #[arg(long, default_value_t, value_name = "PERIOD")]
+        period: metrics::report::Period,
+        /// Output as JSON
+        #[arg(long)]
+        json: bool,
     },
     /// Play a Space Invaders mini-game where each filtered command spawns an enemy
     Game {
@@ -139,6 +159,7 @@ enum Commands {
     },
     /// Show or update configuration
     Config {
+        /// Output as JSON
         #[arg(long)]
         json: bool,
         /// Set global debug mode
@@ -147,11 +168,14 @@ enum Commands {
         /// Enable or disable debug logging to ~/.config/ecotokens/debug.log
         #[arg(long, value_name = "true|false")]
         debuglog: Option<bool>,
-        /// Set the default model used for cost calculations
-        #[arg(long)]
-        model: Option<String>,
+        /// Enable or disable TypeSafe Jev judgments (requires TYPESAFE_API_KEY)
+        #[arg(long, value_name = "true|false")]
+        jev: Option<bool>,
+        /// Enable or disable Jev line selection in the generic filter
+        #[arg(long, value_name = "true|false")]
+        jev_line_select: Option<bool>,
         /// Set embed provider: candle, ollama, none
-        #[arg(long)]
+        #[arg(long, value_parser = ["candle", "ollama", "none"])]
         embed_provider: Option<String>,
         /// Model name for the embeddings provider (e.g. sentence-transformers/all-MiniLM-L6-v2)
         #[arg(long)]
@@ -162,6 +186,7 @@ enum Commands {
     },
     /// Diagnose common ecotokens setup issues without changing files
     Doctor {
+        /// Output as JSON
         #[arg(long)]
         json: bool,
     },
@@ -181,6 +206,7 @@ enum Commands {
         kinds: Option<Vec<String>>,
         #[arg(long)]
         depth: Option<u32>,
+        /// Output as JSON
         #[arg(long)]
         json: bool,
     },
@@ -209,6 +235,7 @@ enum Commands {
         /// Disable automatic trace augmentation for symbol queries
         #[arg(long)]
         no_trace: bool,
+        /// Output as JSON
         #[arg(long)]
         json: bool,
     },
@@ -247,6 +274,7 @@ enum Commands {
         min_lines: usize,
         #[arg(long)]
         index_dir: Option<PathBuf>,
+        /// Output as JSON
         #[arg(long)]
         json: bool,
     },
@@ -301,6 +329,87 @@ enum Commands {
         /// Target shell
         shell: Shell,
     },
+    /// Rewrite, retone, simplify, or translate prose using the local model
+    #[cfg(feature = "rewrite")]
+    Rewrite {
+        /// Rewrite mode
+        //
+        // Not restricted by clap: a mismatch would exit 2, overriding the
+        // contract's exit code 1 for "unknown mode" (contracts/cli-rewrite.md).
+        // `LenientPossibleValues` only advertises the values to the completion
+        // generators; validation still happens in `Mode::parse`.
+        #[arg(long, default_value = "paraphrase", value_parser = LenientPossibleValues(&["paraphrase", "tone", "reading-level", "translate"]))]
+        mode: String,
+        /// Target for tone/reading-level/translate (forbidden for paraphrase)
+        #[arg(long = "to")]
+        to: Option<String>,
+        /// Read input from a file instead of stdin
+        #[arg(long)]
+        file: Option<PathBuf>,
+        /// Override the configured model
+        #[arg(long)]
+        model: Option<String>,
+        /// Whole-operation timeout in milliseconds
+        #[arg(long, default_value = "30000")]
+        timeout_ms: u64,
+        /// Force diff saving on for this run
+        #[arg(long)]
+        save_diff: bool,
+        /// Force diff saving off for this run (wins over config and --save-diff)
+        #[arg(long)]
+        no_save_diff: bool,
+        /// Output as JSON
+        #[arg(long)]
+        json: bool,
+    },
+}
+
+#[derive(Subcommand)]
+enum GainAction {
+    /// Set the model price used for cost estimates (USD per million tokens)
+    Price {
+        #[arg(long)]
+        input: Option<f64>,
+        #[arg(long)]
+        output: Option<f64>,
+    },
+}
+
+#[derive(Subcommand)]
+enum RouterAction {
+    /// Turn the router on: hook + helper agents in ~/.claude
+    On {
+        /// Max time Jev may add to each message, in ms (saved as router_timeout_ms)
+        #[arg(long)]
+        timeout_ms: Option<u64>,
+    },
+    /// Turn the router off and remove the hook and helper agents
+    Off,
+    /// Show messages per size, decisions and what Jev has cost
+    Status {
+        /// Output as JSON
+        #[arg(long)]
+        json: bool,
+    },
+    /// Size sample messages with Jev (live, not recorded, works while off)
+    Try {
+        /// Messages to size
+        #[arg(required = true)]
+        messages: Vec<String>,
+        /// Output as JSON
+        #[arg(long)]
+        json: bool,
+        /// Override router_timeout_ms for this run
+        #[arg(long)]
+        timeout_ms: Option<u64>,
+    },
+    /// Set the Jev price used for cost estimates (USD per million tokens)
+    Price {
+        #[arg(long)]
+        input: Option<f64>,
+        #[arg(long)]
+        output: Option<f64>,
+    },
 }
 
 #[derive(Subcommand)]
@@ -310,6 +419,7 @@ enum TraceAction {
         symbol: String,
         #[arg(long)]
         index_dir: Option<PathBuf>,
+        /// Output as JSON
         #[arg(long)]
         json: bool,
     },
@@ -320,6 +430,7 @@ enum TraceAction {
         depth: u32,
         #[arg(long)]
         index_dir: Option<PathBuf>,
+        /// Output as JSON
         #[arg(long)]
         json: bool,
     },
@@ -507,9 +618,36 @@ fn format_thousands(n: u64) -> String {
     result.chars().rev().collect()
 }
 
+const NO_PRICE_HINT: &str =
+    "n/a (set with: ecotokens gain price --input <usd/Mtok> --output <usd/Mtok>)";
+
+fn cmd_gain_price(input: Option<f64>, output: Option<f64>) {
+    let mut settings = config::Settings::load();
+    for (name, value) in [("--input", input), ("--output", output)] {
+        if let Err(e) = config::validate_price(name, value) {
+            eprintln!("gain price error: {e}");
+            std::process::exit(1);
+        }
+    }
+    if input.is_some() {
+        settings.price_input_usd_per_mtok = input;
+    }
+    if output.is_some() {
+        settings.price_output_usd_per_mtok = output;
+    }
+    if let Err(e) = settings.save() {
+        eprintln!("gain price error: {e}");
+        std::process::exit(1);
+    }
+    println!(
+        "Price: input {} · output {} (USD per million tokens)",
+        config::fmt_price(settings.price_input_usd_per_mtok),
+        config::fmt_price(settings.price_output_usd_per_mtok)
+    );
+}
+
 fn print_history_table(report: &metrics::report::HistoryReport) {
-    let model = &report.model_ref;
-    println!("Savings History          [model: {model}]");
+    println!("Savings History");
     println!("{}", "─".repeat(65));
     println!(
         "{:<14} {:>6}  {:>14}  {:>9}  {:>12}",
@@ -522,19 +660,242 @@ fn print_history_table(report: &metrics::report::HistoryReport) {
     ] {
         let tokens_saved = r.total_tokens_before.saturating_sub(r.total_tokens_after);
         println!(
-            "{:<14} {:>6}  {:>14}  {:>8.1}%  ${:.2}",
+            "{:<14} {:>6}  {:>14}  {:>8.1}%  {}",
             label,
             r.total_interceptions,
             format_thousands(tokens_saved),
             r.total_savings_pct,
             r.cost_avoided_usd
+                .map_or_else(|| "n/a".to_string(), |c| format!("${c:.2}"))
         );
     }
     println!("{}", "─".repeat(65));
 }
 
-fn cmd_gain(period: metrics::report::Period, json: bool, model: Option<String>, history: bool) {
-    use metrics::report::{aggregate, aggregate_history, filter_by_period};
+fn run_gain_tui<B: ratatui::backend::Backend>(
+    terminal: &mut Terminal<B>,
+    period: &metrics::report::Period,
+    path: &std::path::Path,
+) {
+    use metrics::report::{aggregate, filter_by_period};
+    use metrics::store::read_from;
+    let mut items = read_from(path).unwrap_or_default();
+    let mut report = aggregate(&items, period.clone());
+    let mut filtered_items = filter_by_period(&items, period);
+    let mut gain_mode = tui::gain::GainMode::default();
+    let mut sparkline_mode = tui::gain::SparklineMode::default();
+    let mut detail_mode = tui::gain::DetailMode::default();
+    let mut selected_family: Option<usize> = None;
+    let mut selected_project: Option<usize> = None;
+    let mut project_filter: Option<String> = None;
+    let mut history_scroll: usize = 0;
+    let mut log_scroll: usize = 0;
+    let mut log_selected: Option<usize> = None;
+    let mut gauge_scroll: usize = 0;
+    let mut split_raw_after_scroll: usize = 0;
+    let mut last_reload = std::time::Instant::now();
+    // Precomputed once at load time, updated only on reload.
+    let mut sorted_projects: Vec<(String, f32)> = sorted_projects_from(&report);
+    loop {
+        // Reload data every 10 seconds regardless of incoming key events
+        if last_reload.elapsed() >= std::time::Duration::from_secs(10) {
+            items = read_from(path).unwrap_or_default();
+            report = aggregate(&items, period.clone());
+            filtered_items = filter_by_period(&items, period);
+            sorted_projects = sorted_projects_from(&report);
+            last_reload = std::time::Instant::now();
+        }
+        let ts = chrono::Utc::now().format("%H:%M:%S").to_string();
+        let family_count = match project_filter.as_deref() {
+            Some(proj) => tui::gain::sorted_family_keys_for_project(&filtered_items, proj).len(),
+            None => report.by_family.len(),
+        };
+        let project_count = report.by_project.len();
+        let _ = terminal.draw(|f| {
+            tui::gain::render_gain(
+                f,
+                f.area(),
+                &report,
+                &filtered_items,
+                Some(&ts),
+                gain_mode,
+                sparkline_mode,
+                selected_family,
+                detail_mode,
+                selected_project,
+                project_filter.as_deref(),
+                &mut history_scroll,
+                &mut log_scroll,
+                log_selected,
+                &mut gauge_scroll,
+                &mut split_raw_after_scroll,
+            );
+        });
+        if poll(std::time::Duration::from_millis(500)).unwrap_or(false) {
+            if let Ok(Event::Key(key)) = read() {
+                if key.kind != KeyEventKind::Press {
+                    continue;
+                }
+                if is_quit_key(&key) {
+                    break;
+                }
+                if key.code == KeyCode::Char('v') {
+                    tui::jev::run(terminal, period);
+                    continue;
+                }
+                let switch_mode = (key.code == KeyCode::Char('p')
+                    && gain_mode == tui::gain::GainMode::Family)
+                    || (key.code == KeyCode::Char('f')
+                        && gain_mode == tui::gain::GainMode::Project);
+                if switch_mode {
+                    project_filter = None;
+                    gain_mode = gain_mode.toggle();
+                    history_scroll = 0;
+                    log_scroll = 0;
+                    log_selected = None;
+                    gauge_scroll = 0;
+                }
+                if key.code == KeyCode::Char('s') {
+                    sparkline_mode = sparkline_mode.next();
+                }
+                if key.code == KeyCode::Char('d') {
+                    detail_mode = detail_mode.toggle();
+                    history_scroll = 0;
+                    log_scroll = 0;
+                    split_raw_after_scroll = 0;
+                }
+                // Maj+O/Maj+L scrollent le panneau APRÈS en mode SplitRaw.
+                if detail_mode == tui::gain::DetailMode::SplitRaw {
+                    match key.code {
+                        KeyCode::Char('L') => {
+                            split_raw_after_scroll = split_raw_after_scroll.saturating_add(1);
+                        }
+                        KeyCode::Char('O') => {
+                            split_raw_after_scroll = split_raw_after_scroll.saturating_sub(1);
+                        }
+                        _ => {}
+                    }
+                }
+                if gain_mode == tui::gain::GainMode::Family && family_count > 0 {
+                    match key.code {
+                        KeyCode::Char('j') => {
+                            selected_family = Some(match selected_family {
+                                None => 0,
+                                Some(i) => (i + 1) % family_count,
+                            });
+                            history_scroll = 0;
+                            log_scroll = 0;
+                            log_selected = None;
+                        }
+                        KeyCode::Char('u') => {
+                            selected_family = Some(match selected_family {
+                                None => family_count - 1,
+                                Some(i) => {
+                                    if i == 0 {
+                                        family_count - 1
+                                    } else {
+                                        i - 1
+                                    }
+                                }
+                            });
+                            history_scroll = 0;
+                            log_scroll = 0;
+                            log_selected = None;
+                        }
+                        _ => {}
+                    }
+                }
+                if gain_mode == tui::gain::GainMode::Project && project_count > 0 {
+                    match key.code {
+                        KeyCode::Char('j') => {
+                            selected_project = Some(match selected_project {
+                                None => 0,
+                                Some(i) => (i + 1) % project_count,
+                            });
+                            history_scroll = 0;
+                            log_scroll = 0;
+                            log_selected = None;
+                        }
+                        KeyCode::Char('u') => {
+                            selected_project = Some(match selected_project {
+                                None => project_count - 1,
+                                Some(i) => {
+                                    if i == 0 {
+                                        project_count - 1
+                                    } else {
+                                        i - 1
+                                    }
+                                }
+                            });
+                            history_scroll = 0;
+                            log_scroll = 0;
+                            log_selected = None;
+                        }
+                        KeyCode::Char('l') => {
+                            history_scroll = history_scroll.saturating_add(1);
+                        }
+                        KeyCode::Char('o') => {
+                            history_scroll = history_scroll.saturating_sub(1);
+                        }
+                        _ => {}
+                    }
+                }
+                // o/l scroll the active detail panel in Family mode.
+                if gain_mode == tui::gain::GainMode::Family {
+                    match key.code {
+                        KeyCode::Char('l') => {
+                            history_scroll = history_scroll.saturating_add(1);
+                        }
+                        KeyCode::Char('o') => {
+                            history_scroll = history_scroll.saturating_sub(1);
+                        }
+                        _ => {}
+                    }
+                }
+                // i/k move the selected line in the History panel.
+                match key.code {
+                    KeyCode::Char('k') => {
+                        let count = tui::gain::log_item_count(
+                            &filtered_items,
+                            gain_mode,
+                            selected_family,
+                            selected_project,
+                            project_filter.as_deref(),
+                            &report,
+                            &sorted_projects,
+                        );
+                        if count > 0 {
+                            log_selected = Some(log_selected.map_or(0, |i| (i + 1).min(count - 1)));
+                        }
+                        history_scroll = 0;
+                    }
+                    KeyCode::Char('i') => {
+                        log_selected = Some(log_selected.map_or(0, |i| i.saturating_sub(1)));
+                        history_scroll = 0;
+                    }
+                    _ => {}
+                }
+                if gain_mode == tui::gain::GainMode::Project
+                    && key.code == KeyCode::Enter
+                    && project_count > 0
+                {
+                    if let Some(idx) = selected_project {
+                        if let Some((name, _)) = sorted_projects.get(idx) {
+                            project_filter = Some(name.clone());
+                            gain_mode = tui::gain::GainMode::Family;
+                            selected_family = None;
+                            history_scroll = 0;
+                            gauge_scroll = 0;
+                        }
+                    }
+                }
+            }
+        }
+    }
+}
+
+fn cmd_gain(period: metrics::report::Period, json: bool, history: bool) {
+    use metrics::report::{aggregate, aggregate_history};
     use metrics::store::read_from;
 
     let path = match metrics::store::metrics_path() {
@@ -544,12 +905,10 @@ fn cmd_gain(period: metrics::report::Period, json: bool, model: Option<String>, 
             std::process::exit(1);
         }
     };
-    let settings = config::Settings::load();
-    let model_str = model.as_deref().unwrap_or(&settings.default_model);
-    let mut items = read_from(&path).unwrap_or_default();
+    let items = read_from(&path).unwrap_or_default();
 
     if history {
-        let hist = aggregate_history(&items, model_str);
+        let hist = aggregate_history(&items);
         if json {
             println!("{}", serde_json::to_string_pretty(&hist).unwrap());
         } else {
@@ -558,8 +917,7 @@ fn cmd_gain(period: metrics::report::Period, json: bool, model: Option<String>, 
         return;
     }
 
-    let mut report = aggregate(&items, period.clone(), model_str);
-    let mut filtered_items = filter_by_period(&items, &period);
+    let report = aggregate(&items, period.clone());
 
     if json {
         println!("{}", serde_json::to_string_pretty(&report).unwrap());
@@ -573,218 +931,7 @@ fn cmd_gain(period: metrics::report::Period, json: bool, model: Option<String>, 
         let _guard = TerminalGuard::stdout();
         let backend = CrosstermBackend::new(std::io::stdout());
         if let Ok(mut terminal) = Terminal::new(backend) {
-            let mut gain_mode = tui::gain::GainMode::default();
-            let mut sparkline_mode = tui::gain::SparklineMode::default();
-            let mut detail_mode = tui::gain::DetailMode::default();
-            let mut selected_family: Option<usize> = None;
-            let mut selected_project: Option<usize> = None;
-            let mut project_filter: Option<String> = None;
-            let mut history_scroll: usize = 0;
-            let mut log_scroll: usize = 0;
-            let mut log_selected: Option<usize> = None;
-            let mut gauge_scroll: usize = 0;
-            let mut split_raw_after_scroll: usize = 0;
-            let mut last_reload = std::time::Instant::now();
-            // Precomputed once at load time, updated only on reload.
-            let mut sorted_projects: Vec<(String, f32)> = sorted_projects_from(&report);
-            loop {
-                // Reload data every 10 seconds regardless of incoming key events
-                if last_reload.elapsed() >= std::time::Duration::from_secs(10) {
-                    items = read_from(&path).unwrap_or_default();
-                    report = aggregate(&items, period.clone(), model_str);
-                    filtered_items = filter_by_period(&items, &period);
-                    sorted_projects = sorted_projects_from(&report);
-                    last_reload = std::time::Instant::now();
-                }
-                let ts = chrono::Utc::now().format("%H:%M:%S").to_string();
-                let family_count = match project_filter.as_deref() {
-                    Some(proj) => {
-                        tui::gain::sorted_family_keys_for_project(&filtered_items, proj).len()
-                    }
-                    None => report.by_family.len(),
-                };
-                let project_count = report.by_project.len();
-                let _ = terminal.draw(|f| {
-                    tui::gain::render_gain(
-                        f,
-                        f.area(),
-                        &report,
-                        &filtered_items,
-                        Some(&ts),
-                        gain_mode,
-                        sparkline_mode,
-                        selected_family,
-                        detail_mode,
-                        selected_project,
-                        project_filter.as_deref(),
-                        &mut history_scroll,
-                        &mut log_scroll,
-                        log_selected,
-                        &mut gauge_scroll,
-                        &mut split_raw_after_scroll,
-                    );
-                });
-                if poll(std::time::Duration::from_millis(500)).unwrap_or(false) {
-                    if let Ok(Event::Key(key)) = read() {
-                        if key.kind != KeyEventKind::Press {
-                            continue;
-                        }
-                        if is_quit_key(&key) {
-                            break;
-                        }
-                        let switch_mode = (key.code == KeyCode::Char('p')
-                            && gain_mode == tui::gain::GainMode::Family)
-                            || (key.code == KeyCode::Char('f')
-                                && gain_mode == tui::gain::GainMode::Project);
-                        if switch_mode {
-                            project_filter = None;
-                            gain_mode = gain_mode.toggle();
-                            history_scroll = 0;
-                            log_scroll = 0;
-                            log_selected = None;
-                            gauge_scroll = 0;
-                        }
-                        if key.code == KeyCode::Char('s') {
-                            sparkline_mode = sparkline_mode.next();
-                        }
-                        if key.code == KeyCode::Char('d') {
-                            detail_mode = detail_mode.toggle();
-                            history_scroll = 0;
-                            log_scroll = 0;
-                            split_raw_after_scroll = 0;
-                        }
-                        // Maj+O/Maj+L scrollent le panneau APRÈS en mode SplitRaw.
-                        if detail_mode == tui::gain::DetailMode::SplitRaw {
-                            match key.code {
-                                KeyCode::Char('L') => {
-                                    split_raw_after_scroll =
-                                        split_raw_after_scroll.saturating_add(1);
-                                }
-                                KeyCode::Char('O') => {
-                                    split_raw_after_scroll =
-                                        split_raw_after_scroll.saturating_sub(1);
-                                }
-                                _ => {}
-                            }
-                        }
-                        if gain_mode == tui::gain::GainMode::Family && family_count > 0 {
-                            match key.code {
-                                KeyCode::Char('j') => {
-                                    selected_family = Some(match selected_family {
-                                        None => 0,
-                                        Some(i) => (i + 1) % family_count,
-                                    });
-                                    history_scroll = 0;
-                                    log_scroll = 0;
-                                    log_selected = None;
-                                }
-                                KeyCode::Char('u') => {
-                                    selected_family = Some(match selected_family {
-                                        None => family_count - 1,
-                                        Some(i) => {
-                                            if i == 0 {
-                                                family_count - 1
-                                            } else {
-                                                i - 1
-                                            }
-                                        }
-                                    });
-                                    history_scroll = 0;
-                                    log_scroll = 0;
-                                    log_selected = None;
-                                }
-                                _ => {}
-                            }
-                        }
-                        if gain_mode == tui::gain::GainMode::Project && project_count > 0 {
-                            match key.code {
-                                KeyCode::Char('j') => {
-                                    selected_project = Some(match selected_project {
-                                        None => 0,
-                                        Some(i) => (i + 1) % project_count,
-                                    });
-                                    history_scroll = 0;
-                                    log_scroll = 0;
-                                    log_selected = None;
-                                }
-                                KeyCode::Char('u') => {
-                                    selected_project = Some(match selected_project {
-                                        None => project_count - 1,
-                                        Some(i) => {
-                                            if i == 0 {
-                                                project_count - 1
-                                            } else {
-                                                i - 1
-                                            }
-                                        }
-                                    });
-                                    history_scroll = 0;
-                                    log_scroll = 0;
-                                    log_selected = None;
-                                }
-                                KeyCode::Char('l') => {
-                                    history_scroll = history_scroll.saturating_add(1);
-                                }
-                                KeyCode::Char('o') => {
-                                    history_scroll = history_scroll.saturating_sub(1);
-                                }
-                                _ => {}
-                            }
-                        }
-                        // o/l scroll the active detail panel in Family mode.
-                        if gain_mode == tui::gain::GainMode::Family {
-                            match key.code {
-                                KeyCode::Char('l') => {
-                                    history_scroll = history_scroll.saturating_add(1);
-                                }
-                                KeyCode::Char('o') => {
-                                    history_scroll = history_scroll.saturating_sub(1);
-                                }
-                                _ => {}
-                            }
-                        }
-                        // i/k move the selected line in the History panel.
-                        match key.code {
-                            KeyCode::Char('k') => {
-                                let count = tui::gain::log_item_count(
-                                    &filtered_items,
-                                    gain_mode,
-                                    selected_family,
-                                    selected_project,
-                                    project_filter.as_deref(),
-                                    &report,
-                                    &sorted_projects,
-                                );
-                                if count > 0 {
-                                    log_selected =
-                                        Some(log_selected.map_or(0, |i| (i + 1).min(count - 1)));
-                                }
-                                history_scroll = 0;
-                            }
-                            KeyCode::Char('i') => {
-                                log_selected =
-                                    Some(log_selected.map_or(0, |i| i.saturating_sub(1)));
-                                history_scroll = 0;
-                            }
-                            _ => {}
-                        }
-                        if gain_mode == tui::gain::GainMode::Project
-                            && key.code == KeyCode::Enter
-                            && project_count > 0
-                        {
-                            if let Some(idx) = selected_project {
-                                if let Some((name, _)) = sorted_projects.get(idx) {
-                                    project_filter = Some(name.clone());
-                                    gain_mode = tui::gain::GainMode::Family;
-                                    selected_family = None;
-                                    history_scroll = 0;
-                                    gauge_scroll = 0;
-                                }
-                            }
-                        }
-                    }
-                }
-            }
+            run_gain_tui(&mut terminal, &period, &path);
         }
     } else {
         println!("=== ecotokens gain ({period}) ===");
@@ -792,8 +939,16 @@ fn cmd_gain(period: metrics::report::Period, json: bool, model: Option<String>, 
         println!("Tokens before  : {}", report.total_tokens_before);
         println!("Tokens after   : {}", report.total_tokens_after);
         println!("Savings        : {:.1}%", report.total_savings_pct);
-        if report.cost_avoided_usd > 0.0 {
-            println!("Cost avoided   : ${:.4} USD", report.cost_avoided_usd);
+        match report.cost_avoided_usd {
+            Some(cost) if cost > 0.0 => println!("Cost avoided   : ${cost:.4} USD"),
+            Some(_) => {}
+            None => println!("Cost avoided   : {NO_PRICE_HINT}"),
+        }
+        if report.rewrite_overhead_tokens > 0 {
+            println!(
+                "Rewrite overhead: {} tokens (automatic pipeline transformation)",
+                format_thousands(report.rewrite_overhead_tokens)
+            );
         }
         if !report.by_agent.is_empty() {
             println!("By agent       :");
@@ -805,6 +960,55 @@ fn cmd_gain(period: metrics::report::Period, json: bool, model: Option<String>, 
                     agent, stats.count, stats.savings_pct
                 );
             }
+        }
+    }
+}
+
+fn cmd_jev(period: metrics::report::Period, json: bool) {
+    let settings = config::Settings::load();
+    let summary = tui::jev::load_summary(&settings, &period);
+    if json {
+        println!("{}", serde_json::to_string_pretty(&summary).unwrap());
+    } else if std::io::IsTerminal::is_terminal(&std::io::stdout()) {
+        if let Err(e) = enable_raw_mode() {
+            eprintln!("failed to enable raw mode: {e}");
+        }
+        if let Err(e) = std::io::stdout().execute(EnterAlternateScreen) {
+            eprintln!("failed to enter alternate screen: {e}");
+        }
+        let _guard = TerminalGuard::stdout();
+        let backend = CrosstermBackend::new(std::io::stdout());
+        if let Ok(mut terminal) = Terminal::new(backend) {
+            if tui::jev::run(&mut terminal, &period) {
+                if let Some(path) = metrics::store::metrics_path() {
+                    run_gain_tui(&mut terminal, &period, &path);
+                }
+            }
+        }
+    } else {
+        println!("=== ecotokens jev ({period}) ===");
+        println!("Calls          : {}", summary.calls);
+        println!("Success        : {}", summary.ok);
+        println!("Fell back      : {}", summary.fallbacks);
+        println!(
+            "Latency        : avg {} ms, p95 {} ms",
+            summary.avg_latency_ms, summary.p95_latency_ms
+        );
+        println!(
+            "Tokens         : {} in, {} out",
+            summary.input_tokens, summary.output_tokens
+        );
+        if let Some(c) = summary.cost_usd {
+            println!("Cost           : ${c:.4} USD");
+        }
+        for (purpose, st) in summary.by_purpose.iter().filter(|(_, st)| st.calls > 0) {
+            println!(
+                "  {purpose:<13} {} calls, {} ok, avg {} ms",
+                st.calls, st.ok, st.avg_latency_ms
+            );
+        }
+        for (kind, n) in &summary.errors {
+            println!("  failure {kind}: {n}");
         }
     }
 }
@@ -957,6 +1161,18 @@ fn cmd_install(
             Err(e) => {
                 eprintln!("install error (mcp server): {e}");
                 std::process::exit(1);
+            }
+        }
+        // `uninstall` removes the session hooks too, so a reinstall must restore
+        // them when auto-watch is enabled, otherwise SessionStart never fires.
+        let settings = config::Settings::load();
+        if settings.auto_watch && !install::are_session_hooks_installed(&claude_path) {
+            match install::install_session_hooks(&claude_path) {
+                Ok(()) => print_install_item("ok", "session hooks", &claude_path),
+                Err(e) => {
+                    eprintln!("install error (claude session hooks): {e}");
+                    std::process::exit(1);
+                }
             }
         }
     }
@@ -1184,6 +1400,8 @@ fn cmd_install(
         }
     }
 
+    post_install_completions(&mut first_section);
+
     let enable_ai = ai_summary || ai_summary_model.is_some();
     if enable_ai {
         let mut settings = config::Settings::load();
@@ -1237,8 +1455,19 @@ fn cmd_uninstall(target: String) {
         let had_post_hook = install::is_post_hook_installed(&claude_path);
         let had_mcp = install::is_mcp_registered(&claude_path);
         let had_session = install::are_session_hooks_installed(&claude_path);
+        let had_router = install::is_prompt_hook_installed(&claude_path);
         match install::uninstall_hook(&claude_path, &claude_json) {
             Ok(()) => {
+                if had_router {
+                    print_install_item("removed", "router hook", &claude_path);
+                }
+                if let Some(dir) = router::agents::default_agents_dir() {
+                    if let Ok(removed) = router::agents::remove_agents(&dir) {
+                        for path in removed {
+                            print_install_item("removed", "router agent", &path);
+                        }
+                    }
+                }
                 if had_hook {
                     print_install_item("removed", "hook", &claude_path);
                 }
@@ -1251,7 +1480,7 @@ fn cmd_uninstall(target: String) {
                 if had_session {
                     print_install_item("removed", "session hooks", &claude_path);
                 }
-                if !had_hook && !had_post_hook && !had_mcp && !had_session {
+                if !had_hook && !had_post_hook && !had_mcp && !had_session && !had_router {
                     print_install_note("nothing to uninstall");
                 }
             }
@@ -1485,13 +1714,40 @@ fn cmd_uninstall(target: String) {
             print_install_note("nothing to uninstall");
         }
     }
+
+    post_uninstall_completions(&mut first_section);
 }
 
+fn cmd_router(action: RouterAction) {
+    let settings_path = default_settings_path();
+    let Some(agents_dir) = router::agents::default_agents_dir() else {
+        eprintln!("error: cannot locate the home directory");
+        std::process::exit(1);
+    };
+    let result = match action {
+        RouterAction::On { timeout_ms } => router::cli::on(&settings_path, &agents_dir, timeout_ms),
+        RouterAction::Off => router::cli::off(&settings_path, &agents_dir),
+        RouterAction::Status { json } => router::cli::status(&settings_path, &agents_dir, json),
+        RouterAction::Try {
+            messages,
+            json,
+            timeout_ms,
+        } => std::process::exit(router::cli::try_messages(&messages, json, timeout_ms)),
+        RouterAction::Price { input, output } => router::cli::price(input, output),
+    };
+    if let Err(e) = result {
+        eprintln!("router error: {e}");
+        std::process::exit(1);
+    }
+}
+
+#[allow(clippy::too_many_arguments)]
 fn cmd_config(
     json: bool,
     debug: Option<bool>,
     debuglog: Option<bool>,
-    model: Option<String>,
+    jev: Option<bool>,
+    jev_line_select: Option<bool>,
     embed_provider: Option<String>,
     embed_model: Option<String>,
     embed_url: Option<String>,
@@ -1513,21 +1769,26 @@ fn cmd_config(
         dirty = true;
     }
 
-    if let Some(ref m) = model {
-        if m.is_empty() || !settings.model_pricing.contains_key(m.as_str()) {
-            if !m.is_empty() {
-                eprintln!("unknown model: '{}'", m);
-            }
-            let mut known = config::models::model_names();
-            known.sort();
-            eprintln!("available models:");
-            for name in known {
-                eprintln!("  {}", name);
-            }
-            std::process::exit(1);
-        }
-        settings.default_model = m.clone();
+    if let Some(v) = jev {
+        settings.jev_enabled = v;
         dirty = true;
+        let has_key =
+            matches!(std::env::var(crate::jev::API_KEY_ENV), Ok(k) if !k.trim().is_empty());
+        if v && !has_key {
+            eprintln!(
+                "warning: {} not set; Jev calls will fall back to heuristics",
+                crate::jev::API_KEY_ENV
+            );
+        }
+    }
+
+    if let Some(v) = jev_line_select {
+        settings.jev_line_select_enabled = v;
+        dirty = true;
+    }
+
+    if jev_line_select == Some(true) && !settings.jev_enabled {
+        eprintln!("warning: jev_line_select_enabled has no effect while jev_enabled is false");
     }
 
     // Mutation via --embed-provider
@@ -1598,7 +1859,14 @@ fn cmd_config(
         println!("hook_installed        : {}", hook_installed);
         println!("debug                 : {}", settings.debug);
         println!("debuglog              : {}", settings.debuglog);
-        println!("default_model         : {}", settings.default_model);
+        println!(
+            "price_input_usd_per_mtok  : {}",
+            config::fmt_price(settings.price_input_usd_per_mtok)
+        );
+        println!(
+            "price_output_usd_per_mtok : {}",
+            config::fmt_price(settings.price_output_usd_per_mtok)
+        );
         println!("exclusions            : {:?}", settings.exclusions);
         println!("embed_provider        : {}", provider_str);
         println!("ai_summary_enabled    : {}", settings.ai_summary_enabled);
@@ -1617,6 +1885,11 @@ fn cmd_config(
                 .unwrap_or("http://localhost:11434 (default)")
         );
         println!("abbreviations_enabled : {}", settings.abbreviations_enabled);
+        println!("jev_enabled           : {}", settings.jev_enabled);
+        println!(
+            "jev_line_select       : {}",
+            settings.jev_line_select_enabled
+        );
 
         let watch_store = config::SessionStore::load();
         let active_sessions: u32 = watch_store.0.values().map(|e| e.sessions).sum();
@@ -2953,10 +3226,239 @@ fn cmd_abbreviations_list() {
     }
 }
 
+/// String value parser that advertises its values (for shell
+/// completion and `--help`) without rejecting anything else at parse time.
+#[derive(Clone)]
+struct LenientPossibleValues(&'static [&'static str]);
+
+impl clap::builder::TypedValueParser for LenientPossibleValues {
+    type Value = String;
+
+    fn parse_ref(
+        &self,
+        _cmd: &clap::Command,
+        _arg: Option<&clap::Arg>,
+        value: &std::ffi::OsStr,
+    ) -> Result<String, clap::Error> {
+        Ok(value.to_string_lossy().into_owned())
+    }
+
+    fn possible_values(
+        &self,
+    ) -> Option<Box<dyn Iterator<Item = clap::builder::PossibleValue> + '_>> {
+        Some(Box::new(
+            self.0
+                .iter()
+                .copied()
+                .map(clap::builder::PossibleValue::new),
+        ))
+    }
+}
+
 fn cmd_completions(shell: Shell) {
     let mut cmd = Cli::command();
     let name = cmd.get_name().to_string();
     generate(shell, &mut cmd, name, &mut std::io::stdout());
+}
+
+fn completion_script(shell: install::CompletionShell) -> String {
+    let clap_shell = match shell {
+        install::CompletionShell::Bash => Shell::Bash,
+        install::CompletionShell::Zsh => Shell::Zsh,
+        install::CompletionShell::Fish => Shell::Fish,
+    };
+    let mut cmd = Cli::command();
+    let name = cmd.get_name().to_string();
+    let mut buf = Vec::new();
+    generate(clap_shell, &mut cmd, name, &mut buf);
+    String::from_utf8_lossy(&buf).into_owned()
+}
+
+/// Post-install step: install or update the shell completion script.
+/// Never aborts the install; failures are reported as warnings.
+fn post_install_completions(first_section: &mut bool) {
+    print_install_section(first_section, "Shell completion");
+    let shell_env = std::env::var("SHELL").ok();
+    let Some(shell) = install::CompletionShell::detect(shell_env.as_deref()) else {
+        print_install_note("unsupported or unknown shell; run `ecotokens completions <shell>`");
+        return;
+    };
+    let Some(path) = install::default_completion_path(shell) else {
+        eprintln!(
+            "warning: cannot determine completion path for {}",
+            shell.name()
+        );
+        return;
+    };
+    match install::install_completion_script(&path, &completion_script(shell)) {
+        Ok(install::CompletionStatus::Created) => print_install_item("ok", "completion", &path),
+        Ok(install::CompletionStatus::Updated) => {
+            print_install_item("updated", "completion", &path)
+        }
+        Ok(install::CompletionStatus::Unchanged) => print_install_item("ok", "completion", &path),
+        Err(e) => eprintln!("warning: could not install completion script: {e}"),
+    }
+    if shell == install::CompletionShell::Zsh {
+        print_install_note("zsh: ensure the site-functions directory is in your fpath");
+    }
+}
+
+/// Post-uninstall step: remove ecotokens completion scripts for every shell.
+/// Never aborts the uninstall; failures are reported as warnings.
+fn post_uninstall_completions(first_section: &mut bool) {
+    print_install_section(first_section, "Shell completion");
+    let mut removed_any = false;
+    for shell in install::CompletionShell::ALL {
+        let Some(path) = install::default_completion_path(shell) else {
+            continue;
+        };
+        match install::uninstall_completion_script(&path) {
+            Ok(true) => {
+                removed_any = true;
+                print_install_item("removed", "completion", &path);
+            }
+            Ok(false) => {}
+            Err(e) => eprintln!("warning: could not remove {}: {e}", path.display()),
+        }
+    }
+    if !removed_any {
+        print_install_note("no completion script found");
+    }
+}
+
+#[cfg(feature = "rewrite")]
+#[allow(clippy::too_many_arguments)]
+fn cmd_rewrite(
+    mode: String,
+    to: Option<String>,
+    file: Option<PathBuf>,
+    model: Option<String>,
+    timeout_ms: u64,
+    save_diff: bool,
+    no_save_diff: bool,
+    json: bool,
+) {
+    let stdin_is_tty = std::io::IsTerminal::is_terminal(&std::io::stdin());
+
+    // Stdin tty-ness alone cannot distinguish "explicitly piped content" from
+    // "non-interactive but empty" (e.g. `< /dev/null`, or any headless/CI
+    // invocation with `--file` and no redirection) — a pure tty check would
+    // wrongly reject the common non-interactive `--file` usage. So when a
+    // file is given and stdin is not a terminal, drain stdin (safe: a
+    // non-terminal stream always reaches EOF, it cannot block forever) and
+    // only treat it as "both supplied" if it actually carried bytes.
+    let stdin_bytes = if stdin_is_tty {
+        Vec::new()
+    } else {
+        let mut buf = Vec::new();
+        let _ = std::io::stdin().read_to_end(&mut buf);
+        buf
+    };
+
+    let text = match &file {
+        Some(_) if !stdin_bytes.is_empty() => {
+            eprintln!("ecotokens: error: supply input via stdin OR --file, not both");
+            std::process::exit(2);
+        }
+        Some(path) => match std::fs::read_to_string(path) {
+            Ok(s) => s,
+            Err(e) => {
+                eprintln!("ecotokens: error: could not read {}: {e}", path.display());
+                std::process::exit(2);
+            }
+        },
+        None if stdin_is_tty => {
+            eprintln!("ecotokens: error: no input — pipe text via stdin or pass --file <PATH>");
+            std::process::exit(2);
+        }
+        None => match String::from_utf8(stdin_bytes) {
+            Ok(s) => s,
+            Err(_) => {
+                eprintln!("ecotokens: error: input is not valid UTF-8");
+                std::process::exit(2);
+            }
+        },
+    };
+
+    let parsed_mode = match rewrite::modes::Mode::parse(&mode, to.as_deref()) {
+        Ok(m) => m,
+        Err(e) => {
+            eprintln!("ecotokens: error: {e}");
+            std::process::exit(1);
+        }
+    };
+
+    let settings = config::Settings::load();
+    let model_name = model
+        .or_else(|| settings.rewrite_model.clone())
+        .or_else(|| settings.ai_summary_model.clone())
+        .unwrap_or_else(|| "llama3.2:3b".to_string());
+
+    let provider = match rewrite::provider::OllamaProvider::new(
+        settings.rewrite_url.as_deref(),
+        model_name.clone(),
+    ) {
+        Ok(p) => p,
+        Err(e) => {
+            eprintln!("ecotokens: error: {e}");
+            std::process::exit(1);
+        }
+    };
+
+    // Precedence per contracts/config-settings.md:
+    // --no-save-diff > --save-diff > rewrite_save_diff > default (false).
+    let effective_save_diff = if no_save_diff {
+        false
+    } else if save_diff {
+        true
+    } else {
+        settings.rewrite_save_diff
+    };
+    let diff_dir = settings
+        .rewrite_diff_dir
+        .clone()
+        .unwrap_or_else(std::env::temp_dir);
+
+    let request = rewrite::RewriteRequest {
+        text,
+        mode: parsed_mode,
+        model: model_name,
+        timeout: std::time::Duration::from_millis(timeout_ms),
+        origin: rewrite::Origin::Cli,
+        truncation_ratio: settings.rewrite_truncation_ratio,
+        context_tokens: settings.rewrite_context_tokens,
+        save_diff: effective_save_diff,
+        diff_dir,
+        diff_retention: settings.rewrite_diff_retention,
+    };
+
+    let judge = jev::judge_from_settings(&settings);
+    let jev_ctx = judge.as_deref().map(|j| jev::JevContext::new(j, &settings));
+    let result = match rewrite::rewrite_with_judge(request, &provider, jev_ctx) {
+        Ok(r) => r,
+        Err(e) => {
+            eprintln!("ecotokens: error: {e}");
+            std::process::exit(1);
+        }
+    };
+
+    if let Some(reason) = &result.reason {
+        eprintln!("ecotokens: {reason}");
+    }
+
+    if json {
+        // `RewriteResult` already carries every field contracts/cli-rewrite.md
+        // requires, including `diff_path` — serialize it directly.
+        println!(
+            "{}",
+            serde_json::to_string_pretty(&result).unwrap_or_default()
+        );
+    } else {
+        print!("{}", result.text);
+        if !result.text.ends_with('\n') {
+            println!();
+        }
+    }
 }
 
 fn parse_version(v: &str) -> Option<(u32, u32, u32)> {
@@ -3047,6 +3549,7 @@ fn cmd_update(check: bool) {
 }
 
 fn main() {
+    config::env_file::load();
     let cli = Cli::parse();
     match cli.command {
         Commands::Hook => hook::handle(),
@@ -3059,6 +3562,8 @@ fn main() {
         Commands::HookPostQwen => hook::handle_post_qwen(),
         Commands::HookCodex => hook::handle_codex(),
         Commands::HookPostCodex => hook::handle_post_codex(),
+        Commands::HookPrompt => router::hook::handle_prompt(),
+        Commands::Router { action } => cmd_router(action),
         Commands::Filter {
             args,
             debug,
@@ -3073,11 +3578,16 @@ fn main() {
             hook_type,
         } => cmd_filter_output(command, exit_code, debug, cwd, hook_type),
         Commands::Gain {
+            action: Some(GainAction::Price { input, output }),
+            ..
+        } => cmd_gain_price(input, output),
+        Commands::Gain {
             period,
             json,
-            model,
             history,
-        } => cmd_gain(period, json, model, history),
+            action: None,
+        } => cmd_gain(period, json, history),
+        Commands::Jev { period, json } => cmd_jev(period, json),
         Commands::Game { period } => cmd_game(period),
         Commands::Install {
             target,
@@ -3090,7 +3600,8 @@ fn main() {
             json,
             debug,
             debuglog,
-            model,
+            jev,
+            jev_line_select,
             embed_provider,
             embed_model,
             embed_url,
@@ -3098,7 +3609,8 @@ fn main() {
             json,
             debug,
             debuglog,
-            model,
+            jev,
+            jev_line_select,
             embed_provider,
             embed_model,
             embed_url,
@@ -3194,6 +3706,26 @@ fn main() {
             AbbreviationsAction::List => cmd_abbreviations_list(),
         },
         Commands::Completions { shell } => cmd_completions(shell),
+        #[cfg(feature = "rewrite")]
+        Commands::Rewrite {
+            mode,
+            to,
+            file,
+            model,
+            timeout_ms,
+            save_diff,
+            no_save_diff,
+            json,
+        } => cmd_rewrite(
+            mode,
+            to,
+            file,
+            model,
+            timeout_ms,
+            save_diff,
+            no_save_diff,
+            json,
+        ),
         Commands::McpServer { index_dir } => {
             let idx_dir = index_dir.unwrap_or_else(default_index_dir);
             let rt = tokio::runtime::Builder::new_current_thread()

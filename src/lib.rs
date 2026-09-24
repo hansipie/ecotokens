@@ -8,8 +8,13 @@ pub mod embed;
 pub mod filter;
 pub mod hook;
 pub mod install;
+pub mod jev;
 pub mod masking;
+pub mod mcp;
 pub mod metrics;
+#[cfg(feature = "rewrite")]
+pub mod rewrite;
+pub mod router;
 pub mod search;
 pub mod tokens;
 pub mod trace;

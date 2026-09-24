@@ -1,5 +1,5 @@
 use chrono::Utc;
-use ecotokens::metrics::report::{aggregate, Period};
+use ecotokens::metrics::report::{aggregate, aggregate_with_price, Period};
 use ecotokens::metrics::store::{CommandFamily, FilterMode, HookType, Interception};
 
 fn make_interception_ago(
@@ -52,7 +52,7 @@ fn gain_shows_native_read_savings() {
     native_read.command = "src/main.rs".to_string();
     items.push(native_read);
 
-    let report = aggregate(&items, Period::All, "claude-sonnet-5");
+    let report = aggregate(&items, Period::All);
 
     // NativeRead should appear in by_family with key "native_read" (serde snake_case)
     assert!(
@@ -69,28 +69,28 @@ fn gain_shows_native_read_savings() {
 #[test]
 fn aggregate_all_includes_all_items() {
     let items = make_items();
-    let report = aggregate(&items, Period::All, "claude-sonnet-5");
+    let report = aggregate(&items, Period::All);
     assert_eq!(report.total_interceptions, 3);
 }
 
 #[test]
 fn aggregate_today_filters_to_today() {
     let items = make_items();
-    let report = aggregate(&items, Period::Today, "claude-sonnet-5");
+    let report = aggregate(&items, Period::Today);
     assert_eq!(report.total_interceptions, 2, "only today's items");
 }
 
 #[test]
 fn aggregate_week_includes_recent_items() {
     let items = make_items();
-    let report = aggregate(&items, Period::Week, "claude-sonnet-5");
+    let report = aggregate(&items, Period::Week);
     assert_eq!(report.total_interceptions, 3, "all within a week");
 }
 
 #[test]
 fn savings_pct_calculated() {
     let items = make_items();
-    let report = aggregate(&items, Period::All, "claude-sonnet-5");
+    let report = aggregate(&items, Period::All);
     assert!(
         report.total_savings_pct > 0.0,
         "should have positive savings"
@@ -100,7 +100,7 @@ fn savings_pct_calculated() {
 #[test]
 fn by_family_groups_correctly() {
     let items = make_items();
-    let report = aggregate(&items, Period::All, "claude-sonnet-5");
+    let report = aggregate(&items, Period::All);
     assert!(
         report.by_family.contains_key("git"),
         "should have git family"
@@ -116,7 +116,7 @@ fn by_family_groups_correctly() {
 #[test]
 fn by_project_groups_by_git_root() {
     let items = make_items();
-    let report = aggregate(&items, Period::All, "claude-sonnet-5");
+    let report = aggregate(&items, Period::All);
     assert!(
         report.by_project.contains_key("/repo"),
         "should group by /repo"
@@ -130,7 +130,7 @@ fn by_project_blank_git_root_groups_under_unknown() {
     empty_root.git_root = Some("   ".to_string());
     items.push(empty_root);
 
-    let report = aggregate(&items, Period::All, "claude-sonnet-5");
+    let report = aggregate(&items, Period::All);
     assert!(
         !report.by_project.contains_key(""),
         "blank git_root should not create an empty-string key"
@@ -147,19 +147,33 @@ fn by_project_blank_git_root_groups_under_unknown() {
 }
 
 #[test]
-fn cost_avoided_usd_positive_for_savings() {
+fn cost_avoided_uses_configured_input_price() {
     let items = make_items();
-    let report = aggregate(&items, Period::All, "claude-sonnet-5");
-    assert!(
-        report.cost_avoided_usd > 0.0,
-        "cost avoided should be positive"
-    );
+    let saved: u64 = items
+        .iter()
+        .map(|i| (i.tokens_before - i.tokens_after) as u64)
+        .sum();
+    let report = aggregate_with_price(&items, Period::All, Some(3.0));
+    let expected = saved as f64 / 1_000_000.0 * 3.0;
+    let cost = report.cost_avoided_usd.expect("price is set");
+    assert!(cost > 0.0, "cost avoided should be positive");
+    assert!((cost - expected).abs() < 1e-9);
+}
+
+#[test]
+fn cost_avoided_is_none_without_price() {
+    let items = make_items();
+    let report = aggregate_with_price(&items, Period::All, None);
+    assert_eq!(report.cost_avoided_usd, None);
+    let json = serde_json::to_string(&report).unwrap();
+    let parsed: serde_json::Value = serde_json::from_str(&json).unwrap();
+    assert!(parsed["cost_avoided_usd"].is_null());
 }
 
 #[test]
 fn json_output_is_valid() {
     let items = make_items();
-    let report = aggregate(&items, Period::All, "claude-sonnet-5");
+    let report = aggregate_with_price(&items, Period::All, Some(3.0));
     let json = serde_json::to_string(&report).unwrap();
     let parsed: serde_json::Value = serde_json::from_str(&json).unwrap();
     assert!(parsed["total_interceptions"].is_number());
@@ -170,7 +184,7 @@ fn json_output_is_valid() {
 fn history_ordered_by_date_descending() {
     let items = make_items();
     // history is the raw items; report creation doesn't reorder, but aggregate produces from items
-    let report = aggregate(&items, Period::All, "claude-sonnet-5");
+    let report = aggregate(&items, Period::All);
     // simply verify the report has the correct count — ordering is the consumer's responsibility
     assert_eq!(report.total_interceptions, 3);
 }
