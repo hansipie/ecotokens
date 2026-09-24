@@ -142,9 +142,7 @@ pub fn handle_prompt() {
                     http_status: None,
                     latency_ms: routing.latency_ms,
                     usage: routing.usage,
-                    agent: (routing.decision == Decision::Delegated)
-                        .then(|| routing.size.map(|s| s.agent_name().to_string()))
-                        .flatten(),
+                    agent: routing.target_label(),
                 },
             );
         }

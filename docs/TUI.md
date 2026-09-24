@@ -118,7 +118,7 @@ Shows how the optional [Jev integration](jev-integration.md) is being used: how 
 - **Header.** `Status` is `enabled` (green), `enabled, TYPESAFE_API_KEY missing` (yellow) or `disabled` (grey). Jev counts as enabled when `jev_enabled` or `router_enabled` is set. Then come the total calls, successes, fallbacks to the heuristic (both with percentages), average and p95 latency, tokens in and out, and cost. Cost reads `n/a (no price configured)` when no price is set.
 - **By purpose.** One gauge per purpose that has at least one call, sized by its share of total calls. Each row gives the call count, success rate, average latency and tokens in/out.
 - **Failures.** Failure counts per error kind, most frequent first, or `No failure.` in green.
-- **Recent calls.** One line per call: time, `ok` or `FAIL`, purpose, latency, tokens in/out, the target agent (`-> agent`) when the call came from the router, and the error kind with the HTTP status on failures. The selected line is shown in reverse video.
+- **Recent calls.** One line per call: time, `ok` or `FAIL`, purpose, latency, tokens in/out, the router's target (`-> router-everyday`, or `-> self (unsure)` / `-> self (followup)` when the main session kept the message) for router calls, and the error kind with the HTTP status on failures. The selected line is shown in reverse video.
 - **Calls over time.** A sparkline of call counts.
 
 ### Keybindings

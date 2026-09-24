@@ -168,6 +168,18 @@ impl Routing {
             service_failure: false,
         }
     }
+
+    /// Where the message went, as shown in the Jev usage view: the helper
+    /// agent when delegated, `self (unsure)` / `self (followup)` when the main
+    /// session kept it, nothing for errors and calls that never reached Jev.
+    pub fn target_label(&self) -> Option<String> {
+        match self.decision {
+            Decision::Delegated => self.size.map(|s| s.agent_name().to_string()),
+            Decision::SelfUnsure => Some("self (unsure)".to_string()),
+            Decision::SelfFollowup => Some("self (followup)".to_string()),
+            Decision::Skipped | Decision::JevDown | Decision::Error => None,
+        }
+    }
 }
 
 /// Messages the router never sends to Jev.

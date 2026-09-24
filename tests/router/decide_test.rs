@@ -105,3 +105,18 @@ fn one_request_carries_both_questions_and_the_message() {
     }
     assert!(matches!(qs["needs_conversation"], Question::Noul { .. }));
 }
+
+#[test]
+fn target_label_names_helper_or_self_decision() {
+    let settings = router_settings();
+    let delegated = decide(&answers("everyday", 0.9, 0.05), &settings);
+    assert_eq!(delegated.target_label().as_deref(), Some("router-everyday"));
+
+    let unsure = decide(&answers("everyday", 0.1, 0.05), &settings);
+    assert_eq!(unsure.decision, Decision::SelfUnsure);
+    assert_eq!(unsure.target_label().as_deref(), Some("self (unsure)"));
+
+    let followup = decide(&answers("everyday", 0.9, 0.99), &settings);
+    assert_eq!(followup.decision, Decision::SelfFollowup);
+    assert_eq!(followup.target_label().as_deref(), Some("self (followup)"));
+}

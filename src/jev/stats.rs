@@ -63,7 +63,8 @@ pub struct CallRecord {
     pub http_status: Option<u16>,
     pub latency_ms: u64,
     pub usage: Option<Usage>,
-    /// Router calls: helper agent the message was delegated to, if any.
+    /// Router calls: helper agent the message was delegated to, or `self (…)`
+    /// when the main session kept it.
     pub agent: Option<String>,
 }
 
@@ -184,7 +185,8 @@ pub struct CallRow {
     pub latency_ms: u64,
     pub input_tokens: u64,
     pub output_tokens: u64,
-    /// Router calls: helper agent selected (e.g. `router-everyday`).
+    /// Router calls: helper agent selected (e.g. `router-everyday`), or
+    /// `self (unsure)` / `self (followup)` when not delegated.
     pub agent: Option<String>,
 }
 
