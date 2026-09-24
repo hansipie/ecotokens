@@ -44,6 +44,7 @@ Full methodology and per-family breakdown: [`docs/BENCHMARKS.md`](docs/BENCHMARK
 | **MCP server** | Exposes code-intelligence tools over stdio (`ecotokens mcp-server`) and auto-registers in agent settings on install |
 | **AI summarization** *(optional)* | Large outputs compressed by a local Ollama model instead of being truncated |
 | **Word abbreviations** *(optional)* | Replace common words with shorter forms (`function`→`fn`, `configuration`→`config`, …) in narrative text, and nudge the model to do the same via a SessionStart instruction |
+| **Model router** *(optional)* | Claude Code only: a `UserPromptSubmit` hook has Jev size each message (tiny / everyday / large / hardest) and delegates it to a helper agent on a matching model (Haiku / Sonnet / Opus / Fable), so small jobs stop running on the biggest model. Fail-open, see [Model router](#model-router-optional-off-by-default) |
 | **Zero config** | One `ecotokens install` command - works automatically from there |
 
 > Full compatibility matrix: [harness feature matrix](docs/harness-feature-matrix.md)
@@ -299,17 +300,21 @@ Uninstall Claude Code
 | `ecotokens filter-output --command LABEL --exit-code N` | Filter captured output read from stdin and record metrics (used by Hermes hooks) |
 | `ecotokens filter-output ... --hook-type transform-tool-result` | Same, attributed to the `transform_tool_result` hook in metrics |
 | `ecotokens hook-post` | PostToolUse handler - intercept native tool results (Read, Grep, Glob) |
+| `ecotokens hook-prompt` | UserPromptSubmit handler - size the message and route it to a helper agent (used by the router hook, not run by hand) |
 | `ecotokens gain` | Interactive TUI dashboard - savings by family or project |
 | `ecotokens gain --period PERIOD` | Filter TUI to a time window (`all`, `today`, `week`, `month`) |
 | `ecotokens gain --history` | Print a savings summary table for 24h / 7 days / 30 days |
 | `ecotokens gain --json` | JSON report |
+| `ecotokens jev [--period PERIOD] [--json]` | TUI with detailed Jev usage - calls, fallbacks, latency, tokens, cost, recent calls (also `v` in `gain`) |
 | `ecotokens game [--period PERIOD]` | Space Invaders mini-game - filtered commands spawn enemies scaled by tokens saved |
 | `ecotokens config [--debug true\|false]` | Show or update global configuration (including debug mode) |
 | `ecotokens doctor [--json]` | Diagnose PATH, config, hook, MCP, and metrics setup without mutating files |
-| `ecotokens config --model MODEL` | Set the default model used for cost calculations (empty or unknown value lists available models) |
+| `ecotokens gain price --input X --output Y` | Set the model price in USD per million tokens, used for the cost avoided figure of `gain` (cost stays `n/a` until set) |
 | `ecotokens config --embed-provider candle\|ollama\|none` | Set the embedding backend (`candle` = local BERT, `ollama` = Ollama HTTP API, `none` = BM25 only) |
 | `ecotokens config --embed-model MODEL` | Set the embedding model (e.g. `qwen3-embedding:latest` for Ollama, or a HuggingFace ID for Candle) |
 | `ecotokens config --embed-url URL` | Set the Ollama base URL (default: `http://localhost:11434`) |
+| `ecotokens config --jev true\|false` | Enable or disable TypeSafe Jev judgments (requires `TYPESAFE_API_KEY`) |
+| `ecotokens config --jev-line-select true\|false` | Enable or disable Jev line selection in the generic filter |
 | `ecotokens index [--path DIR]` | Index a codebase for BM25 + symbolic search |
 | `ecotokens search QUERY [--context N] [--include GLOB] [--exclude GLOB] [--no-trace]` | Search the indexed codebase with line numbers, context, and optional trace augmentation |
 | `ecotokens outline PATH` | List symbols in a file or directory |
@@ -330,6 +335,12 @@ Uninstall Claude Code
 | `ecotokens clear --family FAMILY` | Delete interceptions of a specific command family |
 | `ecotokens clear --project PATH` | Delete interceptions for a specific project (use `"[undefined]"` for entries without a git root) |
 | `ecotokens completions SHELL` | Generate a shell completion script (`bash`, `zsh`, `fish`, `powershell`, `elvish`) |
+| `ecotokens rewrite --mode MODE [--to TARGET]` | Paraphrase, retone, adjust reading level, or translate text using a local model |
+| `ecotokens router on [--timeout-ms N]` | Turn the model router on: `UserPromptSubmit` hook plus `router-*` helper agents in `~/.claude` (Claude Code only, needs `TYPESAFE_API_KEY`) |
+| `ecotokens router off` | Turn the router off and remove its hook and helper agents |
+| `ecotokens router status [--json]` | Messages per size and decision, Jev requests, tokens, latency and estimated cost |
+| `ecotokens router try MESSAGE... [--json] [--timeout-ms N]` | Size sample messages with Jev (live, not recorded, works while the router is off) |
+| `ecotokens router price --input USD --output USD` | Set the Jev price per million tokens used for cost estimates |
 
 ## Shell completions
 
@@ -347,22 +358,34 @@ ecotokens completions fish > ~/.config/fish/completions/ecotokens.fish
 ecotokens completions powershell >> $PROFILE
 ```
 
+`ecotokens install` installs or updates the completion script for your current shell automatically (user-level XDG paths; for zsh, add `~/.local/share/zsh/site-functions` to `fpath`), and `ecotokens uninstall` removes it. Only bash, zsh and fish are installed automatically; use `ecotokens completions elvish|powershell` for the others. Enumerated values such as `rewrite --mode` and `config --embed-provider` are completed too.
+
+The scripts are written to these locations:
+
+| Shell | Path |
+|-------|------|
+| bash | `$XDG_DATA_HOME/bash-completion/completions/ecotokens` |
+| zsh | `$XDG_DATA_HOME/zsh/site-functions/_ecotokens` |
+| fish | `$XDG_CONFIG_HOME/fish/completions/ecotokens.fish` |
+
+`$XDG_DATA_HOME` defaults to `~/.local/share` and `$XDG_CONFIG_HOME` to `~/.config`. Re-running `install` is idempotent, and `uninstall` removes the script for every supported shell. If the script cannot be written, `install` prints a warning and carries on: the failure does not abort the installation.
+
 Reload your shell (or open a new terminal) to activate completions.
 
 ## Gain dashboard
 
 ```
-ecotokens gain                                          # all time, uses default model from config
+ecotokens gain                                          # all time
 ecotokens gain --period today                           # today only
 ecotokens gain --period week                            # last 7 days
-ecotokens gain --period month --model claude-sonnet-5 # last 30 days, override model
+ecotokens gain --period month                           # last 30 days
 ecotokens gain --history                                # summary table: 24h / 7d / 30d
 ecotokens gain --history --json                         # same, as JSON
 ```
 
-The model used for cost calculations defaults to the value set with `ecotokens config --model` (or `claude-sonnet-5` if not configured). Pass `--model` to override for a single invocation.
+Cost avoided is computed from the input price you set with `ecotokens gain price --input <USD per 1M tokens> --output <USD per 1M tokens>`. Without a price it shows `n/a` (`null` in `--json`). Running `ecotokens gain price` with no flag shows the current values.
 
-Interactive TUI showing token savings per command family and per project, with a sparkline. The `--period` flag filters both the stats and the history panels.
+Interactive TUI showing token savings per command family and per project, with a sparkline. The `--period` flag filters both the stats and the history panels. All terminal views (gain, jev, game, outline, trace, watch) are described in [`docs/TUI.md`](docs/TUI.md).
 
 **Keybindings:**
 
@@ -475,6 +498,7 @@ Exposed tools:
 - `ecotokens_trace_callers` - find callers of a symbol
 - `ecotokens_trace_callees` - find callees (with depth)
 - `ecotokens_duplicates` - detect near-duplicate code blocks
+- `ecotokens_rewrite` - paraphrase, retone, or translate a block of prose using a local model
 
 For Claude Code, Gemini CLI, Qwen Code, and Codex, `ecotokens install` registers this server automatically in each target's settings file (`mcpServers` in JSON settings, `[mcp_servers.ecotokens]` in Codex's `config.toml`).
 
@@ -551,7 +575,8 @@ Output includes:
 hook_installed        : true
 debug                 : false
 debuglog              : false
-default_model         : claude-sonnet-5
+price_input_usd_per_mtok  : unset
+price_output_usd_per_mtok : unset
 exclusions            : []
 embed_provider        : candle model=sentence-transformers/all-MiniLM-L6-v2
 ai_summary_enabled    : false
@@ -591,27 +616,17 @@ Each entry contains a short `uid` to correlate the input and output phases of th
 
 Logged payloads go through the same secret masking as intercepted output, and the file is created `0600` (owner-only). It still contains file contents and command output, so review it before attaching it to a bug report.
 
-### Default model for cost calculations
+### Price for cost calculations
 
-The model selected here determines the per-token price used in gain reports:
+`gain` has no built-in price list. Enter the price of the model you use, in USD per million tokens:
 
 ```bash
-ecotokens config --model claude-opus-4-7    # set default model
-ecotokens config --model ""                 # list available models
-ecotokens config --model unknown-model      # unknown model → lists available models
+ecotokens gain price --input 3 --output 15   # set both
+ecotokens gain price --input 2.5             # update only the input price
+ecotokens gain price                         # show the current prices
 ```
 
-The model name must be present in the built-in pricing table (or added via `~/.config/ecotokens/pricing.json`). Passing an empty value or an unrecognised name prints the full list and exits.
-
-See the full list of built-in models and prices in [docs/models.md](docs/models.md).
-
-Override any entry or add a new model by creating `~/.config/ecotokens/pricing.json`:
-
-```json
-{
-  "my-custom-model": { "input_usd_per_1m": 0.50, "output_usd_per_1m": 2.00 }
-}
-```
+The saved-token cost uses the input price. Values must be finite and non-negative. This is separate from `ecotokens router price`, which sets the Jev price.
 
 ### Word abbreviations *(optional)*
 
@@ -739,6 +754,189 @@ Or update the config file directly (`~/.config/ecotokens/config.json`):
 ```
 
 Ollama must be running locally. The model is called with a 3-second timeout to avoid blocking the model.
+
+## Rewrite (local text transformation)
+
+`ecotokens rewrite` paraphrases, retones, adjusts reading level, or translates prose using your
+already-configured local model - entirely on your machine, with zero API cost. It's not a token
+*saving* feature (it transforms text rather than compressing it, and is excluded from savings
+reporting), but it reuses the same local-model plumbing as AI summarization.
+
+```bash
+echo "Please fix the login bug ASAP, it's blocking everyone." | ecotokens rewrite --mode tone --to formal
+ecotokens rewrite --mode reading-level --to grade-8 --file notes.md
+ecotokens rewrite --mode translate --to fr --file notes.md
+echo "$TEXT" | ecotokens rewrite --mode paraphrase --json
+```
+
+| Mode | `--to` | Notes |
+|------|--------|-------|
+| `paraphrase` | forbidden | Rewords while preserving meaning |
+| `tone` | required, free-form | e.g. `plain`, `formal`, `friendly` |
+| `reading-level` | required, free-form | e.g. `grade-8`, `expert` |
+| `translate` | required, language code/name | e.g. `fr`, `french`; a same-language target is a no-op |
+
+Fenced code, inline code, URLs, emails, numbers, and dates in the input are preserved
+byte-identically. Code-shaped or predominantly non-prose input is refused rather than transformed.
+On any model failure (unreachable, timeout, empty/truncated/corrupted response), the command
+**fails open**: it prints the original input unchanged and still exits `0`, so it's always safe to
+drop into a pipeline. Long documents are split on structure-aware boundaries (paragraphs, then
+sentences, then whitespace - never inside a fenced code block, table, or list) and reassembled;
+if any chunk fails, the whole document falls back untouched rather than emitting a partial mix.
+
+Available identically from the CLI, as the `ecotokens_rewrite` MCP tool (agents can call it
+mid-session), and - opt-in only - as an automatic pipeline stage (see below).
+
+### Diff audit trail (optional)
+
+Every transformation can be saved as a masked unified diff, so changes stay reviewable:
+
+```bash
+echo "$TEXT" | ecotokens rewrite --mode paraphrase --save-diff   # force on for one run
+echo "$TEXT" | ecotokens rewrite --mode paraphrase --no-save-diff  # force off, overrides config
+```
+
+Diffs go to `rewrite_diff_dir` (default: OS temp dir), are `0600`-permissioned, existing secret
+patterns are masked on both sides before diffing, and old diffs are pruned to `rewrite_diff_retention`
+(default 50, `0` disables pruning). Off by default. A write failure never blocks the transformed
+output - it just warns on stderr.
+
+### Automatic pipeline transformation (optional, off by default)
+
+With `rewrite_auto_enabled = true`, qualifying prose flowing through the normal filter pipeline is
+rewritten automatically before being handed to the agent - e.g. auto-translating command output.
+This is the one rewrite setting that adds latency to every qualifying interception, so it's
+deliberately off by default and gated behind several safeguards: only content classified as prose
+is touched (code, stack traces, diffs, and structured data always pass through untouched), content
+carrying a masked secret is never sent to the model, short content below `rewrite_auto_min_tokens`
+is skipped, and the stage has its own stricter timeout (`rewrite_auto_timeout_ms`) separate from
+`rewrite_timeout_ms`. Because rewriting can *expand* text where compression only shrinks it, any
+resulting token cost is tracked separately and shown as `rewrite_overhead_tokens` in `ecotokens gain`
+and `ecotokens gain --json` - never hidden inside the normal savings figures.
+
+### Configuration
+
+Update `~/.config/ecotokens/config.json` directly, or pass `--model`/`--save-diff`/`--no-save-diff`
+per invocation:
+
+```json
+{
+  "rewrite_model": "llama3.2:3b",
+  "rewrite_url": "http://localhost:11434",
+  "rewrite_timeout_ms": 30000,
+  "rewrite_context_tokens": 8192,
+  "rewrite_truncation_ratio": 0.5,
+  "rewrite_save_diff": false,
+  "rewrite_diff_dir": null,
+  "rewrite_diff_retention": 50,
+  "rewrite_auto_enabled": false,
+  "rewrite_auto_mode": "translate",
+  "rewrite_auto_target": "fr",
+  "rewrite_auto_min_tokens": 500,
+  "rewrite_auto_timeout_ms": 2000
+}
+```
+
+`rewrite_model` falls back to `ai_summary_model`, then to `llama3.2:3b`, and `rewrite_url` must
+resolve to localhost - the endpoint is validated before any request is issued, and text is never
+transmitted anywhere else unless you opt in to [Jev judgments](#jev-judgments-optional-off-by-default).
+
+## Jev judgments (optional, off by default)
+
+ecotokens can ask [TypeSafe](https://docs.typesafe.ai)'s Jev model for quick typed judgments
+(about 100 ms each) in the places where it otherwise relies on hand-tuned heuristics:
+
+| Where | What Jev decides | Built-in fallback |
+|-------|------------------|-------------------|
+| Rewrite gate | prose / code / stack trace / structured data / mixed, plus the source language for `translate` (one request) | regex and ratio classifier, stopword language detection |
+| Rewrite output check | is the output faithful to the input, in the target language, and is its first or last line model commentary (in any language)? | token-ratio truncation check, English-only preamble regex |
+| Generic filter (`jev_line_select_enabled`) | which lines between the kept head and tail report failures, errors, or identifiers you need | blind head+tail truncation |
+
+**Every judgment falls back to today's behaviour.** If Jev is disabled, has no key, is unreachable,
+times out, returns an error, or a response is missing an answer, the built-in heuristic runs
+exactly as before. After the first transport failure, Jev is skipped for the rest of the process
+and a single warning goes to stderr. Exact signals (valid JSON, diffs, Python tracebacks, Rust
+panics) are never sent to Jev. The structural rewrite checks (empty or truncated response, sentinel
+integrity) always run.
+
+**Privacy.** Enabling Jev sends excerpts of the text being judged to `api.typesafe.ai`. Every
+string is passed through the secret-masking patterns first, and each request is capped at
+`jev_max_input_chars`. The API key is read **only** from the `TYPESAFE_API_KEY` environment
+variable. It is never stored in `config.json` or printed. `ecotokens doctor` shows whether Jev is
+active.
+
+```bash
+export TYPESAFE_API_KEY=...
+```
+
+Instead of exporting it in your shell (hooks may not inherit it), you can put it in
+`~/.config/ecotokens/.env`, a `KEY=VALUE` file loaded at every ecotokens start. Variables already set
+in the real environment take precedence. Keep the file private (`chmod 600`).
+
+```
+TYPESAFE_API_KEY=...
+```
+
+```json
+{
+  "jev_enabled": true,
+  "jev_url": "https://api.typesafe.ai/v1/systemone",
+  "jev_timeout_ms": 1000,
+  "jev_max_input_chars": 32000,
+  "jev_line_select_enabled": false,
+  "jev_prose_min_prob": 0.9,
+  "jev_code_min_prob": 0.8,
+  "jev_language_min_confidence": 0.8,
+  "jev_verify_fail_below": 0.3,
+  "jev_commentary_min_prob": 0.8,
+  "jev_line_keep_min_prob": 0.05
+}
+```
+
+Diagrams and details of each integration point: [`docs/jev-integration.md`](docs/jev-integration.md).
+
+`jev_line_select_enabled` is a separate opt-in because generic-filter line selection runs on the
+interception path and adds one request to large generic outputs (up to 10 windows of 200 lines;
+anything larger keeps plain head+tail truncation). `jev_url` must use https. Build with
+`--no-default-features` and without the `jev` feature to compile Jev out entirely.
+
+## Model router (optional, off by default)
+
+The router has Jev size up every message you send to Claude Code, so small jobs run on a smaller,
+cheaper model instead of the biggest one. It needs `TYPESAFE_API_KEY` (see
+[Jev judgments](#jev-judgments-optional-off-by-default)), but it does not need `jev_enabled`.
+
+```bash
+ecotokens router on          # hook + helper agents, then restart Claude Code
+ecotokens router status      # messages per size, decisions, Jev tokens and cost
+ecotokens router off         # removes the hook and the helper agents
+ecotokens router try "rename foo to bar" "write a launch post"   # live check, not recorded
+```
+
+| Size | For | Helper agent | Model |
+|------|-----|--------------|-------|
+| tiny | a lookup, a rename, a one-line answer | `router-tiny` | Haiku |
+| everyday | a normal email, post or short document | `router-everyday` | Sonnet |
+| large | a multi-step build, research, a full report | `router-large` | Opus |
+| hardest | strategy, or anything where a wrong call is expensive | `router-hardest` | Fable |
+
+Claude Code cannot switch the main session's model for each message, so the router works through a
+`UserPromptSubmit` hook. The hook asks Jev one question (which size is the smallest that can do
+this job well?) and, in the same request, whether the message is a short reply that only makes
+sense inside the conversation. When Jev is at least 60% sure, and the message is not such a
+reply, the hook tells the main session to hand the job to that size's helper agent and relay the
+answer. Each helper ends its reply with one line naming the model that did the work. The main
+model still reads the message and does the handoff, so the saving is on the work itself.
+
+The router never blocks a message. If it is off, has no key, times out, or anything goes wrong,
+the hook prints nothing and the message goes through untouched. After a timeout or a network
+failure, Jev is not asked again for 5 minutes. Jev currently answers in about 2 to 3 seconds, and
+every message waits up to `router_timeout_ms` (default 800 ms). Set it with
+`ecotokens router on --timeout-ms 3000` if you accept that delay in exchange for routing. See
+[docs/model-router.md](docs/model-router.md) for the details.
+
+**Privacy.** While the router is on, every message you type is sent (masked) to TypeSafe to be
+sized. Keep it off for private work.
 
 ## Benchmarks
 

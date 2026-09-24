@@ -17,13 +17,13 @@ fn test_watcher_detects_file_creation() {
     let idx_dir = index_dir.path().to_path_buf();
 
     let handle = std::thread::spawn(move || {
-        let _ = watch_directory(
+        watch_directory(
             &watch_path,
             &idx_dir,
             EmbedProvider::None,
             event_tx,
             stop_rx,
-        );
+        )
     });
 
     // Laisser le watcher démarrer
@@ -37,16 +37,15 @@ fn test_watcher_detects_file_creation() {
         .recv_timeout(Duration::from_secs(4))
         .expect("aucun événement reçu après création de fichier");
 
-    assert!(
-        event.status == "re-indexed" || event.status.starts_with("error"),
-        "statut inattendu : {}",
-        event.status
-    );
+    assert_eq!(event.status, "re-indexed", "échec de la réindexation");
     assert!(event.path.to_string_lossy().contains("foo.rs"));
     assert!(!event.timestamp.is_empty());
 
     let _ = stop_tx.send(());
-    let _ = handle.join();
+    handle
+        .join()
+        .expect("watcher panicked")
+        .expect("watcher failed");
 }
 
 /// Vérifie que les fichiers non indexables retournent le statut "ignored".
@@ -62,13 +61,13 @@ fn test_watcher_ignores_non_indexable_files() {
     let idx_dir = index_dir.path().to_path_buf();
 
     let handle = std::thread::spawn(move || {
-        let _ = watch_directory(
+        watch_directory(
             &watch_path,
             &idx_dir,
             EmbedProvider::None,
             event_tx,
             stop_rx,
-        );
+        )
     });
 
     std::thread::sleep(Duration::from_millis(200));
@@ -86,7 +85,10 @@ fn test_watcher_ignores_non_indexable_files() {
     // Pas d'événement = comportement correct aussi (le watcher filtre silencieusement)
 
     let _ = stop_tx.send(());
-    let _ = handle.join();
+    handle
+        .join()
+        .expect("watcher panicked")
+        .expect("watcher failed");
 }
 
 /// Vérifie que les fichiers listés dans .gitignore retournent le statut "ignored".
@@ -157,13 +159,13 @@ fn test_watcher_detects_modification() {
     let idx_dir = index_dir.path().to_path_buf();
 
     let handle = std::thread::spawn(move || {
-        let _ = watch_directory(
+        watch_directory(
             &watch_path,
             &idx_dir,
             EmbedProvider::None,
             event_tx,
             stop_rx,
-        );
+        )
     });
 
     std::thread::sleep(Duration::from_millis(200));
@@ -175,12 +177,11 @@ fn test_watcher_detects_modification() {
         .recv_timeout(Duration::from_secs(4))
         .expect("aucun événement après modification de fichier");
 
-    assert!(
-        event.status == "re-indexed" || event.status.starts_with("error"),
-        "statut inattendu : {}",
-        event.status
-    );
+    assert_eq!(event.status, "re-indexed", "échec de la réindexation");
 
     let _ = stop_tx.send(());
-    let _ = handle.join();
+    handle
+        .join()
+        .expect("watcher panicked")
+        .expect("watcher failed");
 }

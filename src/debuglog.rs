@@ -15,10 +15,25 @@ pub struct DebugLogger {
 /// the serialised line: several patterns end in `[^\s\n]+`, which on compact
 /// JSON would run past the closing quote and swallow neighbouring fields,
 /// corrupting the structure.
+/// Longest string kept per field; bigger payloads are cut so a single event
+/// (e.g. a filtered `cat` of the log itself) cannot bloat the file.
+const MAX_FIELD_CHARS: usize = 4000;
+
+fn truncate(s: &str) -> String {
+    match s.char_indices().nth(MAX_FIELD_CHARS) {
+        Some((idx, _)) => format!(
+            "{}… [truncated {} chars]",
+            &s[..idx],
+            s[idx..].chars().count()
+        ),
+        None => s.to_string(),
+    }
+}
+
 fn mask_json(value: &serde_json::Value) -> serde_json::Value {
     use serde_json::Value;
     match value {
-        Value::String(s) => Value::String(crate::masking::mask(s).0),
+        Value::String(s) => Value::String(truncate(&crate::masking::mask(s).0)),
         Value::Array(items) => Value::Array(items.iter().map(mask_json).collect()),
         Value::Object(fields) => Value::Object(
             fields
@@ -47,6 +62,10 @@ impl DebugLogger {
 
     pub fn log(&self, uid: &str, cmd: &str, phase: &str, data: &serde_json::Value) {
         if !self.enabled {
+            return;
+        }
+        // Reading the debug log must not feed back into it.
+        if data.to_string().contains("ecotokens/debug.log") {
             return;
         }
         let ts = chrono::Utc::now().to_rfc3339_opts(chrono::SecondsFormat::Nanos, true);
@@ -115,6 +134,28 @@ pub fn gen_uid() -> String {
 #[cfg(test)]
 mod tests {
     use super::*;
+
+    #[test]
+    fn mask_json_truncates_long_strings() {
+        let v = mask_json(&serde_json::json!({ "filtered": "é".repeat(MAX_FIELD_CHARS + 50) }));
+        let out = v["filtered"].as_str().unwrap();
+        assert!(out.contains("[truncated 50 chars]"));
+        assert!(out.chars().count() < MAX_FIELD_CHARS + 40);
+    }
+
+    #[test]
+    fn log_skips_events_reading_the_debug_log() {
+        let dir = tempfile::tempdir().unwrap();
+        let path = dir.path().join("debug.log");
+        let l = DebugLogger::with_path(true, path.clone());
+        l.log(
+            "u",
+            "filter",
+            "input",
+            &serde_json::json!({"cmd": "cat ~/.config/ecotokens/debug.log"}),
+        );
+        assert!(!path.exists());
+    }
 
     const AWS_KEY: &str = "AKIAIOSFODNN7EXAMPLE";
 

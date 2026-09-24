@@ -119,3 +119,22 @@ pub struct DuplicatesParams {
     #[serde(default, deserialize_with = "de_opt_usize")]
     pub top_k: Option<usize>,
 }
+
+// Not itself gated on the `rewrite` feature: it's a plain data struct with no
+// dependency on `crate::rewrite`, and the `#[tool_router]` macro on
+// `EcotokensServer` needs `ecotokens_rewrite`'s signature to exist
+// unconditionally (see the cfg split in src/mcp/server.rs's `rewrite_tool_impl`
+// — cfg on an individual method inside a `#[tool_router]` impl block does not
+// reliably suppress the macro's registration of that method).
+#[cfg_attr(not(feature = "rewrite"), allow(dead_code))]
+#[derive(Debug, Deserialize, schemars::JsonSchema)]
+pub struct RewriteParams {
+    #[schemars(description = "The prose to transform")]
+    pub text: String,
+    #[schemars(description = "paraphrase | tone | reading-level | translate")]
+    pub mode: String,
+    #[schemars(description = "Target for tone/reading-level/translate (forbidden for paraphrase)")]
+    pub target: Option<String>,
+    #[schemars(description = "Override the configured model")]
+    pub model: Option<String>,
+}

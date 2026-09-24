@@ -120,6 +120,23 @@ Detects near-duplicate or structurally similar code blocks and returns refactori
 
 Returns a plain-text report grouped by similarity, with file paths, line ranges, and a refactoring suggestion (exact duplicate, near duplicate, or subset).
 
+---
+
+### `ecotokens_rewrite`
+
+Rewrites, retones, simplifies, or translates a block of prose using the locally configured model. Not for source code — predominantly-code input is refused rather than transformed. Falls back to returning the original text unchanged (`status: "fallback"`) if the local model is unavailable; this is a normal successful result, not a tool error.
+
+| Parameter | Type | Default | Description |
+|-----------|------|---------|-------------|
+| `text` | string | required | The prose to transform |
+| `mode` | string | required | `paraphrase` \| `tone` \| `reading-level` \| `translate` |
+| `target` | string | — | Required for `tone`/`reading-level`/`translate`; forbidden for `paraphrase` |
+| `model` | string | configured model | Overrides the configured model for this call |
+
+Returns a JSON object: `status` (`"transformed"` \| `"no_op"` \| `"fallback"`), `reason`, `mode`, `target`, `model`, `text`, `tokens_in`, `tokens_out`, `chunk_count`, `duration_ms`. Unlike the CLI's `--json` output, `diff_path` is never included — it is a local filesystem detail the agent has no use for, even though diff saving (when enabled in config) still applies to agent invocations.
+
+Invalid `mode`/`target` combinations return a tool error without calling the model. A local model failure never errors the tool call — it returns a successful result with `status: "fallback"` and `text` unchanged from the input.
+
 ## Recommended usage pattern
 
 ```

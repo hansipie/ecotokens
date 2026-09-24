@@ -5,6 +5,71 @@ All notable changes to this project will be documented in this file.
 The format is based on [Keep a Changelog](https://keepachangelog.com/en/1.0.0/),
 and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0.html).
 
+## [0.27.0] - 2026-09-23
+
+### Added
+
+- **`~/.config/ecotokens/.env`**: optional `KEY=VALUE` file loaded into the process environment at startup (comments, `export`, and quoted values supported). Variables already set in the real environment win.
+- **Jev judgments (optional, off by default)**: TypeSafe's Jev model can replace fragile heuristics with fast typed judgments. Every use falls back to the existing heuristic when Jev is disabled, unconfigured, unreachable, times out, errors, or omits an answer.
+  - Rewrite gate: one Choice request classifies prose / code / stack trace / structured data / mixed and, for `translate`, detects the source language. It replaces the regex/ratio classifier and stopword language detection. Exact signals (JSON, diffs, Python tracebacks, Rust panics) never reach Jev.
+  - Rewrite output verification: Nouls check faithfulness and target language, and detect first/last-line model commentary in any language. A failed check falls back to the original text. The structural truncation and sentinel checks always run.
+  - Generic filter line selection (`jev_line_select_enabled`, separate opt-in): keeps the error-bearing lines that plain head+tail truncation would drop.
+  - Privacy: every string sent is masked with the existing secret patterns and capped at `jev_max_input_chars`. The API key is read only from `TYPESAFE_API_KEY`. `jev_url` must use https.
+  - Process-wide circuit breaker with a single stderr warning after the first transport failure.
+  - `ecotokens doctor` reports whether Jev is active. It never prints the key and makes no network call.
+  - New `jev` Cargo feature (in `default`) and 11 additive `jev_*` configuration keys, all with `#[serde(default)]`. No new crates.
+  - `ecotokens config --jev true|false` and `--jev-line-select true|false` toggle `jev_enabled` and `jev_line_select_enabled` without editing `config.json`.
+- **`ecotokens doctor` auto-watch check**: warns when `auto_watch` is enabled but the Claude Code session hooks are missing (in that state `SessionStart` never fires and the watcher silently never starts).
+- **Shell completion post-install / post-uninstall steps**: `ecotokens install` now installs or refreshes the completion script for the shell in `$SHELL` (bash: `$XDG_DATA_HOME/bash-completion/completions/ecotokens`, zsh: `$XDG_DATA_HOME/zsh/site-functions/_ecotokens`, fish: `$XDG_CONFIG_HOME/fish/completions/ecotokens.fish`); `ecotokens uninstall` removes ecotokens completion scripts for all three shells. Idempotent, leaves non-ecotokens files untouched, and failures only warn.
+- **Model router (optional, off by default)**: `ecotokens router on|off|status|try|price`. A new `UserPromptSubmit` hook (`ecotokens hook-prompt`) asks Jev to size each Claude Code message (tiny / everyday / large / hardest) and whether it is a follow-up that only makes sense in the conversation, in one request. When the size confidence is at least `router_min_confidence` (0.6), the main session is told to hand the job to one of four helper agents written to `~/.claude/agents/` (`router-tiny` → haiku, `router-everyday` → sonnet, `router-large` → opus, `router-hardest` → fable). Each helper ends its reply with a line naming its model.
+  - Fail-open: when the router is off, has no key, gets a slash or `!` command, hits an error, or is past its `router_timeout_ms` (default 800 ms), the hook prints nothing. Timeouts and transport failures write an on-disk marker that pauses Jev calls for 5 minutes. Claude Code's hook `timeout` follows the setting.
+  - `router status` shows messages per size and per decision, Jev requests, input/output tokens, average latency, and a cost estimate once `jev_usd_per_mtok_input/output` are set with `router price`. Decisions are logged in `~/.config/ecotokens/router.db`, and message text is never stored.
+  - Only agent files carrying the ecotokens marker are written or removed. `ecotokens uninstall` also removes the hook and the helpers. `ecotokens doctor` gains a **Router** line.
+  - The Jev client now reads `usage.input_tokens/output_tokens` (`Judge::ask_with_usage`, `client::parse_usage`).
+- **`ecotokens jev` — detailed Jev usage view**: a TUI (also `--json`, and plain text when not a terminal; `--period all|today|week|month`) showing calls, success and heuristic-fallback rates, average and p95 latency, tokens, cost estimate, calls by purpose (`filter_lines`, `classify`, `code_gate`, `verify`, `router`), failures by kind/HTTP status, a calls-over-time sparkline and the recent call log. Press `v` in `ecotokens gain` to open it.
+  - Every request to the Jev service (filter, rewrite, router) is now logged as one row in the `jev_calls` table of `~/.config/ecotokens/router.db` (purpose, outcome, latency, tokens; never the content). `ECOTOKENS_JEV_DB` overrides the file. Test doubles do not write to it.
+
+### Changed
+
+- **Version**: bumped the crate to `0.27.0`.
+- **`ecotokens config --embed-provider`**: the value is now validated at parse time (`candle`, `ollama`, or `none`) and offered by shell completion, instead of accepting any string.
+- **Dependencies**: refreshed `Cargo.lock` (about 200 crates updated, including `rmcp` 1.5 → 1.8, `clap` 4.6.1 → 4.6.7 and `tokio` 1.52 → 1.53). No new direct dependencies.
+- **Debug log** (`debuglog = true`): string fields are now truncated to 4000 characters (`… [truncated N chars]`), so a single large filtered output can no longer bloat `debug.log`.
+- **BREAKING: cost calculation no longer uses a model price list.** The built-in model catalog, `ecotokens config --model`, `ecotokens gain --model`, the `default_model` setting and `~/.config/ecotokens/pricing.json` are removed (old keys in `config.json` are ignored). Enter the price yourself with `ecotokens gain price --input X --output Y` (USD per million tokens). Without a price, `gain` shows cost avoided as `n/a` and `gain --json` reports `cost_avoided_usd: null`. `model_ref` is dropped from `gain --json`.
+- `ecotokens router price` (and `gain price`) now reject negative, NaN and infinite values.
+- **Shell completion**: `ecotokens rewrite --mode` now completes `paraphrase`, `tone`, `reading-level` and `translate` and lists them in `--help`. The values are only advertised, not enforced by clap, so an unknown mode still exits with code 1 (not clap's 2) as the CLI contract requires.
+- **`--json` help text**: every `--json` flag now has a description (`Output as JSON`) in `--help` and in generated completion scripts.
+
+### Fixed
+
+- **Debug log self-pollution**: events whose data references `ecotokens/debug.log` are no longer logged, so reading the log through ecotokens no longer makes it grow.
+- **Auto-watch after reinstall**: `ecotokens uninstall` removes the Claude Code session hooks, but `ecotokens install` did not restore them, so auto-watch stayed enabled yet never started. `install` now reinstalls the session hooks whenever `auto_watch` is enabled.
+- **`ecotokens jev` recent calls**: router calls the main session kept are now labelled `-> self (unsure)` or `-> self (followup)` instead of being left blank; only delegated calls showed a target before.
+
+### Documentation
+
+- Added `docs/test-audit.md` and `docs/test-audit.csv`: a per-function inventory of the test suite (execution status, assessment, first assertion).
+- Added `docs/TUI.md`: reference for the terminal views (gain, jev, game, outline, trace, watch) with launch commands, layouts, keybindings and empty-data behavior.
+
+## [0.26.0] - 2026-08-16
+
+### Added
+
+- **Local text rewrite**: `ecotokens rewrite` paraphrases, retones, adjusts reading level, or translates prose using your already-configured local model, entirely on-machine. Available identically from the CLI (`--mode`, `--to`, `--file`, `--model`, `--json`), as the `ecotokens_rewrite` MCP tool, and — opt-in only — as an automatic pipeline stage.
+  - Fenced code, inline code, URLs, emails, numbers, and dates are preserved byte-identically via sentinel extract/restore; code-shaped input is refused rather than transformed.
+  - Fails open on every model failure (unreachable, timeout, empty/truncated/corrupted response): the original input is emitted unchanged and the command still exits `0`.
+  - Long documents are split on structure-aware boundaries (paragraph → sentence → whitespace; fenced code, tables, and list groups are never split) and reassembled; any chunk failure falls back to the whole, untouched document rather than emitting a partial mix.
+  - Optional masked-diff audit trail (`--save-diff`/`--no-save-diff`/`rewrite_save_diff`) — existing secret-masking rules are applied to both sides before diffing, diffs are written `0600`, and old diffs are pruned to a configurable retention count.
+  - Optional automatic pipeline stage (`rewrite_auto_enabled`, off by default): rewrites qualifying prose flowing through the normal interception pipeline, gated by content classification (only prose — never code, stack traces, diffs, or structured data), a minimum token threshold, and secret-content exclusion, with its own stricter timeout and a once-per-session (not per-interception) unreachable-model warning.
+  - 13 new additive `rewrite_*` configuration keys, all with `#[serde(default)]` — existing config files load unchanged.
+  - New `rewrite` Cargo feature, enabled in `default`.
+- **Metrics**: new `FilterMode::Rewritten` interception mode. Local (`Cli`/`Mcp` origin) rewrites are recorded but excluded from savings aggregation — this feature transforms text rather than compressing it. Automatic-pipeline rewrites, which do add a real token cost, are surfaced separately as `rewrite_overhead_tokens` in `ecotokens gain` and `ecotokens gain --json`, never hidden inside the ordinary savings figures. MCP-originated rows use a new `mcp` hook type.
+
+### Changed
+
+- **Version**: bumped the crate to `0.26.0`.
+- **Configuration validation**: `config.json` is now validated at load time and every violation is reported as a single stderr warning (previously `validate()` was never called). New checks: `rewrite_url` must point to localhost, `rewrite_truncation_ratio` must be in `(0.0, 1.0)`, and `rewrite_auto_enabled` requires `rewrite_auto_mode` (plus `rewrite_auto_target` for modes that need one).
+
 ## [0.25.2] - 2026-07-29
 
 ### Changed
