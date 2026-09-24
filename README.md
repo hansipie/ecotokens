@@ -972,6 +972,7 @@ Filtering is aggressive on noise, conservative on signal:
 - One or more of: Claude Code (with hook support), Codex, Hermes, Pi ≥ 0.62.0, Gemini CLI ≥ 0.1.0, Qwen Code
 - Internet access on first use (Candle downloads `all-MiniLM-L6-v2` ~90 MB from HuggingFace Hub; cached locally after that)
 - Ollama (optional, for AI summarization and/or Ollama-backed embeddings)
+- A [TypeSafe](https://docs.typesafe.ai) API key in the `TYPESAFE_API_KEY` environment variable (optional, for [Jev judgments](#jev-judgments-optional-off-by-default) and the [model router](#model-router-optional-off-by-default)); without it, every Jev use falls back to the existing heuristic
 
 ## Contributing
 
