@@ -23,6 +23,8 @@ Thank you for taking the time to contribute. This guide explains how to set up y
 - **Rust stable ≥ 1.75** (no nightly features — the project enforces this)
 - `cargo`, `rustfmt`, `clippy` (all included with `rustup`)
 
+`.rustfmt.toml` sets two nightly-only options (`imports_granularity`, `group_imports`). On stable, `cargo fmt` prints a warning about them and ignores them — this is expected.
+
 ```bash
 rustup update stable
 rustup component add rustfmt clippy
@@ -48,18 +50,27 @@ All tests must pass on a clean clone before you make any change.
 ```
 src/
   main.rs           # CLI entry point — commands, keyboard handlers, TUI event loop
+  lib.rs            # Library crate root
+  install.rs        # Hook / plugin / MCP registration for every supported harness
+  doctor.rs         # `ecotokens doctor` diagnostics
+  debuglog.rs       # Debug file logging
   filter/           # Output filters per command family (git, cargo, python, …)
-  metrics/          # Token store and report aggregation
-  search/           # BM25 + symbolic index, query, outline, trace
-  tui/              # Ratatui panels (gain, outline, trace, watch, progress)
-  hook/             # PreToolUse hook handler
-  install/          # Hook + MCP registration for Claude Code, Gemini CLI, and VS Code
-  config/           # User settings (embed provider, thresholds, exclusions)
+  metrics/          # Token store (SQLite) and report aggregation
+  search/           # BM25 + vector index, query, outline, symbols
+  embed/            # Local embedding provider (Candle)
+  tui/              # Ratatui panels (gain, jev, outline, trace, watch, progress, game)
+  hook/             # PreToolUse / PostToolUse handlers (Read, Grep, Glob)
+  config/           # User settings (embed provider, thresholds, exclusions), session store
   masking/          # PII / secret redaction before filtering
   daemon/           # File watcher for live index updates
   mcp/              # MCP server (JSON-RPC over stdio)
   trace/            # Call graph (callers / callees)
+  duplicates/       # Near-duplicate detection
   tokens/           # Token counting (estimate + optional tiktoken)
+  abbreviations/    # Optional word abbreviations
+  rewrite/          # Optional local-LLM text rewrite
+  jev/              # Optional Jev judgments (falls back to heuristics)
+  router/           # Optional model router (Claude Code only)
 
 tests/
   filter/           # Unit tests for each filter family
@@ -70,8 +81,31 @@ tests/
   hook/             # Hook handler tests
   config/           # Settings load/save tests
   masking/          # PII pattern tests
+  duplicates/       # Duplicate detection tests
+  abbreviations/    # Abbreviation tests
+  rewrite/          # Rewrite tests
+  jev/              # Jev client and stats tests
+  router/           # Model router tests
+  tokens/           # Token counter tests
+  unit/             # Fast unit tests (embeddings, HNSW, chunking)
   integration/      # End-to-end, install, MCP, perf, fault tests
 ```
+
+### Supported harnesses
+
+Harnesses are listed in priority order. Bug fixes and parity work for higher-ranked harnesses come first, and docs list them in this order:
+
+1. Claude Code
+2. Codex
+3. Hermes
+4. Pi
+5. Others (Gemini CLI, Qwen Code)
+
+When you add or change harness support, update the [feature matrix](harness-feature-matrix.md) and the README installation section.
+
+### Cargo features
+
+Default features are `embeddings`, `ai-summary`, `rewrite` and `jev`. Optional ones are `exact-tokens`, `cuda` and `metal`. Code behind a feature must still compile with that feature disabled.
 
 ---
 
@@ -89,6 +123,10 @@ cargo test
 cargo test --test gain_tui_test
 cargo test --test git_test
 ```
+
+Test files are not auto-discovered. Each one is declared as a `[[test]]` entry (`name` + `path`) in `Cargo.toml` — add one when you create a new test file.
+
+Tests that need a network or a live service (`*_live_test.rs`, some `semantic_search_test.rs` cases) are marked `#[ignore]`. Run them explicitly with `cargo test -- --ignored`.
 
 ### 3. Lint
 
@@ -125,6 +163,8 @@ cargo fmt --check && cargo clippy -- -D warnings && cargo test
 | Metrics logic | `tests/metrics/` |
 | Search / index | `tests/search/` |
 | Install / config | `tests/integration/install_test.rs` |
+| Rewrite / Jev / router | `tests/rewrite/`, `tests/jev/`, `tests/router/` |
+| Duplicate detection | `tests/duplicates/` |
 | New CLI command | `tests/integration/end_to_end_test.rs` |
 
 ### Rules
@@ -142,6 +182,15 @@ cargo fmt --check && cargo clippy -- -D warnings && cargo test
 
 For release-oriented coverage, manual QA scope, priority levels, and exit criteria, see [`docs/TEST-PLAN.md`](TEST-PLAN.md).
 Use it to decide which additional checks are required when a change touches filters, hooks, install flow, metrics, search, TUI, masking, or performance-sensitive paths.
+
+In short:
+
+- Touching `src/filter/*` → TEST-PLAN sections B and G.
+- Touching `src/hook/*` or `install.rs` → sections C, D and G. Installs and uninstalls must stay idempotent and must not break third-party entries.
+- Touching `src/metrics/*` or `src/tui/gain.rs` → sections E and H.
+- Touching `src/search/*`, `src/trace/*`, `src/daemon/*` or `src/mcp/*` → sections F and I.
+- Touching `src/masking/*` → section G is blocking.
+- Errors, test failures, tracebacks and useful identifiers must stay visible after filtering, and no secret may appear in clear text.
 
 ### TUI test pattern
 
@@ -192,6 +241,8 @@ Before opening a pull request, verify each item:
 - [ ] No `unwrap()` on paths that can realistically fail at runtime — use `?` or handle the error
 - [ ] No `unsafe` code without a documented safety comment
 - [ ] No nightly-only features (`#![feature(...)]`)
+- [ ] Docs are in English (README, `docs/`, changelogs, code comments)
+- [ ] Harness lists follow the priority order above, and the feature matrix is updated if harness support changed
 - [ ] Public functions and types have doc comments if their purpose is not immediately obvious
 - [ ] Secrets and PII are never logged or stored (use `masking::mask()` before recording content)
 
@@ -199,12 +250,12 @@ Before opening a pull request, verify each item:
 
 ## Submitting a pull request
 
-1. **Fork** the repository and create a branch from `main`:
+1. **Fork** the repository and create a branch from `master`:
    ```bash
    git checkout -b feat/my-feature
    ```
 2. Make your changes, following the workflow above.
-3. Push and open a pull request against `main`.
+3. Push and open a pull request against `master`.
 4. The PR description must explain **what** changed and **why**.
 5. Link any related issue with `Closes #N`.
 
