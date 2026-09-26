@@ -1117,6 +1117,7 @@ fn cmd_install(
     let install_pi = matches!(target.as_str(), "pi" | "all");
     let install_hermes = matches!(target.as_str(), "hermes" | "all");
     let install_codex = matches!(target.as_str(), "codex" | "all");
+    let install_opencode = matches!(target.as_str(), "opencode" | "all");
 
     if !install_claude
         && !install_gemini
@@ -1124,9 +1125,10 @@ fn cmd_install(
         && !install_pi
         && !install_hermes
         && !install_codex
+        && !install_opencode
     {
         eprintln!(
-            "unknown target '{}'. Valid values: claude, gemini, qwen, pi, hermes, codex, all",
+            "unknown target '{}'. Valid values: claude, gemini, qwen, pi, hermes, codex, opencode, all",
             target
         );
         std::process::exit(1);
@@ -1400,6 +1402,26 @@ fn cmd_install(
         }
     }
 
+    if install_opencode {
+        print_install_section(&mut first_section, "Install OpenCode");
+        match install::default_opencode_plugin_path() {
+            Some(ref p) => match install::install_opencode_plugin(p) {
+                Ok(()) => {
+                    print_install_item("ok", "plugin", p);
+                    print_install_note("restart OpenCode to load the plugin");
+                }
+                Err(e) => {
+                    eprintln!("install error (opencode): {e}");
+                    std::process::exit(1);
+                }
+            },
+            None => {
+                eprintln!("cannot determine OpenCode plugin path on this system");
+                std::process::exit(1);
+            }
+        }
+    }
+
     post_install_completions(&mut first_section);
 
     let enable_ai = ai_summary || ai_summary_model.is_some();
@@ -1432,6 +1454,7 @@ fn cmd_uninstall(target: String) {
     let uninstall_pi = matches!(target.as_str(), "pi" | "all");
     let uninstall_hermes = matches!(target.as_str(), "hermes" | "all");
     let uninstall_codex = matches!(target.as_str(), "codex" | "all");
+    let uninstall_opencode = matches!(target.as_str(), "opencode" | "all");
 
     if !uninstall_claude
         && !uninstall_gemini
@@ -1439,9 +1462,10 @@ fn cmd_uninstall(target: String) {
         && !uninstall_pi
         && !uninstall_hermes
         && !uninstall_codex
+        && !uninstall_opencode
     {
         eprintln!(
-            "unknown target '{}'. Valid values: claude, gemini, qwen, pi, hermes, codex, all",
+            "unknown target '{}'. Valid values: claude, gemini, qwen, pi, hermes, codex, opencode, all",
             target
         );
         std::process::exit(1);
@@ -1712,6 +1736,32 @@ fn cmd_uninstall(target: String) {
         }
         if !had_plugin && !had_hook && !had_post && !had_mcp {
             print_install_note("nothing to uninstall");
+        }
+    }
+
+    if uninstall_opencode {
+        print_install_section(&mut first_section, "Uninstall OpenCode");
+        match install::default_opencode_plugin_path() {
+            Some(ref p) => {
+                let had = install::is_opencode_plugin_installed(p);
+                match install::uninstall_opencode_plugin(p) {
+                    Ok(()) => {
+                        if had {
+                            print_install_item("removed", "plugin", p);
+                        } else {
+                            print_install_note("nothing to uninstall");
+                        }
+                    }
+                    Err(e) => {
+                        eprintln!("uninstall error (opencode): {e}");
+                        std::process::exit(1);
+                    }
+                }
+            }
+            None => {
+                eprintln!("cannot determine OpenCode plugin path on this system");
+                std::process::exit(1);
+            }
         }
     }
 

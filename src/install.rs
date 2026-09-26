@@ -975,6 +975,43 @@ pub fn uninstall_pi(extension_path: &Path) -> InstallResult {
     Ok(())
 }
 
+// ============================================================================
+// OpenCode Support (plugin TypeScript déposé dans ~/.config/opencode/plugins/)
+// ============================================================================
+
+const OPENCODE_PLUGIN_CONTENT: &str = include_str!("opencode_plugin.ts");
+
+/// Get the default OpenCode plugin path: ~/.config/opencode/plugins/ecotokens.ts
+pub fn default_opencode_plugin_path() -> Option<std::path::PathBuf> {
+    dirs::home_dir().map(|d| {
+        d.join(".config")
+            .join("opencode")
+            .join("plugins")
+            .join("ecotokens.ts")
+    })
+}
+
+/// Install the ecotokens plugin for OpenCode (idempotent).
+pub fn install_opencode_plugin(plugin_path: &Path) -> InstallResult {
+    if let Some(parent) = plugin_path.parent() {
+        std::fs::create_dir_all(parent)?;
+    }
+    crate::config::atomic_write(plugin_path, OPENCODE_PLUGIN_CONTENT)
+}
+
+/// Check if the ecotokens OpenCode plugin is installed.
+pub fn is_opencode_plugin_installed(plugin_path: &Path) -> bool {
+    plugin_path.exists()
+}
+
+/// Remove the ecotokens OpenCode plugin.
+pub fn uninstall_opencode_plugin(plugin_path: &Path) -> InstallResult {
+    if plugin_path.exists() {
+        std::fs::remove_file(plugin_path)?;
+    }
+    Ok(())
+}
+
 // ---------------------------------------------------------------------------
 // Shell completion script (post-install / post-uninstall step)
 // ---------------------------------------------------------------------------
