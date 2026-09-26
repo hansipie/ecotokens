@@ -80,6 +80,12 @@ The result: the model sees clean, concise output - and you keep your context win
 cargo install --git https://github.com/hansipie/ecotokens
 ```
 
+Or via [mise](https://mise.jdx.dev):
+
+```bash
+mise use github:hansipie/ecotokens
+```
+
 For exact token counting (tiktoken cl100k_base instead of the character heuristic):
 
 ```bash
