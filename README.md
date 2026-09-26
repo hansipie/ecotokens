@@ -21,7 +21,7 @@ On one developer workstation, ecotokens recorded **19 928 hook executions** betw
 | Commands with savings | 5 735 / 19 928, or 28.8% |
 | Biggest command family | `grep`, with 55 383 168 tokens saved |
 
-[Claude Code](https://claude.ai/code), Codex, [Hermes](https://hermes.dev), [Pi](https://pi.dev), [Gemini CLI](https://github.com/google-gemini/gemini-cli), and [Qwen Code](https://github.com/QwenLM/qwen-code) can all dump massive command outputs and native tool results into your context window. ecotokens sits in front of those outputs, removes the noise, preserves the important bits, and records the before/after savings locally.
+[Claude Code](https://claude.ai/code), Codex, [Hermes](https://hermes.dev), [Pi](https://pi.dev), [Gemini CLI](https://github.com/google-gemini/gemini-cli), [Qwen Code](https://github.com/QwenLM/qwen-code), and [OpenCode](https://opencode.ai) can all dump massive command outputs and native tool results into your context window. ecotokens sits in front of those outputs, removes the noise, preserves the important bits, and records the before/after savings locally.
 
 Built on a *"set it and forget it!"* philosophy: one install command, zero configuration, then automatic compression for shell commands, file reads, grep/search results, directory listings, and code-intelligence workflows.
 
@@ -38,7 +38,7 @@ Full methodology and per-family breakdown: [`docs/BENCHMARKS.md`](docs/BENCHMARK
 | **PreToolUse hook** | Intercepts every shell (`Bash`) command before its output reaches the model - filters, compresses, and records savings |
 | **PostToolUse hook** | Intercepts native tool results (`Read`/`read_file`, `Grep`/`search_file_content`, `Glob`/`list_directory`) - outline-based compression for source files, grep trimming, glob denoising |
 | **Gain dashboard** | Interactive TUI - token savings by command family or project, sparkline, diff view, history log |
-| **Multi-agent support** | Works with Claude Code, Codex, Hermes, Pi, Gemini CLI, and Qwen Code out of the box |
+| **Multi-agent support** | Works with Claude Code, Codex, Hermes, Pi, Gemini CLI, Qwen Code, and OpenCode out of the box |
 | **Precision guarantees** | Errors, failures, and stack traces are never removed; secrets are redacted before filtering |
 | **Code intelligence** | BM25 + vector search (Candle zero-config or Ollama), symbol lookup, call graph tracing, near-duplicate detection |
 | **MCP server** | Exposes code-intelligence tools over stdio (`ecotokens mcp-server`) and auto-registers in agent settings on install |
@@ -68,7 +68,7 @@ ecotokens installs hooks that intercept tool outputs before they reach the model
 3. Returns the compressed result to the model
 4. Records the savings under the `native_read`, `grep`, or `fs` family
 
-Claude Code uses the `PreToolUse` + `PostToolUse` hooks (`~/.claude/settings.json`). Codex uses `PreToolUse` + `PostToolUse` hooks in `~/.codex/hooks.json` and registers the MCP server in `~/.codex/config.toml`. Hermes uses a plugin that sends outputs through `filter-output` via `HermesTransformTerminalOutput` and `HermesTransformToolResult` hook types. Pi uses a TypeScript extension (`~/.pi/agent/extensions/ecotokens.ts`) that intercepts `tool_call` (bash pre-exec) and `tool_result` (read/grep/find/ls post-exec) events in-process. Gemini CLI uses the `BeforeTool` + `AfterTool` hooks (`~/.gemini/settings.json`). Qwen Code uses the `PreToolUse` + `PostToolUse` hooks (`~/.qwen/settings.json`).
+Claude Code uses the `PreToolUse` + `PostToolUse` hooks (`~/.claude/settings.json`). Codex uses `PreToolUse` + `PostToolUse` hooks in `~/.codex/hooks.json` and registers the MCP server in `~/.codex/config.toml`. Hermes uses a plugin that sends outputs through `filter-output` via `HermesTransformTerminalOutput` and `HermesTransformToolResult` hook types. Pi uses a TypeScript extension (`~/.pi/agent/extensions/ecotokens.ts`) that intercepts `tool_call` (bash pre-exec) and `tool_result` (read/grep/find/ls post-exec) events in-process. Gemini CLI uses the `BeforeTool` + `AfterTool` hooks (`~/.gemini/settings.json`). Qwen Code uses the `PreToolUse` + `PostToolUse` hooks (`~/.qwen/settings.json`). OpenCode uses a JS/TS plugin (`~/.config/opencode/plugins/ecotokens.ts`) that intercepts `tool.execute.before` (bash) and `tool.execute.after` (read/grep/glob) events in-process.
 
 For a focused view of the runtime path, see [`docs/hook-filter-metrics-flow.md`](docs/hook-filter-metrics-flow.md).
 
@@ -213,6 +213,17 @@ ecotokens install --target pi
 
 This writes a TypeScript extension to `~/.pi/agent/extensions/ecotokens.ts`. Pi auto-discovers it on next startup (or `/reload` inside an active session). The extension intercepts bash commands before execution and filters native tool results (`read`, `grep`, `find`, `ls`) after execution.
 
+### OpenCode
+
+Requires [OpenCode](https://opencode.ai).
+
+```bash
+cargo install --path .
+ecotokens install --target opencode
+```
+
+This writes a JS/TS plugin to `~/.config/opencode/plugins/ecotokens.ts`. OpenCode auto-discovers it on next startup. The plugin intercepts `tool.execute.before` (bash command rewrite) and `tool.execute.after` (read/grep/glob output filtering) events in-process. Works with OpenCode in terminal, desktop, and ACP mode (Zed, JetBrains, etc.).
+
 ### Gemini CLI
 
 Requires [Gemini CLI](https://github.com/google-gemini/gemini-cli) ≥ 0.1.0.
@@ -245,7 +256,7 @@ It also registers the ecotokens MCP server in `~/.qwen/settings.json`.
 ecotokens install --target all
 ```
 
-`--target all` covers Claude Code, Codex, Hermes, Pi, Gemini CLI, and Qwen Code in a single command.
+`--target all` covers Claude Code, Codex, Hermes, Pi, Gemini CLI, Qwen Code, and OpenCode in a single command.
 
 ### With AI summarization
 
@@ -267,6 +278,7 @@ ecotokens uninstall --target hermes    # Hermes
 ecotokens uninstall --target pi        # Pi
 ecotokens uninstall --target gemini    # Gemini CLI
 ecotokens uninstall --target qwen      # Qwen Code
+ecotokens uninstall --target opencode  # OpenCode
 ecotokens uninstall --target all       # all targets
 ```
 
@@ -294,6 +306,7 @@ Uninstall Claude Code
 | `ecotokens install --target codex` | Install the Codex plugin, `PreToolUse`/`PostToolUse` hooks in `~/.codex/hooks.json`, and MCP server in `~/.codex/config.toml` |
 | `ecotokens install --target hermes` | Install the Hermes plugin in `~/.hermes/plugins/` |
 | `ecotokens install --target hermes --enable-plugin` | Install and add to `plugins.enabled` in `~/.hermes/config.yaml` directly |
+| `ecotokens install --target opencode` | Install the OpenCode plugin in `~/.config/opencode/plugins/ecotokens.ts` |
 | `ecotokens uninstall` | Remove all hooks (PreToolUse, PostToolUse, SessionStart, SessionEnd where supported) and the MCP server entry |
 | `ecotokens filter -- CMD [ARGS]` | Run a command, filter its output, record metrics |
 | `ecotokens filter --cwd DIR -- CMD [ARGS]` | Same, with an explicit working directory |
@@ -969,7 +982,7 @@ Filtering is aggressive on noise, conservative on signal:
 ## Requirements
 
 - Rust ≥ 1.75 (stable)
-- One or more of: Claude Code (with hook support), Codex, Hermes, Pi ≥ 0.62.0, Gemini CLI ≥ 0.1.0, Qwen Code
+- One or more of: Claude Code (with hook support), Codex, Hermes, Pi ≥ 0.62.0, Gemini CLI ≥ 0.1.0, Qwen Code, OpenCode
 - Internet access on first use (Candle downloads `all-MiniLM-L6-v2` ~90 MB from HuggingFace Hub; cached locally after that)
 - Ollama (optional, for AI summarization and/or Ollama-backed embeddings)
 - A [TypeSafe](https://docs.typesafe.ai) API key in the `TYPESAFE_API_KEY` environment variable (optional, for [Jev judgments](#jev-judgments-optional-off-by-default) and the [model router](#model-router-optional-off-by-default)); without it, every Jev use falls back to the existing heuristic
