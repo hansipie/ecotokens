@@ -1,4 +1,7 @@
-use ecotokens::metrics::store::{append_to, read_from, CommandFamily, FilterMode, Interception};
+use ecotokens::metrics::store::{
+    agent_to_hook_type_post, agent_to_hook_type_pre, append_to, read_from, CommandFamily,
+    FilterMode, HookType, Interception,
+};
 use tempfile::TempDir;
 
 fn metrics_file(dir: &TempDir) -> std::path::PathBuf {
@@ -182,7 +185,6 @@ fn concurrent_migration_produces_no_duplicates_and_no_error() {
     );
     assert!(!jsonl_path.exists(), "metrics.jsonl doit avoir été renommé");
 }
-
 #[test]
 fn content_is_stored_and_truncated() {
     let long = "x".repeat(5000);
@@ -201,4 +203,11 @@ fn content_is_stored_and_truncated() {
     let before = item.content_before.unwrap();
     assert!(before.len() < 5000, "content should be truncated");
     assert!(before.contains("[truncated]"));
+}
+
+#[test]
+fn opencode_agent_maps_to_opencode_hook_type() {
+    assert_eq!(agent_to_hook_type_pre("opencode"), HookType::OpenCode);
+    assert_eq!(agent_to_hook_type_post("opencode"), HookType::OpenCode);
+    assert_eq!(HookType::OpenCode.agent_label(), "opencode");
 }

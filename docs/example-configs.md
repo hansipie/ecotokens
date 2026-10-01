@@ -163,6 +163,20 @@ ls ~/.pi/agent/extensions/ecotokens.ts
 
 ---
 
+## OpenCode
+
+OpenCode uses a JS/TS plugin instead of a JSON config file. `ecotokens install --target opencode` writes the plugin to `~/.config/opencode/plugins/ecotokens.ts`. OpenCode auto-discovers any `.ts` file in that directory on startup (restart OpenCode after installing). The plugin intercepts `tool.execute.before` (bash command rewrite via `ecotokens filter`) and `tool.execute.after` (read/grep/glob output filtering via `ecotokens hook-post`).
+
+No manual editing is required. To verify the plugin is in place:
+
+```bash
+ls ~/.config/opencode/plugins/ecotokens.ts
+```
+
+Works the same in terminal, desktop, and ACP mode (Zed, JetBrains, …).
+
+---
+
 ## Hermes
 
 Hermes uses a Python plugin installed under `~/.hermes/plugins/ecotokens/`.

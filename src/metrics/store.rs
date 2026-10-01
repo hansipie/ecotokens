@@ -34,6 +34,7 @@ pub enum HookType {
     CodexPreToolUse,
     CodexPostToolUse,
     Pi,
+    OpenCode,
     Cli,
     Mcp,
     HermesTransformTerminalOutput,
@@ -48,6 +49,7 @@ impl HookType {
             HookType::QwenPreToolUse | HookType::QwenPostToolUse => "qwen",
             HookType::CodexPreToolUse | HookType::CodexPostToolUse => "codex",
             HookType::Pi => "pi",
+            HookType::OpenCode => "opencode",
             HookType::Cli => "cli",
             HookType::Mcp => "mcp",
             HookType::HermesTransformTerminalOutput | HookType::HermesTransformToolResult => {
@@ -64,6 +66,7 @@ pub fn agent_to_hook_type_pre(s: &str) -> HookType {
         "qwen" => HookType::QwenPreToolUse,
         "codex" => HookType::CodexPreToolUse,
         "pi" => HookType::Pi,
+        "opencode" => HookType::OpenCode,
         _ => HookType::Cli,
     }
 }
@@ -75,6 +78,7 @@ pub fn agent_to_hook_type_post(s: &str) -> HookType {
         "qwen" => HookType::QwenPostToolUse,
         "codex" => HookType::CodexPostToolUse,
         "pi" => HookType::Pi,
+        "opencode" => HookType::OpenCode,
         _ => HookType::PostToolUse,
     }
 }

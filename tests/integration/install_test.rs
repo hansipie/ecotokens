@@ -5,12 +5,13 @@ use helpers::ecotokens_bin;
 use ecotokens::install::{
     are_session_hooks_installed, enable_hermes_plugin_in_config, install_codex_mcp_server,
     install_codex_plugin, install_gemini_hook, install_hermes_plugin, install_hook,
-    install_mcp_server, install_post_hook, install_qwen_hook, install_session_hooks,
-    is_codex_mcp_registered, is_codex_plugin_installed, is_gemini_hook_installed,
-    is_gemini_mcp_registered, is_hermes_plugin_enabled_in_config, is_hermes_plugin_installed,
-    is_mcp_registered, is_post_hook_installed, is_qwen_hook_installed, is_qwen_mcp_registered,
+    install_mcp_server, install_opencode_plugin, install_post_hook, install_qwen_hook,
+    install_session_hooks, is_codex_mcp_registered, is_codex_plugin_installed,
+    is_gemini_hook_installed, is_gemini_mcp_registered, is_hermes_plugin_enabled_in_config,
+    is_hermes_plugin_installed, is_mcp_registered, is_opencode_plugin_installed,
+    is_post_hook_installed, is_qwen_hook_installed, is_qwen_mcp_registered,
     uninstall_codex_mcp_server, uninstall_codex_plugin, uninstall_gemini, uninstall_hermes_plugin,
-    uninstall_hook, uninstall_qwen,
+    uninstall_hook, uninstall_opencode_plugin, uninstall_qwen,
 };
 use std::process::Command;
 use tempfile::TempDir;
@@ -1398,4 +1399,129 @@ fn cli_install_and_uninstall_manage_completion_script() {
     assert!(run("uninstall").status.success());
     assert!(!script.exists(), "completion script should be removed");
     assert!(run("uninstall").status.success(), "re-uninstall is a no-op");
+}
+
+// ── OpenCode plugin ─────────────────────────────────────────────────────────
+
+fn temp_opencode_plugin(dir: &TempDir) -> std::path::PathBuf {
+    dir.path()
+        .join(".config")
+        .join("opencode")
+        .join("plugins")
+        .join("ecotokens.ts")
+}
+
+#[test]
+fn opencode_install_writes_plugin_with_embedded_content() {
+    let dir = TempDir::new().unwrap();
+    let path = temp_opencode_plugin(&dir);
+    assert!(!is_opencode_plugin_installed(&path));
+
+    install_opencode_plugin(&path).unwrap();
+    assert!(is_opencode_plugin_installed(&path));
+
+    let content = std::fs::read_to_string(&path).unwrap();
+    assert!(
+        content.contains("tool.execute.before"),
+        "plugin before-hook present"
+    );
+    assert!(
+        content.contains("tool.execute.after"),
+        "plugin after-hook present"
+    );
+    assert!(content.contains("--agent opencode"), "agent flag present");
+}
+
+#[test]
+fn opencode_install_is_idempotent() {
+    let dir = TempDir::new().unwrap();
+    let path = temp_opencode_plugin(&dir);
+
+    install_opencode_plugin(&path).unwrap();
+    let first = std::fs::read_to_string(&path).unwrap();
+    install_opencode_plugin(&path).unwrap();
+    let second = std::fs::read_to_string(&path).unwrap();
+    assert_eq!(first, second, "re-install must not change the file");
+}
+
+#[test]
+fn opencode_uninstall_removes_file_and_is_noop_when_absent() {
+    let dir = TempDir::new().unwrap();
+    let path = temp_opencode_plugin(&dir);
+
+    // Absent: no-op, no error.
+    uninstall_opencode_plugin(&path).unwrap();
+    assert!(!path.exists());
+
+    install_opencode_plugin(&path).unwrap();
+    assert!(path.exists());
+    uninstall_opencode_plugin(&path).unwrap();
+    assert!(!path.exists(), "uninstall must remove the plugin");
+    // Second uninstall: no-op.
+    uninstall_opencode_plugin(&path).unwrap();
+}
+
+#[test]
+fn opencode_install_end_to_end_with_home() {
+    let dir = TempDir::new().unwrap();
+
+    let out = Command::new(ecotokens_bin())
+        .args(["install", "--target", "opencode"])
+        .env("HOME", dir.path())
+        .output()
+        .expect("failed to run ecotokens install --target opencode");
+    assert!(
+        out.status.success(),
+        "install --target opencode doit réussir, stderr: {}",
+        String::from_utf8_lossy(&out.stderr)
+    );
+    let plugin = temp_opencode_plugin(&dir);
+    assert!(plugin.exists(), "plugin doit être créé sous HOME");
+    assert!(
+        String::from_utf8_lossy(&out.stdout).contains("OpenCode"),
+        "install doit afficher une section OpenCode"
+    );
+
+    // Re-install: idempotent.
+    let out2 = Command::new(ecotokens_bin())
+        .args(["install", "--target", "opencode"])
+        .env("HOME", dir.path())
+        .output()
+        .unwrap();
+    assert!(out2.status.success());
+
+    let out3 = Command::new(ecotokens_bin())
+        .args(["uninstall", "--target", "opencode"])
+        .env("HOME", dir.path())
+        .output()
+        .unwrap();
+    assert!(out3.status.success());
+    assert!(!plugin.exists(), "uninstall doit supprimer le plugin");
+}
+
+#[test]
+fn install_all_includes_opencode_and_unknown_target_errors() {
+    let dir = TempDir::new().unwrap();
+
+    let out = Command::new(ecotokens_bin())
+        .args(["install", "--target", "all"])
+        .env("HOME", dir.path())
+        .output()
+        .expect("failed to run ecotokens install --target all");
+    assert!(out.status.success());
+    assert!(
+        temp_opencode_plugin(&dir).exists(),
+        "--target all doit inclure opencode"
+    );
+
+    let bad = Command::new(ecotokens_bin())
+        .args(["install", "--target", "nope"])
+        .env("HOME", dir.path())
+        .output()
+        .unwrap();
+    assert!(!bad.status.success(), "unknown target must error");
+    assert!(
+        String::from_utf8_lossy(&bad.stderr).contains("opencode"),
+        "error message must list opencode as a valid target"
+    );
 }

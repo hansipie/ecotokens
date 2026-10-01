@@ -1,7 +1,11 @@
 /**
  * ecotokens plugin for OpenCode — token savings via pre/post tool interception.
  * Install: ecotokens install --target opencode
- * Do not edit manually — regenerate with: ecotokens install --target opencode
+ *
+ * This file is the source of truth; `install` copies it verbatim to
+ * ~/.config/opencode/plugins/ecotokens.ts. Do not edit the installed copy.
+ * Restart OpenCode after installing ecotokens or this plugin — plugins are
+ * loaded at startup only.
  *
  * OpenCode uses in-process JS/TS hooks (tool.execute.before / tool.execute.after).
  * Plugin docs: https://opencode.ai/docs/plugins
@@ -18,6 +22,15 @@ function ecotokensAvailable(): boolean {
   } catch {
     return false
   }
+}
+
+/**
+ * POSIX single-quote escaping: `'foo'` → `'foo'\''bar'`.
+ * Unlike JSON.stringify (double quotes), the result is passed to the shell
+ * verbatim — no $VAR, $(...), backtick, or ! expansion by the outer shell.
+ */
+function shQuote(s: string): string {
+  return `'${s.replace(/'/g, `'\\''`)}'`
 }
 
 /**
@@ -86,7 +99,9 @@ export const EcotokensPlugin: Plugin = async ({ directory }) => {
       if (input.tool !== "bash") return
       const args = output.args as { command?: string }
       if (!args.command) return
-      args.command = `ecotokens filter --agent opencode --cwd ${JSON.stringify(directory)} -- bash -c ${JSON.stringify(args.command)}`
+      // Guard against double-wrapping (re-entrant calls or already-wrapped commands).
+      if (args.command.startsWith("ecotokens")) return
+      args.command = `ecotokens filter --agent opencode --cwd ${shQuote(directory)} -- bash -c ${shQuote(args.command)}`
     },
 
     // ── 2. Native tools post-execution: PostToolUse ───────────────────────
