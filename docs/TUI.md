@@ -100,6 +100,8 @@ Shows how the optional [Jev integration](jev-integration.md) is being used: how 
 
 **Data source.** The Jev call log, a SQLite DB located by the `ECOTOKENS_JEV_DB` environment variable, or otherwise the model router database. Configuration facts (enabled state, URL) come from the ecotokens settings. An unreadable or missing log is treated as empty.
 
+**Router hook warning.** When the model router is enabled but its `UserPromptSubmit` hook is not installed, the header shows a red `router hook missing` notice with the fix (`ecotokens router on`).
+
 ### Layout
 
 ```

@@ -18,6 +18,9 @@ pub struct JevStatus {
     pub enabled: bool,
     pub has_key: bool,
     pub url: Option<String>,
+    /// The router is enabled but its `UserPromptSubmit` hook is not installed,
+    /// so it never runs.
+    pub router_hook_missing: bool,
 }
 
 fn label(text: &str) -> Span<'static> {
@@ -107,6 +110,14 @@ fn render_header(
                 "   URL: {}",
                 status.url.as_deref().unwrap_or("default")
             )),
+            if status.router_hook_missing {
+                Span::styled(
+                    "   router hook missing: run `ecotokens router on`",
+                    Style::default().fg(Color::Red),
+                )
+            } else {
+                Span::raw("")
+            },
         ]),
         Line::from(vec![
             label("Calls: "),
@@ -229,6 +240,7 @@ fn render_log(
         .skip(start)
         .take(height)
         .map(|(i, c)| {
+            let date = c.timestamp.get(0..10).unwrap_or("");
             let time = c.timestamp.get(11..19).unwrap_or(&c.timestamp);
             let (mark, color) = if c.ok {
                 ("ok  ", Color::Green)
@@ -236,7 +248,7 @@ fn render_log(
                 ("FAIL", Color::Red)
             };
             let mut spans = vec![
-                Span::raw(format!("{time} ")),
+                Span::raw(format!("{date} {time} ")),
                 Span::styled(mark, Style::default().fg(color)),
                 Span::raw(format!(
                     " {:<12} {:>5} ms {:>6}/{:<5}",
@@ -302,6 +314,9 @@ pub fn status_from_settings(settings: &crate::config::Settings) -> JevStatus {
             .map(|k| !k.trim().is_empty())
             .unwrap_or(false),
         url: settings.jev_url.clone(),
+        router_hook_missing: settings.router_enabled
+            && !crate::install::default_claude_settings_path()
+                .is_some_and(|p| crate::install::is_prompt_hook_installed(&p)),
     }
 }
 

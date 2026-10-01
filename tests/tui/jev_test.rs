@@ -7,7 +7,7 @@ mod helpers;
 use helpers::buffer_text;
 
 fn draw(summary: &JevSummary, status: &JevStatus) -> String {
-    let mut terminal = Terminal::new(TestBackend::new(140, 36)).unwrap();
+    let mut terminal = Terminal::new(TestBackend::new(160, 36)).unwrap();
     terminal
         .draw(|f| {
             render_jev(
@@ -87,6 +87,7 @@ fn populated_data_shows_stats_failures_and_log() {
         enabled: true,
         has_key: true,
         url: None,
+        ..Default::default()
     };
     let text = draw(&populated(), &status);
     for needle in [
@@ -121,4 +122,26 @@ fn small_terminal_does_not_panic() {
             )
         })
         .unwrap();
+}
+
+#[test]
+fn header_warns_when_router_hook_is_missing() {
+    let status = JevStatus {
+        enabled: true,
+        has_key: true,
+        router_hook_missing: true,
+        ..Default::default()
+    };
+    let text = draw(&populated(), &status);
+    assert!(text.contains("router hook missing"), "{text}");
+
+    let ok = draw(
+        &populated(),
+        &JevStatus {
+            enabled: true,
+            has_key: true,
+            ..Default::default()
+        },
+    );
+    assert!(!ok.contains("router hook missing"));
 }
