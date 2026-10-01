@@ -5,6 +5,16 @@ All notable changes to this project will be documented in this file.
 The format is based on [Keep a Changelog](https://keepachangelog.com/en/1.0.0/),
 and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0.html).
 
+## [0.27.1] - 2026-10-01
+
+### Added
+
+- **`ecotokens jev` router hook warning**: the Jev usage view header now shows a red `router hook missing: run \`ecotokens router on\`` notice when the model router is enabled but its `UserPromptSubmit` hook is not installed (in that state the router never runs).
+
+### Changed
+
+- **Version**: bumped the crate to `0.27.1`.
+
 ## [0.27.0] - 2026-09-23
 
 ### Added
