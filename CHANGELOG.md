@@ -5,6 +5,23 @@ All notable changes to this project will be documented in this file.
 The format is based on [Keep a Changelog](https://keepachangelog.com/en/1.0.0/),
 and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0.html).
 
+## [0.28.0] - 2026-10-02
+
+### Added
+
+- **OpenCode plugin support** (#116).
+- **Raw output recovery**: `ecotokens show <id>` prints the full unfiltered output of a filtered command (#119).
+
+### Fixed
+
+- **Hermes install**: the Hermes CLI call is now bounded by a timeout and the hermes tests are hermetic (#120).
+
+### Changed
+
+- **Docs**: the README is split into focused documents (#121).
+- **Router model labels**: the helper agents' model labels no longer carry a version number (`Claude Haiku`, `Claude Sonnet`, `Claude Opus`, `Claude Fable`), so they stay accurate when an alias moves to a newer model. Re-run `ecotokens router on` to refresh installed agents.
+- **Version**: bumped the crate to `0.28.0`.
+
 ## [0.27.1] - 2026-10-01
 
 ### Added

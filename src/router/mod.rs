@@ -69,10 +69,10 @@ impl Size {
 
     pub fn model_label(self) -> &'static str {
         match self {
-            Size::Tiny => "Claude Haiku 4.5",
-            Size::Everyday => "Claude Sonnet 5",
-            Size::Large => "Claude Opus 5.5",
-            Size::Hardest => "Claude Fable 5.1",
+            Size::Tiny => "Claude Haiku",
+            Size::Everyday => "Claude Sonnet",
+            Size::Large => "Claude Opus",
+            Size::Hardest => "Claude Fable",
         }
     }
 
