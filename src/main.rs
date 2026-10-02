@@ -1098,6 +1098,40 @@ fn print_install_note(message: &str) {
     println!("  note    {message}");
 }
 
+/// How long the optional Hermes CLI call may take before we give up.
+const HERMES_CLI_TIMEOUT: std::time::Duration = std::time::Duration::from_secs(15);
+
+/// Run `hermes <args>` without ever blocking the install for long.
+///
+/// Registering the plugin through the CLI is a convenience (callers fail open),
+/// and `hermes` may start a slow first-run bootstrap, e.g. when `HERMES_HOME`
+/// points at a fresh directory. On timeout the child is killed and a
+/// `TimedOut` error is returned, which callers treat like a missing CLI.
+fn run_hermes_cli(args: &[&str]) -> std::io::Result<std::process::Output> {
+    use std::process::Stdio;
+    let mut child = std::process::Command::new("hermes")
+        .args(args)
+        .stdin(Stdio::null())
+        .stdout(Stdio::piped())
+        .stderr(Stdio::piped())
+        .spawn()?;
+    let deadline = std::time::Instant::now() + HERMES_CLI_TIMEOUT;
+    loop {
+        if child.try_wait()?.is_some() {
+            return child.wait_with_output();
+        }
+        if std::time::Instant::now() >= deadline {
+            let _ = child.kill();
+            let _ = child.wait();
+            return Err(std::io::Error::new(
+                std::io::ErrorKind::TimedOut,
+                "hermes did not finish in time",
+            ));
+        }
+        std::thread::sleep(std::time::Duration::from_millis(50));
+    }
+}
+
 fn cmd_install(
     target: String,
     ai_summary: bool,
@@ -1312,9 +1346,7 @@ fn cmd_install(
                         }
                     } else {
                         // Try via the Hermes CLI (fail-open).
-                        let result = std::process::Command::new("hermes")
-                            .args(["plugins", "enable", "ecotokens"])
-                            .output();
+                        let result = run_hermes_cli(&["plugins", "enable", "ecotokens"]);
                         match result {
                             Ok(out) => {
                                 let msg = String::from_utf8_lossy(&out.stdout);
@@ -1632,9 +1664,7 @@ fn cmd_uninstall(target: String) {
                     Ok(()) => {
                         if had {
                             print_install_item("removed", "plugin", p);
-                            let disabled = std::process::Command::new("hermes")
-                                .args(["plugins", "disable", "ecotokens"])
-                                .output();
+                            let disabled = run_hermes_cli(&["plugins", "disable", "ecotokens"]);
                             match disabled {
                                 Ok(out) if out.status.success() => {
                                     print_install_note("plugin disabled in Hermes");

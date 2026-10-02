@@ -1153,6 +1153,13 @@ fn codex_install_end_to_end_with_codex_home() {
 
 // ── Phase 5 : test d'intégration end-to-end install Hermes ──────────────────
 
+/// A PATH with no `hermes` on it. Without `--enable-plugin`, install/uninstall
+/// shell out to the Hermes CLI; a real one can start a slow first-run
+/// bootstrap in a fresh `HERMES_HOME`, so these tests must not depend on it.
+fn no_hermes_path() -> std::ffi::OsString {
+    std::ffi::OsString::from("/nonexistent")
+}
+
 #[test]
 fn hermes_install_end_to_end_with_hermes_home() {
     let dir = TempDir::new().unwrap();
@@ -1162,6 +1169,7 @@ fn hermes_install_end_to_end_with_hermes_home() {
     let out = Command::new(ecotokens_bin())
         .args(["install", "--target", "hermes"])
         .env("HERMES_HOME", hermes_home)
+        .env("PATH", no_hermes_path())
         .output()
         .expect("failed to run ecotokens install");
 
@@ -1238,6 +1246,7 @@ fn hermes_uninstall_end_to_end_with_hermes_home() {
     Command::new(ecotokens_bin())
         .args(["install", "--target", "hermes"])
         .env("HERMES_HOME", hermes_home)
+        .env("PATH", no_hermes_path())
         .output()
         .unwrap();
 
@@ -1247,6 +1256,7 @@ fn hermes_uninstall_end_to_end_with_hermes_home() {
     let out = Command::new(ecotokens_bin())
         .args(["uninstall", "--target", "hermes"])
         .env("HERMES_HOME", hermes_home)
+        .env("PATH", no_hermes_path())
         .output()
         .expect("failed to run ecotokens uninstall");
 
