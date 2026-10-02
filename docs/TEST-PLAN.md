@@ -271,6 +271,16 @@ Verify:
 - Original or safe fallback content is returned when filtering fails
 - Large outputs are handled within threshold and timeout expectations
 
+Raw output recovery (`ecotokens show`):
+- A filtered output that saved >= 20% tokens ends with `ecotokens show <id>`; short or unreduced outputs have no hint
+- `ecotokens show <id>` prints the saved text; an unknown id exits 1 with a clear message
+- Ids that are not 8 lowercase hex characters (for example `../x`) are rejected before any file is read
+- Saved files are `0600` and contain the masked text: a secret in the raw output appears as `[REDACTED]`, never in clear
+- Entries older than `raw_recovery_retention_days` and entries beyond `raw_recovery_max_entries` are pruned; `0` disables a rule
+- `raw_recovery_enabled: false` writes nothing and prints no hint
+- `ecotokens clear --all` also removes saved outputs; other `clear` filters leave them alone
+- An unwritable config directory does not change the filtered output
+
 ### H. TUI checks
 
 Objective: ensure user-visible terminal screens stay usable.

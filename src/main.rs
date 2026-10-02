@@ -2939,6 +2939,13 @@ fn cmd_show(id: &str) {
     }
 }
 
+fn clear_saved_raw_outputs() {
+    if let Some(dir) = rawstore::raw_dir() {
+        let n = rawstore::clear_in(&dir);
+        println!("Deleted {n} saved raw output(s).");
+    }
+}
+
 fn cmd_clear(
     all: bool,
     before: Option<String>,
@@ -2972,6 +2979,11 @@ fn cmd_clear(
 
     if items.is_empty() {
         println!("No interceptions recorded.");
+        // Saved raw outputs outlive the interceptions they came from (a filtered
+        // `clear` removes only the latter), so `--all` must still sweep them.
+        if all {
+            clear_saved_raw_outputs();
+        }
         return;
     }
 
@@ -3087,10 +3099,7 @@ fn cmd_clear(
             println!("Deleted {deleted} interception(s).");
             // `--all` also drops the saved full outputs (`ecotokens show`).
             if all {
-                if let Some(dir) = rawstore::raw_dir() {
-                    let n = rawstore::clear_in(&dir);
-                    println!("Deleted {n} saved raw output(s).");
-                }
+                clear_saved_raw_outputs();
             }
         }
         Err(e) => {

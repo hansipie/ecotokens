@@ -357,3 +357,39 @@ fn delete_ids_empty_slice_is_a_noop() {
     assert_eq!(delete_ids(&path, &[]).unwrap(), 0);
     assert_eq!(read_from(&path).unwrap().len(), 1);
 }
+
+/// `clear --all` also removes saved raw outputs, even when no interception is
+/// left to delete (a filtered `clear` empties the table but not the raw store).
+#[test]
+fn clear_all_removes_saved_raw_outputs_even_without_interceptions() {
+    let cfg = TempDir::new().unwrap();
+    let raw_dir = cfg.path().join("ecotokens").join("raw");
+    let id = ecotokens::rawstore::save_in(&raw_dir, "full output").unwrap();
+    assert!(ecotokens::rawstore::load_from(&raw_dir, &id).is_ok());
+
+    let out = std::process::Command::new(env!("CARGO_BIN_EXE_ecotokens"))
+        .args(["clear", "--all", "-y"])
+        .env("XDG_CONFIG_HOME", cfg.path())
+        .output()
+        .expect("failed to run ecotokens clear");
+
+    assert!(out.status.success());
+    assert!(ecotokens::rawstore::load_from(&raw_dir, &id).is_err());
+}
+
+/// A filtered `clear` must leave saved raw outputs alone.
+#[test]
+fn clear_with_filter_keeps_saved_raw_outputs() {
+    let cfg = TempDir::new().unwrap();
+    let raw_dir = cfg.path().join("ecotokens").join("raw");
+    let id = ecotokens::rawstore::save_in(&raw_dir, "full output").unwrap();
+
+    let out = std::process::Command::new(env!("CARGO_BIN_EXE_ecotokens"))
+        .args(["clear", "--family", "git", "-y"])
+        .env("XDG_CONFIG_HOME", cfg.path())
+        .output()
+        .expect("failed to run ecotokens clear");
+
+    assert!(out.status.success());
+    assert!(ecotokens::rawstore::load_from(&raw_dir, &id).is_ok());
+}

@@ -348,7 +348,8 @@ Uninstall Claude Code
 | `ecotokens abbreviations disable` | Turn abbreviations off (default) |
 | `ecotokens abbreviations list` | List the active dictionary (defaults merged with user overrides) |
 | `ecotokens duplicates` | Detect near-duplicate code blocks in the indexed codebase |
-| `ecotokens clear --all` | Delete all recorded interceptions |
+| `ecotokens show ID` | Print the full (secret-masked) output behind a filtered result — see [Recovering the full output](#recovering-the-full-output) |
+| `ecotokens clear --all` | Delete all recorded interceptions and saved raw outputs |
 | `ecotokens clear --before DATE` | Delete interceptions recorded before DATE (YYYY-MM-DD) |
 | `ecotokens clear --older-than DURATION` | Delete interceptions older than a duration (e.g. `30d`, `2w`, `1m`) |
 | `ecotokens clear --family FAMILY` | Delete interceptions of a specific command family |
@@ -580,6 +581,24 @@ ecotokens game --period today     # only spawn enemies from today's commands
 ```
 
 Commands present at startup form the classic marching formation; commands filtered live while the game is running spawn as free-roaming "snakes". Arrow keys move, space fires.
+
+## Recovering the full output
+
+Filtering keeps errors and key lines, but sometimes you need everything. When filtering saves at least 20% of the
+tokens, ecotokens saves the full output and appends a hint:
+
+```text
+[ecotokens] Full output saved: ecotokens show 3fa9c1d2
+```
+
+```bash
+ecotokens show 3fa9c1d2   # print the saved output
+```
+
+Only the **secret-masked** text is stored (`~/.config/ecotokens/raw/`, mode `0600`), so recovery never exposes a secret
+that filtering hid. Entries are deleted after 7 days or beyond the 200 newest, and `ecotokens clear --all` removes them
+too. Retention and an off switch (`raw_recovery_enabled`) are in `config.json`; see
+[docs/raw-output-recovery.md](docs/raw-output-recovery.md) for details and limits.
 
 ## Configuration
 
