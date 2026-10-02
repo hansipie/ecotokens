@@ -12,6 +12,7 @@ pub mod jev;
 pub mod masking;
 pub mod mcp;
 pub mod metrics;
+pub mod rawstore;
 #[cfg(feature = "rewrite")]
 pub mod rewrite;
 pub mod router;

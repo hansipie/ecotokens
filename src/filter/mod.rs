@@ -179,8 +179,45 @@ pub fn apply_filter_with(
 
 /// Run the full filter pipeline with an optional working directory for git_root detection.
 /// Returns `(filtered_output, tokens_before, tokens_after)`.
-#[cfg_attr(test, allow(unused_variables))]
+///
+/// When filtering shrank the output noticeably, the full secret-masked text is
+/// saved and a `ecotokens show <id>` line is appended (see [`crate::rawstore`]).
 pub fn run_filter_pipeline_with_cwd(
+    command: &str,
+    raw: &str,
+    duration_ms: u32,
+    cwd: Option<&std::path::Path>,
+    hook_type: crate::metrics::store::HookType,
+) -> (String, u32, u32) {
+    let (mut filtered, tokens_before, tokens_after) =
+        filter_pipeline_core(command, raw, duration_ms, cwd, hook_type);
+
+    // Skipped under `cfg(test)`: it would write into the real config dir.
+    #[cfg(not(test))]
+    if crate::rawstore::worth_saving(tokens_before, tokens_after) {
+        let settings = crate::config::Settings::load();
+        if settings.raw_recovery_enabled {
+            let (masked, _) = crate::masking::mask(raw);
+            if let Some(line) = crate::rawstore::save_and_hint(
+                &masked,
+                settings.raw_recovery_retention_days,
+                settings.raw_recovery_max_entries,
+            ) {
+                if !filtered.ends_with('\n') {
+                    filtered.push('\n');
+                }
+                filtered.push_str(&line);
+            }
+        }
+    }
+    #[cfg(test)]
+    let _ = &mut filtered;
+
+    (filtered, tokens_before, tokens_after)
+}
+
+#[cfg_attr(test, allow(unused_variables))]
+fn filter_pipeline_core(
     command: &str,
     raw: &str,
     duration_ms: u32,

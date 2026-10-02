@@ -238,6 +238,20 @@ pub struct Settings {
     /// the conversation, the main session handles it.
     #[serde(default = "default_router_followup_min_prob")]
     pub router_followup_min_prob: f64,
+
+    // ── Raw output recovery (`ecotokens show <id>`) ──
+    /// Save the full (secret-masked) output whenever filtering shrinks it
+    /// noticeably, and print `ecotokens show <id>` after the filtered text.
+    #[serde(default = "default_true")]
+    pub raw_recovery_enabled: bool,
+    /// Saved outputs older than this many days are deleted. `0` disables
+    /// age-based pruning.
+    #[serde(default = "default_raw_recovery_retention_days")]
+    pub raw_recovery_retention_days: u32,
+    /// Maximum saved outputs kept; oldest pruned first. `0` disables
+    /// count-based pruning.
+    #[serde(default = "default_raw_recovery_max_entries")]
+    pub raw_recovery_max_entries: u32,
 }
 
 #[derive(Debug, Clone, Default, Deserialize)]
@@ -318,6 +332,13 @@ fn default_router_followup_min_prob() -> f64 {
     0.5
 }
 
+fn default_raw_recovery_retention_days() -> u32 {
+    7
+}
+fn default_raw_recovery_max_entries() -> u32 {
+    200
+}
+
 impl Default for Settings {
     fn default() -> Self {
         Settings {
@@ -370,6 +391,9 @@ impl Default for Settings {
             router_timeout_ms: default_router_timeout_ms(),
             router_min_confidence: default_router_min_confidence(),
             router_followup_min_prob: default_router_followup_min_prob(),
+            raw_recovery_enabled: true,
+            raw_recovery_retention_days: default_raw_recovery_retention_days(),
+            raw_recovery_max_entries: default_raw_recovery_max_entries(),
         }
     }
 }
