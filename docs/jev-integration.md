@@ -181,6 +181,8 @@ ecotokens config --jev-line-select true   # jev_line_select_enabled (needs jev_e
 
 `config` prints a warning when `TYPESAFE_API_KEY` is missing, or when line selection is enabled while `jev_enabled` is false.
 
+To compile Jev out entirely, build with `--no-default-features` and without the `jev` feature.
+
 | Setting | Default | Role |
 | --- | --- | --- |
 | `jev_enabled` | `false` | master switch for points ① and ② |

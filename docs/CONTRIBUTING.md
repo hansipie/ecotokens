@@ -101,7 +101,7 @@ Harnesses are listed in priority order. Bug fixes and parity work for higher-ran
 4. Pi
 5. Others (Gemini CLI, Qwen Code)
 
-When you add or change harness support, update the [feature matrix](harness-feature-matrix.md) and the README installation section.
+When you add or change harness support, update the [feature matrix](harness-feature-matrix.md), [installation.md](installation.md) and the "Get started" table in the README.
 
 ### Cargo features
 
