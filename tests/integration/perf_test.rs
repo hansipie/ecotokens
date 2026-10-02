@@ -16,7 +16,13 @@ fn filter_p90_latency_under_50ms() {
     let mut durations_ms = Vec::new();
     for _ in 0..20 {
         let start = Instant::now();
-        let _result = ecotokens::filter::run_filter_pipeline_with_cwd("cat", &content, 0, None);
+        let _result = ecotokens::filter::run_filter_pipeline_with_cwd(
+            "cat",
+            &content,
+            0,
+            None,
+            ecotokens::metrics::store::HookType::default(),
+        );
         let elapsed = start.elapsed().as_millis() as u64;
         durations_ms.push(elapsed);
     }
@@ -33,6 +39,7 @@ fn filter_p90_latency_under_50ms() {
 
 #[test]
 fn gain_report_with_large_store_is_fast() {
+    use ecotokens::metrics::report::{aggregate, Period};
     use ecotokens::metrics::store::{append_to, CommandFamily, FilterMode, Interception};
 
     let tmp = TempDir::new().unwrap();
@@ -57,11 +64,13 @@ fn gain_report_with_large_store_is_fast() {
 
     let start = Instant::now();
     let items = ecotokens::metrics::store::read_from(&store).unwrap();
+    let report = aggregate(&items, Period::All);
     let elapsed = start.elapsed().as_millis();
 
     assert_eq!(items.len(), 1000, "should have read 1000 entries");
+    assert_eq!(report.total_interceptions, 1000);
     assert!(
         elapsed < 3000,
-        "reading 1000 entries should be < 3s, took {elapsed}ms"
+        "reading and aggregating 1000 entries should be < 3s, took {elapsed}ms"
     );
 }

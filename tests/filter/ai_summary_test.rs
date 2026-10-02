@@ -29,8 +29,10 @@ fn fallback_handles_large_output() {
 #[cfg(feature = "ai-summary")]
 #[test]
 fn respects_disabled_flag_in_settings() {
-    let mut settings = Settings::default();
-    settings.ai_summary_enabled = false;
+    let settings = Settings {
+        ai_summary_enabled: false,
+        ..Default::default()
+    };
 
     let output = "a".repeat(10000); // Large enough to trigger AI
     let result = ai_summary::ai_summary_or_fallback(&output, &settings);
@@ -43,9 +45,11 @@ fn respects_disabled_flag_in_settings() {
 #[cfg(feature = "ai-summary")]
 #[test]
 fn skips_summary_for_large_json_object() {
-    let mut settings = Settings::default();
-    settings.ai_summary_enabled = true;
-    settings.ai_summary_min_tokens = 10;
+    let settings = Settings {
+        ai_summary_enabled: true,
+        ai_summary_min_tokens: 10,
+        ..Default::default()
+    };
 
     let mut json = String::from("{\"items\":[");
     for i in 0..500 {
@@ -71,9 +75,11 @@ fn skips_summary_for_large_json_object() {
 #[cfg(feature = "ai-summary")]
 #[test]
 fn skips_summary_for_json_array() {
-    let mut settings = Settings::default();
-    settings.ai_summary_enabled = true;
-    settings.ai_summary_min_tokens = 10;
+    let settings = Settings {
+        ai_summary_enabled: true,
+        ai_summary_min_tokens: 10,
+        ..Default::default()
+    };
 
     let json = format!(
         "[{}]",
@@ -90,9 +96,11 @@ fn skips_summary_for_json_array() {
 #[cfg(feature = "ai-summary")]
 #[test]
 fn does_not_skip_invalid_json_lookalike() {
-    let mut settings = Settings::default();
-    settings.ai_summary_enabled = true;
-    settings.ai_summary_min_tokens = 10;
+    let settings = Settings {
+        ai_summary_enabled: true,
+        ai_summary_min_tokens: 10,
+        ..Default::default()
+    };
 
     let fake = "{ not actually json at all, just looks like it ".repeat(200);
     let result = ai_summary::ai_summary_or_fallback(&fake, &settings);

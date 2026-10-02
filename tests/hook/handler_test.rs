@@ -21,7 +21,7 @@ fn parses_valid_json_stdin() {
 fn excluded_command_returns_passthrough() {
     let exclusions = vec!["grep".to_string(), "ls".to_string()];
     let input = make_input("ls -la");
-    let out = handle_hook_input(&input, &exclusions, false);
+    let out = handle_hook_input(&input, &exclusions, false, "claude");
     assert!(
         matches!(out, HookOutput::Passthrough),
         "excluded cmd should passthrough"
@@ -32,7 +32,7 @@ fn excluded_command_returns_passthrough() {
 fn non_excluded_command_returns_rewrite() {
     let exclusions: Vec<String> = vec![];
     let input = make_input("git status");
-    let out = handle_hook_input(&input, &exclusions, false);
+    let out = handle_hook_input(&input, &exclusions, false, "claude");
     match &out {
         HookOutput::Rewrite(cmd) => {
             assert!(
@@ -52,11 +52,14 @@ fn non_excluded_command_returns_rewrite() {
 fn command_with_shell_operators_is_wrapped_in_bash_c() {
     let exclusions: Vec<String> = vec![];
     let input = make_input("cd /tmp && echo hello");
-    let out = handle_hook_input(&input, &exclusions, false);
+    let out = handle_hook_input(&input, &exclusions, false, "claude");
 
     match out {
         HookOutput::Rewrite(cmd) => {
-            assert_eq!(cmd, "ecotokens filter -- bash -c 'cd /tmp && echo hello'");
+            assert_eq!(
+                cmd,
+                "ecotokens filter --agent claude -- bash -c 'cd /tmp && echo hello'"
+            );
         }
         _ => panic!("expected Rewrite"),
     }
@@ -71,12 +74,12 @@ fn command_with_heredoc_is_wrapped_in_bash_c() {
     let exclusions: Vec<String> = vec![];
     let cmd = "uv run python3 << 'PYEOF'\nprint('hello')\nPYEOF";
     let input = make_input(cmd);
-    let out = handle_hook_input(&input, &exclusions, false);
+    let out = handle_hook_input(&input, &exclusions, false, "claude");
 
     match out {
         HookOutput::Rewrite(rewritten) => {
             assert!(
-                rewritten.starts_with("ecotokens filter -- bash -c '"),
+                rewritten.starts_with("ecotokens filter --agent claude -- bash -c '"),
                 "heredoc command must be wrapped in bash -c"
             );
             assert!(
@@ -96,13 +99,13 @@ fn command_with_output_redirect_is_wrapped_in_bash_c() {
     // internally so ecotokens stdout never reaches the file.
     let exclusions: Vec<String> = vec![];
     let input = make_input("notebooklm source list --json > /tmp/output.json");
-    let out = handle_hook_input(&input, &exclusions, false);
+    let out = handle_hook_input(&input, &exclusions, false, "claude");
 
     match out {
         HookOutput::Rewrite(cmd) => {
             assert_eq!(
                 cmd,
-                "ecotokens filter -- bash -c 'notebooklm source list --json > /tmp/output.json'"
+                "ecotokens filter --agent claude -- bash -c 'notebooklm source list --json > /tmp/output.json'"
             );
         }
         _ => panic!("expected Rewrite"),
@@ -116,13 +119,13 @@ fn cwd_and_command_are_shell_quoted_in_rewrite() {
         command: "printf 'hello'".to_string(),
         cwd: Some("/tmp/dir with spaces".to_string()),
     };
-    let out = handle_hook_input(&input, &exclusions, false);
+    let out = handle_hook_input(&input, &exclusions, false, "claude");
 
     match out {
         HookOutput::Rewrite(cmd) => {
             assert_eq!(
                 cmd,
-                r#"ecotokens filter --cwd '/tmp/dir with spaces' -- bash -c 'printf '"'"'hello'"'"''"#
+                r#"ecotokens filter --agent claude --cwd '/tmp/dir with spaces' -- bash -c 'printf '"'"'hello'"'"''"#
             );
         }
         _ => panic!("expected Rewrite"),
@@ -133,8 +136,8 @@ fn cwd_and_command_are_shell_quoted_in_rewrite() {
 fn debug_flag_does_not_change_rewrite_logic() {
     let exclusions: Vec<String> = vec![];
     let input = make_input("cargo test");
-    let out_normal = handle_hook_input(&input, &exclusions, false);
-    let out_debug = handle_hook_input(&input, &exclusions, true);
+    let out_normal = handle_hook_input(&input, &exclusions, false, "claude");
+    let out_debug = handle_hook_input(&input, &exclusions, true, "claude");
     match (&out_normal, &out_debug) {
         (HookOutput::Rewrite(a), HookOutput::Rewrite(b)) => assert_eq!(a, b),
         _ => panic!("both should be Rewrite"),
@@ -146,14 +149,14 @@ fn hot_reload_exclusion_respected() {
     // Simulate reading fresh exclusion list between calls
     let mut exclusions: Vec<String> = vec![];
     let input = make_input("grep foo bar");
-    let out1 = handle_hook_input(&input, &exclusions, false);
+    let out1 = handle_hook_input(&input, &exclusions, false, "claude");
     assert!(
         matches!(out1, HookOutput::Rewrite(_)),
         "should rewrite before exclusion added"
     );
 
     exclusions.push("grep".to_string());
-    let out2 = handle_hook_input(&input, &exclusions, false);
+    let out2 = handle_hook_input(&input, &exclusions, false, "claude");
     assert!(
         matches!(out2, HookOutput::Passthrough),
         "should passthrough after exclusion added"
@@ -180,13 +183,13 @@ mod gemini_handler {
             .unwrap_or("")
             .to_string();
         let input = ecotokens::hook::handler::HookInput { command, cwd: None };
-        let out = ecotokens::hook::handler::handle_hook_input(&input, &[], false);
+        let out = ecotokens::hook::handler::handle_hook_input(&input, &[], false, "gemini");
 
         match out {
             ecotokens::hook::handler::HookOutput::Rewrite(cmd) => {
                 assert!(
-                    cmd.starts_with("ecotokens filter -- bash -c "),
-                    "should call ecotokens filter"
+                    cmd.starts_with("ecotokens filter --agent gemini -- bash -c "),
+                    "should call ecotokens filter with gemini agent"
                 );
                 assert!(cmd.contains("'ls -la'"), "should retain original command");
             }
@@ -208,7 +211,7 @@ mod gemini_handler {
         // commands including empty ones. The actual guard for non-shell tools is in handle_gemini().
         // Here we verify that an exclusion prevents rewrite.
         let exclusions = vec!["".to_string()];
-        let out = ecotokens::hook::handler::handle_hook_input(&input, &exclusions, false);
+        let out = ecotokens::hook::handler::handle_hook_input(&input, &exclusions, false, "gemini");
         assert!(
             matches!(out, ecotokens::hook::handler::HookOutput::Passthrough),
             "empty command matching exclusion should passthrough"
@@ -223,7 +226,7 @@ mod gemini_handler {
             cwd: None,
         };
         let exclusions = vec!["echo".to_string()];
-        let out = ecotokens::hook::handler::handle_hook_input(&input, &exclusions, false);
+        let out = ecotokens::hook::handler::handle_hook_input(&input, &exclusions, false, "gemini");
         assert!(
             matches!(out, ecotokens::hook::handler::HookOutput::Passthrough),
             "excluded command should passthrough on Gemini too"
@@ -237,7 +240,7 @@ mod gemini_handler {
             "command": "git status",
             "timeout": 30
         });
-        let new_cmd = "ecotokens filter -- bash -c 'git status'".to_string();
+        let new_cmd = "ecotokens filter --agent gemini -- bash -c 'git status'".to_string();
 
         // Simulate what handle_gemini does when rewriting
         let mut tool_input = original_tool_input.clone();

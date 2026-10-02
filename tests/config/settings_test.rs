@@ -9,16 +9,19 @@ fn default_values_when_no_config_file() {
     assert!(s.masking_enabled);
     assert!(!s.exact_token_counting);
     assert!(!s.debug);
-    assert_eq!(s.default_model, "claude-sonnet-4-6");
+    assert_eq!(s.price_input_usd_per_mtok, None);
+    assert_eq!(s.price_output_usd_per_mtok, None);
     assert!(s.exclusions.is_empty());
 }
 
 #[test]
 fn valid_config_round_trips() {
-    let mut s = Settings::default();
-    s.exclusions = vec!["grep".to_string()];
-    s.debug = true;
-    s.summary_threshold_lines = 200;
+    let s = Settings {
+        exclusions: vec!["grep".to_string()],
+        debug: true,
+        summary_threshold_lines: 200,
+        ..Default::default()
+    };
 
     let json = serde_json::to_string(&s).unwrap();
     let s2: Settings = serde_json::from_str(&json).unwrap();
@@ -29,22 +32,28 @@ fn valid_config_round_trips() {
 
 #[test]
 fn rejects_threshold_lines_below_10() {
-    let mut s = Settings::default();
-    s.summary_threshold_lines = 5;
+    let s = Settings {
+        summary_threshold_lines: 5,
+        ..Default::default()
+    };
     assert!(s.validate().is_err());
 }
 
 #[test]
 fn rejects_threshold_lines_above_10000() {
-    let mut s = Settings::default();
-    s.summary_threshold_lines = 20000;
+    let s = Settings {
+        summary_threshold_lines: 20000,
+        ..Default::default()
+    };
     assert!(s.validate().is_err());
 }
 
 #[test]
 fn rejects_threshold_bytes_below_1024() {
-    let mut s = Settings::default();
-    s.summary_threshold_bytes = 512;
+    let s = Settings {
+        summary_threshold_bytes: 512,
+        ..Default::default()
+    };
     assert!(s.validate().is_err());
 }
 
@@ -55,19 +64,55 @@ fn valid_settings_pass_validation() {
 }
 
 #[test]
-fn model_pricing_has_known_models() {
-    let s = Settings::default();
-    assert!(s.model_pricing.contains_key("claude-sonnet-4-6"));
-    assert!(s.model_pricing.contains_key("claude-opus-4-6"));
-}
-
-#[test]
 fn deserialization_with_missing_fields_uses_defaults() {
     let json = r#"{"exclusions": ["ls"]}"#;
     let s: Settings = serde_json::from_str(json).unwrap();
     assert_eq!(s.exclusions, vec!["ls"]);
     assert_eq!(s.summary_threshold_lines, 500);
     assert!(s.masking_enabled);
+}
+
+// ── User-entered pricing ───────────────────────────────────────────────────────
+
+#[test]
+fn price_round_trips_through_json() {
+    let s = Settings {
+        price_input_usd_per_mtok: Some(3.0),
+        price_output_usd_per_mtok: Some(15.0),
+        ..Default::default()
+    };
+    let json = serde_json::to_string(&s).unwrap();
+    let s2: Settings = serde_json::from_str(&json).unwrap();
+    assert_eq!(s2.price_input_usd_per_mtok, Some(3.0));
+    assert_eq!(s2.price_output_usd_per_mtok, Some(15.0));
+}
+
+#[test]
+fn legacy_model_keys_and_pricing_json_are_ignored() {
+    let dir = tempfile::tempdir().unwrap();
+    let config_path = dir.path().join("config.json");
+    let abbrev_path = dir.path().join("abbreviations.json");
+    std::fs::write(
+        &config_path,
+        r#"{"default_model": "claude-opus-5", "model_pricing": {"x": {"input_usd_per_1m": 1.0, "output_usd_per_1m": 2.0}}}"#,
+    )
+    .unwrap();
+    std::fs::write(dir.path().join("pricing.json"), "{}").unwrap();
+
+    let s = Settings::load_from_paths_pub(&config_path, &abbrev_path);
+    assert_eq!(s.price_input_usd_per_mtok, None);
+    assert_eq!(s.price_output_usd_per_mtok, None);
+}
+
+#[test]
+fn validate_price_rejects_negative_and_non_finite() {
+    use ecotokens::config::validate_price;
+    assert!(validate_price("--input", None).is_ok());
+    assert!(validate_price("--input", Some(0.0)).is_ok());
+    assert!(validate_price("--input", Some(3.5)).is_ok());
+    assert!(validate_price("--input", Some(-1.0)).is_err());
+    assert!(validate_price("--output", Some(f64::NAN)).is_err());
+    assert!(validate_price("--output", Some(f64::INFINITY)).is_err());
 }
 
 // ── T072t — Tests embed_provider (CLI --embed-provider) ───────────────────────
@@ -85,18 +130,46 @@ fn embed_provider_candle_by_default() {
 
 #[test]
 fn embed_provider_none_roundtrip() {
-    let mut s = Settings::default();
-    s.embed_provider = EmbedProvider::None;
+    let s = Settings {
+        embed_provider: EmbedProvider::None,
+        ..Default::default()
+    };
     let json = serde_json::to_string(&s).unwrap();
     let s2: Settings = serde_json::from_str(&json).unwrap();
     assert_eq!(s2.embed_provider, EmbedProvider::None);
 }
 
 #[test]
-fn embed_provider_legacy_ollama_deserializes_to_legacy() {
+fn embed_provider_ollama_deserializes_to_ollama() {
     let json = r#"{"embed_provider": {"type": "ollama", "url": "http://localhost:11434", "model": "nomic-embed-text"}}"#;
     let s: Settings = serde_json::from_str(json).unwrap();
-    assert_eq!(s.embed_provider, EmbedProvider::Legacy);
+    assert_eq!(
+        s.embed_provider,
+        EmbedProvider::Ollama {
+            url: "http://localhost:11434".to_string(),
+            model: "nomic-embed-text".to_string(),
+        }
+    );
+}
+
+#[test]
+fn embed_provider_ollama_roundtrip() {
+    let s = Settings {
+        embed_provider: EmbedProvider::Ollama {
+            url: "http://localhost:11434".to_string(),
+            model: "qwen3-embedding:latest".to_string(),
+        },
+        ..Default::default()
+    };
+    let json = serde_json::to_string(&s).unwrap();
+    let s2: Settings = serde_json::from_str(&json).unwrap();
+    assert_eq!(
+        s2.embed_provider,
+        EmbedProvider::Ollama {
+            url: "http://localhost:11434".to_string(),
+            model: "qwen3-embedding:latest".to_string(),
+        }
+    );
 }
 
 #[test]

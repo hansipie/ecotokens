@@ -7,7 +7,8 @@ use ratatui::crossterm::terminal::{
 };
 use ratatui::crossterm::ExecutableCommand;
 use ratatui::Terminal;
-use std::path::PathBuf;
+use std::io::Read;
+use std::path::{Path, PathBuf};
 
 use crate::config::default_index_dir;
 
@@ -15,14 +16,19 @@ mod abbreviations;
 mod config;
 mod daemon;
 mod debuglog;
+mod doctor;
 mod duplicates;
 mod embed;
 mod filter;
 mod hook;
 mod install;
+mod jev;
 mod masking;
 mod mcp;
 mod metrics;
+#[cfg(feature = "rewrite")]
+mod rewrite;
+mod router;
 mod search;
 mod tokens;
 mod trace;
@@ -32,7 +38,7 @@ mod tui;
 #[command(
     name = "ecotokens",
     version,
-    about = "Token-saving companion for Claude Code and Gemini CLI"
+    about = "Token-saving companion for AI coding agents"
 )]
 struct Cli {
     #[command(subcommand)]
@@ -48,11 +54,26 @@ enum Commands {
     /// Intercept a Qwen Code tool call via PreToolUse hook (reads JSON from stdin)
     HookQwen,
     /// Intercept a native Claude Code tool result via PostToolUse hook (reads JSON from stdin)
-    HookPost,
+    HookPost {
+        /// Harness that triggered this hook (claude, pi, opencode). Default: claude
+        #[arg(long, default_value = "claude")]
+        agent: String,
+    },
     /// Intercept a Gemini CLI tool result via AfterTool hook (reads JSON from stdin)
     HookPostGemini,
     /// Intercept a Qwen Code tool result via PostToolUse hook (reads JSON from stdin)
     HookPostQwen,
+    /// Intercept a Codex Bash tool call via PreToolUse hook (reads JSON from stdin)
+    HookCodex,
+    /// Intercept a Codex Bash tool result via PostToolUse hook (reads JSON from stdin)
+    HookPostCodex,
+    /// Model router: size a Claude Code message with Jev via UserPromptSubmit hook (reads JSON from stdin)
+    HookPrompt,
+    /// Model router: Jev sizes each message and small jobs go to cheaper helper agents
+    Router {
+        #[command(subcommand)]
+        action: RouterAction,
+    },
     /// Execute a command, filter its output, record metrics
     Filter {
         #[arg(last = true)]
@@ -62,28 +83,62 @@ enum Commands {
         /// Working directory for git root detection (used by Pi extension)
         #[arg(long)]
         cwd: Option<PathBuf>,
+        /// Harness that triggered this filter (claude, gemini, qwen, pi, opencode, cli). Default: cli
+        #[arg(long, default_value = "cli")]
+        agent: String,
+    },
+    /// Filter an already captured tool output from stdin, record metrics
+    FilterOutput {
+        /// Original command or tool label associated with the captured output
+        #[arg(long)]
+        command: String,
+        /// Original exit code associated with the captured output
+        #[arg(long, default_value_t = 0)]
+        exit_code: i32,
+        #[arg(long)]
+        debug: bool,
+        /// Working directory for git root detection
+        #[arg(long)]
+        cwd: Option<PathBuf>,
+        /// Hermes hook type for metrics: transform-terminal-output (default) or transform-tool-result
+        #[arg(long, default_value = "transform-terminal-output")]
+        hook_type: String,
     },
     /// Show token savings report
     Gain {
         #[arg(
             long,
-            default_value = "all",
+            default_value_t,
             value_name = "PERIOD",
-            help = "Time window to aggregate [possible values: all, today, week, month]",
             conflicts_with = "history"
         )]
-        period: String,
+        period: metrics::report::Period,
+        /// Output as JSON
         #[arg(long)]
         json: bool,
-        #[arg(long)]
-        model: Option<String>,
         /// Show savings for last 24h, 7 days, and 30 days at once
         #[arg(long)]
         history: bool,
+        #[command(subcommand)]
+        action: Option<GainAction>,
     },
-    /// Install ecotokens hook in ~/.claude/settings.json, ~/.gemini/settings.json, ~/.qwen/settings.json, or ~/.pi/agent/extensions/
+    /// Show detailed Jev usage: calls, fallbacks, latency, tokens and cost
+    Jev {
+        #[arg(long, default_value_t, value_name = "PERIOD")]
+        period: metrics::report::Period,
+        /// Output as JSON
+        #[arg(long)]
+        json: bool,
+    },
+    /// Play a Space Invaders mini-game where each filtered command spawns an enemy
+    Game {
+        /// Period of filtered commands used to spawn enemies
+        #[arg(long, default_value_t, value_name = "PERIOD")]
+        period: metrics::report::Period,
+    },
+    /// Install ecotokens hook in ~/.claude/settings.json, ~/.gemini/settings.json, ~/.qwen/settings.json, ~/.pi/agent/extensions/, ~/.hermes/plugins/, ~/.codex/plugins/, or ~/.config/opencode/plugins/
     Install {
-        /// Target AI tool to install for: claude, gemini, qwen, pi, or all (default: claude)
+        /// Target AI tool to install for: claude, gemini, qwen, pi, hermes, codex, opencode, or all (default: claude)
         #[arg(long, default_value = "claude")]
         target: String,
         /// Enable AI-powered output summarization via Ollama
@@ -92,15 +147,19 @@ enum Commands {
         /// Ollama model to use for AI summary (implies --ai-summary)
         #[arg(long)]
         ai_summary_model: Option<String>,
+        /// (Hermes) Add ecotokens to plugins.enabled in ~/.hermes/config.yaml directly, without calling hermes CLI
+        #[arg(long)]
+        enable_plugin: bool,
     },
-    /// Remove ecotokens hook from ~/.claude/settings.json, ~/.gemini/settings.json, ~/.qwen/settings.json, or ~/.pi/agent/extensions/
+    /// Remove ecotokens hook from ~/.claude/settings.json, ~/.gemini/settings.json, ~/.qwen/settings.json, ~/.pi/agent/extensions/, ~/.hermes/plugins/, ~/.codex/plugins/, or ~/.config/opencode/plugins/
     Uninstall {
-        /// Target to uninstall from: claude, gemini, qwen, pi, or all (default: claude)
+        /// Target to uninstall from: claude, gemini, qwen, pi, hermes, codex, opencode, or all (default: claude)
         #[arg(long, default_value = "claude")]
         target: String,
     },
     /// Show or update configuration
     Config {
+        /// Output as JSON
         #[arg(long)]
         json: bool,
         /// Set global debug mode
@@ -109,15 +168,27 @@ enum Commands {
         /// Enable or disable debug logging to ~/.config/ecotokens/debug.log
         #[arg(long, value_name = "true|false")]
         debuglog: Option<bool>,
-        /// Set the default model used for cost calculations
-        #[arg(long)]
-        model: Option<String>,
-        /// Set embed provider: candle, none
-        #[arg(long)]
+        /// Enable or disable TypeSafe Jev judgments (requires TYPESAFE_API_KEY)
+        #[arg(long, value_name = "true|false")]
+        jev: Option<bool>,
+        /// Enable or disable Jev line selection in the generic filter
+        #[arg(long, value_name = "true|false")]
+        jev_line_select: Option<bool>,
+        /// Set embed provider: candle, ollama, none
+        #[arg(long, value_parser = ["candle", "ollama", "none"])]
         embed_provider: Option<String>,
         /// Model name for the embeddings provider (e.g. sentence-transformers/all-MiniLM-L6-v2)
         #[arg(long)]
         embed_model: Option<String>,
+        /// Base URL for the Ollama embedding API (e.g. http://localhost:11434)
+        #[arg(long)]
+        embed_url: Option<String>,
+    },
+    /// Diagnose common ecotokens setup issues without changing files
+    Doctor {
+        /// Output as JSON
+        #[arg(long)]
+        json: bool,
     },
     /// Index a directory for BM25 + symbolic search
     Index {
@@ -135,6 +206,7 @@ enum Commands {
         kinds: Option<Vec<String>>,
         #[arg(long)]
         depth: Option<u32>,
+        /// Output as JSON
         #[arg(long)]
         json: bool,
     },
@@ -163,6 +235,7 @@ enum Commands {
         /// Disable automatic trace augmentation for symbol queries
         #[arg(long)]
         no_trace: bool,
+        /// Output as JSON
         #[arg(long)]
         json: bool,
     },
@@ -180,6 +253,9 @@ enum Commands {
         /// Run in background (no TUI, log events to stdout)
         #[arg(long)]
         background: bool,
+        /// Internal worker mode used by auto-watch supervisors.
+        #[arg(long, hide = true)]
+        background_worker: bool,
         /// Show status of background watch process
         #[arg(long)]
         status: bool,
@@ -198,12 +274,13 @@ enum Commands {
         min_lines: usize,
         #[arg(long)]
         index_dir: Option<PathBuf>,
+        /// Output as JSON
         #[arg(long)]
         json: bool,
     },
-    /// Called by Claude Code SessionStart hook — starts watch if auto-watch is enabled
+    /// Called by SessionStart hook (Claude Code, Qwen Code, Codex) or Hermes on_session_start — starts watch if auto-watch is enabled
     SessionStart,
-    /// Called by Claude Code SessionEnd hook — stops watch if auto-watch is enabled
+    /// Called by SessionEnd hook (Claude Code, Qwen Code) or Hermes on_session_end — stops watch if auto-watch is enabled
     SessionEnd,
     /// Enable or disable automatic watch on Claude Code session start/end
     AutoWatch {
@@ -252,6 +329,87 @@ enum Commands {
         /// Target shell
         shell: Shell,
     },
+    /// Rewrite, retone, simplify, or translate prose using the local model
+    #[cfg(feature = "rewrite")]
+    Rewrite {
+        /// Rewrite mode
+        //
+        // Not restricted by clap: a mismatch would exit 2, overriding the
+        // contract's exit code 1 for "unknown mode" (contracts/cli-rewrite.md).
+        // `LenientPossibleValues` only advertises the values to the completion
+        // generators; validation still happens in `Mode::parse`.
+        #[arg(long, default_value = "paraphrase", value_parser = LenientPossibleValues(&["paraphrase", "tone", "reading-level", "translate"]))]
+        mode: String,
+        /// Target for tone/reading-level/translate (forbidden for paraphrase)
+        #[arg(long = "to")]
+        to: Option<String>,
+        /// Read input from a file instead of stdin
+        #[arg(long)]
+        file: Option<PathBuf>,
+        /// Override the configured model
+        #[arg(long)]
+        model: Option<String>,
+        /// Whole-operation timeout in milliseconds
+        #[arg(long, default_value = "30000")]
+        timeout_ms: u64,
+        /// Force diff saving on for this run
+        #[arg(long)]
+        save_diff: bool,
+        /// Force diff saving off for this run (wins over config and --save-diff)
+        #[arg(long)]
+        no_save_diff: bool,
+        /// Output as JSON
+        #[arg(long)]
+        json: bool,
+    },
+}
+
+#[derive(Subcommand)]
+enum GainAction {
+    /// Set the model price used for cost estimates (USD per million tokens)
+    Price {
+        #[arg(long)]
+        input: Option<f64>,
+        #[arg(long)]
+        output: Option<f64>,
+    },
+}
+
+#[derive(Subcommand)]
+enum RouterAction {
+    /// Turn the router on: hook + helper agents in ~/.claude
+    On {
+        /// Max time Jev may add to each message, in ms (saved as router_timeout_ms)
+        #[arg(long)]
+        timeout_ms: Option<u64>,
+    },
+    /// Turn the router off and remove the hook and helper agents
+    Off,
+    /// Show messages per size, decisions and what Jev has cost
+    Status {
+        /// Output as JSON
+        #[arg(long)]
+        json: bool,
+    },
+    /// Size sample messages with Jev (live, not recorded, works while off)
+    Try {
+        /// Messages to size
+        #[arg(required = true)]
+        messages: Vec<String>,
+        /// Output as JSON
+        #[arg(long)]
+        json: bool,
+        /// Override router_timeout_ms for this run
+        #[arg(long)]
+        timeout_ms: Option<u64>,
+    },
+    /// Set the Jev price used for cost estimates (USD per million tokens)
+    Price {
+        #[arg(long)]
+        input: Option<f64>,
+        #[arg(long)]
+        output: Option<f64>,
+    },
 }
 
 #[derive(Subcommand)]
@@ -261,6 +419,7 @@ enum TraceAction {
         symbol: String,
         #[arg(long)]
         index_dir: Option<PathBuf>,
+        /// Output as JSON
         #[arg(long)]
         json: bool,
     },
@@ -271,6 +430,7 @@ enum TraceAction {
         depth: u32,
         #[arg(long)]
         index_dir: Option<PathBuf>,
+        /// Output as JSON
         #[arg(long)]
         json: bool,
     },
@@ -330,7 +490,7 @@ fn default_claude_json_path() -> PathBuf {
         .join(".claude.json")
 }
 
-fn cmd_filter(args: Vec<String>, debug: bool, cwd: Option<PathBuf>) {
+fn cmd_filter(args: Vec<String>, debug: bool, cwd: Option<PathBuf>, agent: String) {
     if args.is_empty() {
         eprintln!("ecotokens filter: no command given");
         std::process::exit(1);
@@ -369,9 +529,15 @@ fn cmd_filter(args: Vec<String>, debug: bool, cwd: Option<PathBuf>) {
         }
     };
 
-    let duration_ms = start.elapsed().as_millis() as u32;
-    let (filtered, tokens_before, tokens_after) =
-        filter::run_filter_pipeline_with_cwd(&command, &raw, duration_ms, cwd.as_deref());
+    let duration_ms = start.elapsed().as_millis().min(u32::MAX as u128) as u32;
+    let hook_type = metrics::store::agent_to_hook_type_pre(&agent);
+    let (filtered, tokens_before, tokens_after) = filter::run_filter_pipeline_with_cwd(
+        &command,
+        &raw,
+        duration_ms,
+        cwd.as_deref(),
+        hook_type,
+    );
 
     if debug || settings.debug {
         eprintln!("[ecotokens debug] command={command} tokens_before={tokens_before} tokens_after={tokens_after}");
@@ -389,6 +555,57 @@ fn cmd_filter(args: Vec<String>, debug: bool, cwd: Option<PathBuf>) {
     }
 }
 
+fn cmd_filter_output(
+    command: String,
+    exit_code: i32,
+    debug: bool,
+    cwd: Option<PathBuf>,
+    hook_type: String,
+) {
+    let settings = config::Settings::load();
+    let logger = debuglog::DebugLogger::new(settings.debuglog);
+    let uid = debuglog::gen_uid();
+
+    let mut raw = String::new();
+    if let Err(e) = std::io::stdin().read_to_string(&mut raw) {
+        eprintln!("ecotokens filter-output: failed to read stdin: {e}");
+        std::process::exit(1);
+    }
+
+    logger.log(
+        &uid,
+        "filter-output",
+        "input",
+        &serde_json::json!({"cmd": command, "exit_code": exit_code, "cwd": cwd.as_ref().map(|p| p.display().to_string()), "hook_type": hook_type}),
+    );
+
+    let resolved_hook_type = if hook_type == "transform-tool-result" {
+        metrics::store::HookType::HermesTransformToolResult
+    } else {
+        metrics::store::HookType::HermesTransformTerminalOutput
+    };
+
+    let (filtered, tokens_before, tokens_after) = filter::run_filter_pipeline_with_cwd(
+        &command,
+        &raw,
+        0u32,
+        cwd.as_deref(),
+        resolved_hook_type,
+    );
+
+    if debug || settings.debug {
+        eprintln!("[ecotokens debug] command={command} exit_code={exit_code} tokens_before={tokens_before} tokens_after={tokens_after}");
+    }
+    logger.log(
+        &uid,
+        "filter-output",
+        "output",
+        &serde_json::json!({"filtered": filtered, "tokens_before": tokens_before, "tokens_after": tokens_after}),
+    );
+
+    print!("{filtered}");
+}
+
 fn format_thousands(n: u64) -> String {
     let s = n.to_string();
     let mut result = String::new();
@@ -401,9 +618,36 @@ fn format_thousands(n: u64) -> String {
     result.chars().rev().collect()
 }
 
+const NO_PRICE_HINT: &str =
+    "n/a (set with: ecotokens gain price --input <usd/Mtok> --output <usd/Mtok>)";
+
+fn cmd_gain_price(input: Option<f64>, output: Option<f64>) {
+    let mut settings = config::Settings::load();
+    for (name, value) in [("--input", input), ("--output", output)] {
+        if let Err(e) = config::validate_price(name, value) {
+            eprintln!("gain price error: {e}");
+            std::process::exit(1);
+        }
+    }
+    if input.is_some() {
+        settings.price_input_usd_per_mtok = input;
+    }
+    if output.is_some() {
+        settings.price_output_usd_per_mtok = output;
+    }
+    if let Err(e) = settings.save() {
+        eprintln!("gain price error: {e}");
+        std::process::exit(1);
+    }
+    println!(
+        "Price: input {} · output {} (USD per million tokens)",
+        config::fmt_price(settings.price_input_usd_per_mtok),
+        config::fmt_price(settings.price_output_usd_per_mtok)
+    );
+}
+
 fn print_history_table(report: &metrics::report::HistoryReport) {
-    let model = &report.model_ref;
-    println!("Savings History          [model: {model}]");
+    println!("Savings History");
     println!("{}", "─".repeat(65));
     println!(
         "{:<14} {:>6}  {:>14}  {:>9}  {:>12}",
@@ -416,19 +660,242 @@ fn print_history_table(report: &metrics::report::HistoryReport) {
     ] {
         let tokens_saved = r.total_tokens_before.saturating_sub(r.total_tokens_after);
         println!(
-            "{:<14} {:>6}  {:>14}  {:>8.1}%  ${:.2}",
+            "{:<14} {:>6}  {:>14}  {:>8.1}%  {}",
             label,
             r.total_interceptions,
             format_thousands(tokens_saved),
             r.total_savings_pct,
             r.cost_avoided_usd
+                .map_or_else(|| "n/a".to_string(), |c| format!("${c:.2}"))
         );
     }
     println!("{}", "─".repeat(65));
 }
 
-fn cmd_gain(period: String, json: bool, model: Option<String>, history: bool) {
-    use metrics::report::{aggregate, aggregate_history, filter_by_period, Period};
+fn run_gain_tui<B: ratatui::backend::Backend>(
+    terminal: &mut Terminal<B>,
+    period: &metrics::report::Period,
+    path: &std::path::Path,
+) {
+    use metrics::report::{aggregate, filter_by_period};
+    use metrics::store::read_from;
+    let mut items = read_from(path).unwrap_or_default();
+    let mut report = aggregate(&items, period.clone());
+    let mut filtered_items = filter_by_period(&items, period);
+    let mut gain_mode = tui::gain::GainMode::default();
+    let mut sparkline_mode = tui::gain::SparklineMode::default();
+    let mut detail_mode = tui::gain::DetailMode::default();
+    let mut selected_family: Option<usize> = None;
+    let mut selected_project: Option<usize> = None;
+    let mut project_filter: Option<String> = None;
+    let mut history_scroll: usize = 0;
+    let mut log_scroll: usize = 0;
+    let mut log_selected: Option<usize> = None;
+    let mut gauge_scroll: usize = 0;
+    let mut split_raw_after_scroll: usize = 0;
+    let mut last_reload = std::time::Instant::now();
+    // Precomputed once at load time, updated only on reload.
+    let mut sorted_projects: Vec<(String, f32)> = sorted_projects_from(&report);
+    loop {
+        // Reload data every 10 seconds regardless of incoming key events
+        if last_reload.elapsed() >= std::time::Duration::from_secs(10) {
+            items = read_from(path).unwrap_or_default();
+            report = aggregate(&items, period.clone());
+            filtered_items = filter_by_period(&items, period);
+            sorted_projects = sorted_projects_from(&report);
+            last_reload = std::time::Instant::now();
+        }
+        let ts = chrono::Utc::now().format("%H:%M:%S").to_string();
+        let family_count = match project_filter.as_deref() {
+            Some(proj) => tui::gain::sorted_family_keys_for_project(&filtered_items, proj).len(),
+            None => report.by_family.len(),
+        };
+        let project_count = report.by_project.len();
+        let _ = terminal.draw(|f| {
+            tui::gain::render_gain(
+                f,
+                f.area(),
+                &report,
+                &filtered_items,
+                Some(&ts),
+                gain_mode,
+                sparkline_mode,
+                selected_family,
+                detail_mode,
+                selected_project,
+                project_filter.as_deref(),
+                &mut history_scroll,
+                &mut log_scroll,
+                log_selected,
+                &mut gauge_scroll,
+                &mut split_raw_after_scroll,
+            );
+        });
+        if poll(std::time::Duration::from_millis(500)).unwrap_or(false) {
+            if let Ok(Event::Key(key)) = read() {
+                if key.kind != KeyEventKind::Press {
+                    continue;
+                }
+                if is_quit_key(&key) {
+                    break;
+                }
+                if key.code == KeyCode::Char('v') {
+                    tui::jev::run(terminal, period);
+                    continue;
+                }
+                let switch_mode = (key.code == KeyCode::Char('p')
+                    && gain_mode == tui::gain::GainMode::Family)
+                    || (key.code == KeyCode::Char('f')
+                        && gain_mode == tui::gain::GainMode::Project);
+                if switch_mode {
+                    project_filter = None;
+                    gain_mode = gain_mode.toggle();
+                    history_scroll = 0;
+                    log_scroll = 0;
+                    log_selected = None;
+                    gauge_scroll = 0;
+                }
+                if key.code == KeyCode::Char('s') {
+                    sparkline_mode = sparkline_mode.next();
+                }
+                if key.code == KeyCode::Char('d') {
+                    detail_mode = detail_mode.toggle();
+                    history_scroll = 0;
+                    log_scroll = 0;
+                    split_raw_after_scroll = 0;
+                }
+                // Maj+O/Maj+L scrollent le panneau APRÈS en mode SplitRaw.
+                if detail_mode == tui::gain::DetailMode::SplitRaw {
+                    match key.code {
+                        KeyCode::Char('L') => {
+                            split_raw_after_scroll = split_raw_after_scroll.saturating_add(1);
+                        }
+                        KeyCode::Char('O') => {
+                            split_raw_after_scroll = split_raw_after_scroll.saturating_sub(1);
+                        }
+                        _ => {}
+                    }
+                }
+                if gain_mode == tui::gain::GainMode::Family && family_count > 0 {
+                    match key.code {
+                        KeyCode::Char('j') => {
+                            selected_family = Some(match selected_family {
+                                None => 0,
+                                Some(i) => (i + 1) % family_count,
+                            });
+                            history_scroll = 0;
+                            log_scroll = 0;
+                            log_selected = None;
+                        }
+                        KeyCode::Char('u') => {
+                            selected_family = Some(match selected_family {
+                                None => family_count - 1,
+                                Some(i) => {
+                                    if i == 0 {
+                                        family_count - 1
+                                    } else {
+                                        i - 1
+                                    }
+                                }
+                            });
+                            history_scroll = 0;
+                            log_scroll = 0;
+                            log_selected = None;
+                        }
+                        _ => {}
+                    }
+                }
+                if gain_mode == tui::gain::GainMode::Project && project_count > 0 {
+                    match key.code {
+                        KeyCode::Char('j') => {
+                            selected_project = Some(match selected_project {
+                                None => 0,
+                                Some(i) => (i + 1) % project_count,
+                            });
+                            history_scroll = 0;
+                            log_scroll = 0;
+                            log_selected = None;
+                        }
+                        KeyCode::Char('u') => {
+                            selected_project = Some(match selected_project {
+                                None => project_count - 1,
+                                Some(i) => {
+                                    if i == 0 {
+                                        project_count - 1
+                                    } else {
+                                        i - 1
+                                    }
+                                }
+                            });
+                            history_scroll = 0;
+                            log_scroll = 0;
+                            log_selected = None;
+                        }
+                        KeyCode::Char('l') => {
+                            history_scroll = history_scroll.saturating_add(1);
+                        }
+                        KeyCode::Char('o') => {
+                            history_scroll = history_scroll.saturating_sub(1);
+                        }
+                        _ => {}
+                    }
+                }
+                // o/l scroll the active detail panel in Family mode.
+                if gain_mode == tui::gain::GainMode::Family {
+                    match key.code {
+                        KeyCode::Char('l') => {
+                            history_scroll = history_scroll.saturating_add(1);
+                        }
+                        KeyCode::Char('o') => {
+                            history_scroll = history_scroll.saturating_sub(1);
+                        }
+                        _ => {}
+                    }
+                }
+                // i/k move the selected line in the History panel.
+                match key.code {
+                    KeyCode::Char('k') => {
+                        let count = tui::gain::log_item_count(
+                            &filtered_items,
+                            gain_mode,
+                            selected_family,
+                            selected_project,
+                            project_filter.as_deref(),
+                            &report,
+                            &sorted_projects,
+                        );
+                        if count > 0 {
+                            log_selected = Some(log_selected.map_or(0, |i| (i + 1).min(count - 1)));
+                        }
+                        history_scroll = 0;
+                    }
+                    KeyCode::Char('i') => {
+                        log_selected = Some(log_selected.map_or(0, |i| i.saturating_sub(1)));
+                        history_scroll = 0;
+                    }
+                    _ => {}
+                }
+                if gain_mode == tui::gain::GainMode::Project
+                    && key.code == KeyCode::Enter
+                    && project_count > 0
+                {
+                    if let Some(idx) = selected_project {
+                        if let Some((name, _)) = sorted_projects.get(idx) {
+                            project_filter = Some(name.clone());
+                            gain_mode = tui::gain::GainMode::Family;
+                            selected_family = None;
+                            history_scroll = 0;
+                            gauge_scroll = 0;
+                        }
+                    }
+                }
+            }
+        }
+    }
+}
+
+fn cmd_gain(period: metrics::report::Period, json: bool, history: bool) {
+    use metrics::report::{aggregate, aggregate_history};
     use metrics::store::read_from;
 
     let path = match metrics::store::metrics_path() {
@@ -438,12 +905,10 @@ fn cmd_gain(period: String, json: bool, model: Option<String>, history: bool) {
             std::process::exit(1);
         }
     };
-    let settings = config::Settings::load();
-    let model_str = model.as_deref().unwrap_or(&settings.default_model);
-    let mut items = read_from(&path).unwrap_or_default();
+    let items = read_from(&path).unwrap_or_default();
 
     if history {
-        let hist = aggregate_history(&items, model_str);
+        let hist = aggregate_history(&items);
         if json {
             println!("{}", serde_json::to_string_pretty(&hist).unwrap());
         } else {
@@ -452,9 +917,7 @@ fn cmd_gain(period: String, json: bool, model: Option<String>, history: bool) {
         return;
     }
 
-    let p = Period::parse(&period);
-    let mut report = aggregate(&items, p.clone(), model_str);
-    let mut filtered_items = filter_by_period(&items, &p);
+    let report = aggregate(&items, period.clone());
 
     if json {
         println!("{}", serde_json::to_string_pretty(&report).unwrap());
@@ -468,218 +931,7 @@ fn cmd_gain(period: String, json: bool, model: Option<String>, history: bool) {
         let _guard = TerminalGuard::stdout();
         let backend = CrosstermBackend::new(std::io::stdout());
         if let Ok(mut terminal) = Terminal::new(backend) {
-            let mut gain_mode = tui::gain::GainMode::default();
-            let mut sparkline_mode = tui::gain::SparklineMode::default();
-            let mut detail_mode = tui::gain::DetailMode::default();
-            let mut selected_family: Option<usize> = None;
-            let mut selected_project: Option<usize> = None;
-            let mut project_filter: Option<String> = None;
-            let mut history_scroll: usize = 0;
-            let mut log_scroll: usize = 0;
-            let mut log_selected: Option<usize> = None;
-            let mut gauge_scroll: usize = 0;
-            let mut split_raw_after_scroll: usize = 0;
-            let mut last_reload = std::time::Instant::now();
-            // Precomputed once at load time, updated only on reload.
-            let mut sorted_projects: Vec<(String, f32)> = sorted_projects_from(&report);
-            loop {
-                // Reload data every 10 seconds regardless of incoming key events
-                if last_reload.elapsed() >= std::time::Duration::from_secs(10) {
-                    items = read_from(&path).unwrap_or_default();
-                    report = aggregate(&items, p.clone(), model_str);
-                    filtered_items = filter_by_period(&items, &p);
-                    sorted_projects = sorted_projects_from(&report);
-                    last_reload = std::time::Instant::now();
-                }
-                let ts = chrono::Utc::now().format("%H:%M:%S").to_string();
-                let family_count = match project_filter.as_deref() {
-                    Some(proj) => {
-                        tui::gain::sorted_family_keys_for_project(&filtered_items, proj).len()
-                    }
-                    None => report.by_family.len(),
-                };
-                let project_count = report.by_project.len();
-                let _ = terminal.draw(|f| {
-                    tui::gain::render_gain(
-                        f,
-                        f.area(),
-                        &report,
-                        &filtered_items,
-                        Some(&ts),
-                        gain_mode,
-                        sparkline_mode,
-                        selected_family,
-                        detail_mode,
-                        selected_project,
-                        project_filter.as_deref(),
-                        &mut history_scroll,
-                        &mut log_scroll,
-                        log_selected,
-                        &mut gauge_scroll,
-                        &mut split_raw_after_scroll,
-                    );
-                });
-                if poll(std::time::Duration::from_millis(500)).unwrap_or(false) {
-                    if let Ok(Event::Key(key)) = read() {
-                        if key.kind != KeyEventKind::Press {
-                            continue;
-                        }
-                        if is_quit_key(&key) {
-                            break;
-                        }
-                        let switch_mode = (key.code == KeyCode::Char('p')
-                            && gain_mode == tui::gain::GainMode::Family)
-                            || (key.code == KeyCode::Char('f')
-                                && gain_mode == tui::gain::GainMode::Project);
-                        if switch_mode {
-                            project_filter = None;
-                            gain_mode = gain_mode.toggle();
-                            history_scroll = 0;
-                            log_scroll = 0;
-                            log_selected = None;
-                            gauge_scroll = 0;
-                        }
-                        if key.code == KeyCode::Char('s') {
-                            sparkline_mode = sparkline_mode.next();
-                        }
-                        if key.code == KeyCode::Char('d') {
-                            detail_mode = detail_mode.toggle();
-                            history_scroll = 0;
-                            log_scroll = 0;
-                            split_raw_after_scroll = 0;
-                        }
-                        // Maj+O/Maj+L scrollent le panneau APRÈS en mode SplitRaw.
-                        if detail_mode == tui::gain::DetailMode::SplitRaw {
-                            match key.code {
-                                KeyCode::Char('L') => {
-                                    split_raw_after_scroll =
-                                        split_raw_after_scroll.saturating_add(1);
-                                }
-                                KeyCode::Char('O') => {
-                                    split_raw_after_scroll =
-                                        split_raw_after_scroll.saturating_sub(1);
-                                }
-                                _ => {}
-                            }
-                        }
-                        if gain_mode == tui::gain::GainMode::Family && family_count > 0 {
-                            match key.code {
-                                KeyCode::Char('j') => {
-                                    selected_family = Some(match selected_family {
-                                        None => 0,
-                                        Some(i) => (i + 1) % family_count,
-                                    });
-                                    history_scroll = 0;
-                                    log_scroll = 0;
-                                    log_selected = None;
-                                }
-                                KeyCode::Char('u') => {
-                                    selected_family = Some(match selected_family {
-                                        None => family_count - 1,
-                                        Some(i) => {
-                                            if i == 0 {
-                                                family_count - 1
-                                            } else {
-                                                i - 1
-                                            }
-                                        }
-                                    });
-                                    history_scroll = 0;
-                                    log_scroll = 0;
-                                    log_selected = None;
-                                }
-                                _ => {}
-                            }
-                        }
-                        if gain_mode == tui::gain::GainMode::Project && project_count > 0 {
-                            match key.code {
-                                KeyCode::Char('j') => {
-                                    selected_project = Some(match selected_project {
-                                        None => 0,
-                                        Some(i) => (i + 1) % project_count,
-                                    });
-                                    history_scroll = 0;
-                                    log_scroll = 0;
-                                    log_selected = None;
-                                }
-                                KeyCode::Char('u') => {
-                                    selected_project = Some(match selected_project {
-                                        None => project_count - 1,
-                                        Some(i) => {
-                                            if i == 0 {
-                                                project_count - 1
-                                            } else {
-                                                i - 1
-                                            }
-                                        }
-                                    });
-                                    history_scroll = 0;
-                                    log_scroll = 0;
-                                    log_selected = None;
-                                }
-                                KeyCode::Char('l') => {
-                                    history_scroll = history_scroll.saturating_add(1);
-                                }
-                                KeyCode::Char('o') => {
-                                    history_scroll = history_scroll.saturating_sub(1);
-                                }
-                                _ => {}
-                            }
-                        }
-                        // o/l scroll the active detail panel in Family mode.
-                        if gain_mode == tui::gain::GainMode::Family {
-                            match key.code {
-                                KeyCode::Char('l') => {
-                                    history_scroll = history_scroll.saturating_add(1);
-                                }
-                                KeyCode::Char('o') => {
-                                    history_scroll = history_scroll.saturating_sub(1);
-                                }
-                                _ => {}
-                            }
-                        }
-                        // i/k move the selected line in the History panel.
-                        match key.code {
-                            KeyCode::Char('k') => {
-                                let count = tui::gain::log_item_count(
-                                    &filtered_items,
-                                    gain_mode,
-                                    selected_family,
-                                    selected_project,
-                                    project_filter.as_deref(),
-                                    &report,
-                                    &sorted_projects,
-                                );
-                                if count > 0 {
-                                    log_selected =
-                                        Some(log_selected.map_or(0, |i| (i + 1).min(count - 1)));
-                                }
-                                history_scroll = 0;
-                            }
-                            KeyCode::Char('i') => {
-                                log_selected =
-                                    Some(log_selected.map_or(0, |i| i.saturating_sub(1)));
-                                history_scroll = 0;
-                            }
-                            _ => {}
-                        }
-                        if gain_mode == tui::gain::GainMode::Project
-                            && key.code == KeyCode::Enter
-                            && project_count > 0
-                        {
-                            if let Some(idx) = selected_project {
-                                if let Some((name, _)) = sorted_projects.get(idx) {
-                                    project_filter = Some(name.clone());
-                                    gain_mode = tui::gain::GainMode::Family;
-                                    selected_family = None;
-                                    history_scroll = 0;
-                                    gauge_scroll = 0;
-                                }
-                            }
-                        }
-                    }
-                }
-            }
+            run_gain_tui(&mut terminal, &period, &path);
         }
     } else {
         println!("=== ecotokens gain ({period}) ===");
@@ -687,13 +939,106 @@ fn cmd_gain(period: String, json: bool, model: Option<String>, history: bool) {
         println!("Tokens before  : {}", report.total_tokens_before);
         println!("Tokens after   : {}", report.total_tokens_after);
         println!("Savings        : {:.1}%", report.total_savings_pct);
-        if report.cost_avoided_usd > 0.0 {
-            println!("Cost avoided   : ${:.4} USD", report.cost_avoided_usd);
+        match report.cost_avoided_usd {
+            Some(cost) if cost > 0.0 => println!("Cost avoided   : ${cost:.4} USD"),
+            Some(_) => {}
+            None => println!("Cost avoided   : {NO_PRICE_HINT}"),
+        }
+        if report.rewrite_overhead_tokens > 0 {
+            println!(
+                "Rewrite overhead: {} tokens (automatic pipeline transformation)",
+                format_thousands(report.rewrite_overhead_tokens)
+            );
+        }
+        if !report.by_agent.is_empty() {
+            println!("By agent       :");
+            let mut agents: Vec<_> = report.by_agent.iter().collect();
+            agents.sort_by_key(|(k, _)| k.as_str());
+            for (agent, stats) in agents {
+                println!(
+                    "  {:<12} {:>6} runs  {:.1}% savings",
+                    agent, stats.count, stats.savings_pct
+                );
+            }
+        }
+    }
+}
+
+fn cmd_jev(period: metrics::report::Period, json: bool) {
+    let settings = config::Settings::load();
+    let summary = tui::jev::load_summary(&settings, &period);
+    if json {
+        println!("{}", serde_json::to_string_pretty(&summary).unwrap());
+    } else if std::io::IsTerminal::is_terminal(&std::io::stdout()) {
+        if let Err(e) = enable_raw_mode() {
+            eprintln!("failed to enable raw mode: {e}");
+        }
+        if let Err(e) = std::io::stdout().execute(EnterAlternateScreen) {
+            eprintln!("failed to enter alternate screen: {e}");
+        }
+        let _guard = TerminalGuard::stdout();
+        let backend = CrosstermBackend::new(std::io::stdout());
+        if let Ok(mut terminal) = Terminal::new(backend) {
+            if tui::jev::run(&mut terminal, &period) {
+                if let Some(path) = metrics::store::metrics_path() {
+                    run_gain_tui(&mut terminal, &period, &path);
+                }
+            }
+        }
+    } else {
+        println!("=== ecotokens jev ({period}) ===");
+        println!("Calls          : {}", summary.calls);
+        println!("Success        : {}", summary.ok);
+        println!("Fell back      : {}", summary.fallbacks);
+        println!(
+            "Latency        : avg {} ms, p95 {} ms",
+            summary.avg_latency_ms, summary.p95_latency_ms
+        );
+        println!(
+            "Tokens         : {} in, {} out",
+            summary.input_tokens, summary.output_tokens
+        );
+        if let Some(c) = summary.cost_usd {
+            println!("Cost           : ${c:.4} USD");
+        }
+        for (purpose, st) in summary.by_purpose.iter().filter(|(_, st)| st.calls > 0) {
+            println!(
+                "  {purpose:<13} {} calls, {} ok, avg {} ms",
+                st.calls, st.ok, st.avg_latency_ms
+            );
+        }
+        for (kind, n) in &summary.errors {
+            println!("  failure {kind}: {n}");
         }
     }
 }
 
 /// Compute projects sorted by savings percentage (descending).
+fn cmd_game(period: metrics::report::Period) {
+    let path = match metrics::store::metrics_path() {
+        Some(p) => p,
+        None => {
+            eprintln!("Cannot locate metrics file");
+            std::process::exit(1);
+        }
+    };
+    if !std::io::IsTerminal::is_terminal(&std::io::stdout()) {
+        eprintln!("ecotokens game requires an interactive terminal");
+        std::process::exit(1);
+    }
+    if let Err(e) = enable_raw_mode() {
+        eprintln!("failed to enable raw mode: {e}");
+    }
+    if let Err(e) = std::io::stdout().execute(EnterAlternateScreen) {
+        eprintln!("failed to enter alternate screen: {e}");
+    }
+    let _guard = TerminalGuard::stdout();
+    let backend = CrosstermBackend::new(std::io::stdout());
+    if let Ok(mut terminal) = Terminal::new(backend) {
+        tui::game::run(&mut terminal, &path, &period);
+    }
+}
+
 fn sorted_projects_from(report: &metrics::report::Report) -> Vec<(String, f32)> {
     let mut projects: Vec<(String, f32)> = report
         .by_project
@@ -711,29 +1056,91 @@ fn sorted_projects_from(report: &metrics::report::Report) -> Vec<(String, f32)> 
     projects
 }
 
-fn cmd_install(target: String, ai_summary: bool, ai_summary_model: Option<String>) {
+fn cmd_doctor(json: bool) {
+    let report = doctor::run();
+    if json {
+        println!(
+            "{}",
+            serde_json::to_string_pretty(&report).expect("doctor report should serialize")
+        );
+    } else {
+        println!("ecotokens doctor");
+        for check in &report.checks {
+            let status = match check.status {
+                doctor::DoctorStatus::Ok => "OK",
+                doctor::DoctorStatus::Warning => "WARN",
+                doctor::DoctorStatus::Error => "ERROR",
+            };
+            match &check.path {
+                Some(path) => println!("{status:<5} {:<18} {} ({path})", check.name, check.message),
+                None => println!("{status:<5} {:<18} {}", check.name, check.message),
+            }
+        }
+    }
+    if report.has_errors() {
+        std::process::exit(1);
+    }
+}
+
+fn print_install_section(first: &mut bool, title: &str) {
+    if !*first {
+        println!();
+    }
+    *first = false;
+    println!("{title}");
+}
+
+fn print_install_item(status: &str, action: &str, path: &Path) {
+    println!("  {status:<7} {action:<22} {}", path.display());
+}
+
+fn print_install_note(message: &str) {
+    println!("  note    {message}");
+}
+
+fn cmd_install(
+    target: String,
+    ai_summary: bool,
+    ai_summary_model: Option<String>,
+    enable_plugin: bool,
+) {
     let claude_path = default_settings_path();
     let claude_json = default_claude_json_path();
     let gemini_path = install::default_gemini_settings_path();
     let qwen_path = install::default_qwen_settings_path();
+    let hermes_plugin_dir = install::default_hermes_plugin_dir();
+    let codex_plugin_dir = install::default_codex_plugin_dir();
 
     let install_claude = matches!(target.as_str(), "claude" | "all");
     let install_gemini = matches!(target.as_str(), "gemini" | "all");
     let install_qwen = matches!(target.as_str(), "qwen" | "all");
     let install_pi = matches!(target.as_str(), "pi" | "all");
+    let install_hermes = matches!(target.as_str(), "hermes" | "all");
+    let install_codex = matches!(target.as_str(), "codex" | "all");
+    let install_opencode = matches!(target.as_str(), "opencode" | "all");
 
-    if !install_claude && !install_gemini && !install_qwen && !install_pi {
+    if !install_claude
+        && !install_gemini
+        && !install_qwen
+        && !install_pi
+        && !install_hermes
+        && !install_codex
+        && !install_opencode
+    {
         eprintln!(
-            "unknown target '{}'. Valid values: claude, gemini, qwen, pi, all",
+            "unknown target '{}'. Valid values: claude, gemini, qwen, pi, hermes, codex, opencode, all",
             target
         );
         std::process::exit(1);
     }
 
+    let mut first_section = true;
+
     if install_claude {
+        print_install_section(&mut first_section, "Install Claude Code");
         match install::install_hook(&claude_path, &claude_json) {
             Ok(()) => {
-                println!("ecotokens hook installed → {}", claude_path.display());
+                print_install_item("ok", "hook", &claude_path);
             }
             Err(e) => {
                 eprintln!("install error (claude): {e}");
@@ -742,7 +1149,7 @@ fn cmd_install(target: String, ai_summary: bool, ai_summary_model: Option<String
         }
         match install::install_post_hook(&claude_path) {
             Ok(()) => {
-                println!("ecotokens post-hook installed → {}", claude_path.display());
+                print_install_item("ok", "post-hook", &claude_path);
             }
             Err(e) => {
                 eprintln!("install error (post hook): {e}");
@@ -751,41 +1158,47 @@ fn cmd_install(target: String, ai_summary: bool, ai_summary_model: Option<String
         }
         match install::install_mcp_server(&claude_path) {
             Ok(()) => {
-                println!(
-                    "ecotokens MCP server registered → {}",
-                    claude_path.display()
-                );
+                print_install_item("ok", "MCP server", &claude_path);
             }
             Err(e) => {
                 eprintln!("install error (mcp server): {e}");
                 std::process::exit(1);
             }
         }
+        // `uninstall` removes the session hooks too, so a reinstall must restore
+        // them when auto-watch is enabled, otherwise SessionStart never fires.
+        let settings = config::Settings::load();
+        if settings.auto_watch && !install::are_session_hooks_installed(&claude_path) {
+            match install::install_session_hooks(&claude_path) {
+                Ok(()) => print_install_item("ok", "session hooks", &claude_path),
+                Err(e) => {
+                    eprintln!("install error (claude session hooks): {e}");
+                    std::process::exit(1);
+                }
+            }
+        }
     }
 
     if install_gemini {
+        print_install_section(&mut first_section, "Install Gemini CLI");
         match gemini_path {
             Some(ref p) => {
                 match install::install_gemini_hook(p) {
-                    Ok(()) => println!("ecotokens hook installed (Gemini) → {}", p.display()),
+                    Ok(()) => print_install_item("ok", "hook", p),
                     Err(e) => {
                         eprintln!("install error (gemini hook): {e}");
                         std::process::exit(1);
                     }
                 }
                 match install::install_gemini_post_hook(p) {
-                    Ok(()) => {
-                        println!("ecotokens post-hook installed (Gemini) → {}", p.display())
-                    }
+                    Ok(()) => print_install_item("ok", "post-hook", p),
                     Err(e) => {
                         eprintln!("install error (gemini post-hook): {e}");
                         std::process::exit(1);
                     }
                 }
                 match install::install_mcp_server(p) {
-                    Ok(()) => {
-                        println!("ecotokens MCP server registered (Gemini) → {}", p.display())
-                    }
+                    Ok(()) => print_install_item("ok", "MCP server", p),
                     Err(e) => {
                         eprintln!("install error (gemini mcp server): {e}");
                         std::process::exit(1);
@@ -800,34 +1213,25 @@ fn cmd_install(target: String, ai_summary: bool, ai_summary_model: Option<String
     }
 
     if install_qwen {
+        print_install_section(&mut first_section, "Install Qwen Code");
         match qwen_path {
             Some(ref p) => {
                 match install::install_qwen_hook(p) {
-                    Ok(()) => println!("ecotokens hook installed (Qwen Code) → {}", p.display()),
+                    Ok(()) => print_install_item("ok", "hook", p),
                     Err(e) => {
                         eprintln!("install error (qwen hook): {e}");
                         std::process::exit(1);
                     }
                 }
                 match install::install_qwen_post_hook(p) {
-                    Ok(()) => {
-                        println!(
-                            "ecotokens post-hook installed (Qwen Code) → {}",
-                            p.display()
-                        )
-                    }
+                    Ok(()) => print_install_item("ok", "post-hook", p),
                     Err(e) => {
                         eprintln!("install error (qwen post-hook): {e}");
                         std::process::exit(1);
                     }
                 }
                 match install::install_mcp_server(p) {
-                    Ok(()) => {
-                        println!(
-                            "ecotokens MCP server registered (Qwen Code) → {}",
-                            p.display()
-                        )
-                    }
+                    Ok(()) => print_install_item("ok", "MCP server", p),
                     Err(e) => {
                         eprintln!("install error (qwen mcp server): {e}");
                         std::process::exit(1);
@@ -836,10 +1240,7 @@ fn cmd_install(target: String, ai_summary: bool, ai_summary_model: Option<String
                 let settings = config::Settings::load();
                 if settings.auto_watch && !install::are_session_hooks_installed(p) {
                     match install::install_session_hooks(p) {
-                        Ok(()) => println!(
-                            "ecotokens session hooks installed (Qwen Code) → {}",
-                            p.display()
-                        ),
+                        Ok(()) => print_install_item("ok", "session hooks", p),
                         Err(e) => {
                             eprintln!("install error (qwen session hooks): {e}");
                             std::process::exit(1);
@@ -855,11 +1256,12 @@ fn cmd_install(target: String, ai_summary: bool, ai_summary_model: Option<String
     }
 
     if install_pi {
+        print_install_section(&mut first_section, "Install Pi");
         match install::default_pi_extension_path() {
             Some(ref p) => match install::install_pi_extension(p) {
                 Ok(()) => {
-                    println!("ecotokens extension installed (Pi) → {}", p.display());
-                    println!("  Reload in pi with: /reload");
+                    print_install_item("ok", "extension", p);
+                    print_install_note("reload in Pi with: /reload");
                 }
                 Err(e) => {
                     eprintln!("install error (pi): {e}");
@@ -873,6 +1275,155 @@ fn cmd_install(target: String, ai_summary: bool, ai_summary_model: Option<String
         }
     }
 
+    if install_hermes {
+        print_install_section(&mut first_section, "Install Hermes Agent");
+        match hermes_plugin_dir {
+            Some(ref p) => match install::install_hermes_plugin(p) {
+                Ok(()) => {
+                    print_install_item("ok", "plugin", p);
+                    if enable_plugin {
+                        // Edit config.yaml directly — no Hermes CLI required.
+                        match install::default_hermes_config_path() {
+                            Some(ref cfg) => {
+                                let already = install::is_hermes_plugin_enabled_in_config(cfg);
+                                match install::enable_hermes_plugin_in_config(cfg) {
+                                    Ok(()) => {
+                                        if already {
+                                            print_install_item("skip", "already enabled", cfg);
+                                        } else {
+                                            print_install_item("ok", "enabled", cfg);
+                                            print_install_note("restart Hermes to load the plugin");
+                                        }
+                                    }
+                                    Err(e) => {
+                                        eprintln!("  Warning: could not update config.yaml: {e}");
+                                        print_install_note(
+                                            "enable manually: hermes plugins enable ecotokens",
+                                        );
+                                    }
+                                }
+                            }
+                            None => {
+                                eprintln!("  Warning: cannot determine Hermes config path.");
+                                print_install_note(
+                                    "enable manually: hermes plugins enable ecotokens",
+                                );
+                            }
+                        }
+                    } else {
+                        // Try via the Hermes CLI (fail-open).
+                        let result = std::process::Command::new("hermes")
+                            .args(["plugins", "enable", "ecotokens"])
+                            .output();
+                        match result {
+                            Ok(out) => {
+                                let msg = String::from_utf8_lossy(&out.stdout);
+                                if msg.contains("already enabled") {
+                                    print_install_note("plugin already enabled in Hermes");
+                                } else if out.status.success() {
+                                    print_install_note("plugin enabled in Hermes");
+                                } else {
+                                    print_install_note(
+                                        "enable manually: hermes plugins enable ecotokens",
+                                    );
+                                }
+                            }
+                            Err(_) => {
+                                print_install_note(
+                                    "enable manually: hermes plugins enable ecotokens",
+                                );
+                            }
+                        }
+                    }
+                }
+                Err(e) => {
+                    eprintln!("install error (hermes): {e}");
+                    std::process::exit(1);
+                }
+            },
+            None => {
+                eprintln!("cannot determine Hermes plugin path on this system");
+                std::process::exit(1);
+            }
+        }
+    }
+
+    if install_codex {
+        print_install_section(&mut first_section, "Install Codex");
+        match codex_plugin_dir {
+            Some(ref p) => match install::install_codex_plugin(p) {
+                Ok(()) => {
+                    print_install_item("ok", "plugin", p);
+                }
+                Err(e) => {
+                    eprintln!("install error (codex): {e}");
+                    std::process::exit(1);
+                }
+            },
+            None => {
+                eprintln!("cannot determine Codex plugin path on this system");
+                std::process::exit(1);
+            }
+        }
+        match install::default_codex_hooks_path() {
+            Some(ref h) => {
+                match install::install_codex_hook(h) {
+                    Ok(()) => print_install_item("ok", "hook", h),
+                    Err(e) => {
+                        eprintln!("install error (codex hook): {e}");
+                        std::process::exit(1);
+                    }
+                }
+                match install::install_codex_post_hook(h) {
+                    Ok(()) => print_install_item("ok", "post-hook", h),
+                    Err(e) => {
+                        eprintln!("install error (codex post-hook): {e}");
+                        std::process::exit(1);
+                    }
+                }
+            }
+            None => {
+                eprintln!("cannot determine Codex hooks path on this system");
+                std::process::exit(1);
+            }
+        }
+        match install::default_codex_config_path() {
+            Some(ref c) => match install::install_codex_mcp_server(c) {
+                Ok(()) => print_install_item("ok", "MCP server", c),
+                Err(e) => {
+                    eprintln!("install error (codex mcp server): {e}");
+                    std::process::exit(1);
+                }
+            },
+            None => {
+                eprintln!("cannot determine Codex config path on this system");
+                std::process::exit(1);
+            }
+        }
+    }
+
+    if install_opencode {
+        print_install_section(&mut first_section, "Install OpenCode");
+        match install::default_opencode_plugin_path() {
+            Some(ref p) => match install::install_opencode_plugin(p) {
+                Ok(()) => {
+                    print_install_item("ok", "plugin", p);
+                    print_install_note("restart OpenCode to load the plugin");
+                }
+                Err(e) => {
+                    eprintln!("install error (opencode): {e}");
+                    std::process::exit(1);
+                }
+            },
+            None => {
+                eprintln!("cannot determine OpenCode plugin path on this system");
+                std::process::exit(1);
+            }
+        }
+    }
+
+    post_install_completions(&mut first_section);
+
     let enable_ai = ai_summary || ai_summary_model.is_some();
     if enable_ai {
         let mut settings = config::Settings::load();
@@ -884,7 +1435,8 @@ fn cmd_install(target: String, ai_summary: bool, ai_summary_model: Option<String
             eprintln!("failed to save config: {e}");
             std::process::exit(1);
         }
-        println!("AI summary configured in ~/.config/ecotokens/config.json");
+        print_install_section(&mut first_section, "Configure ecotokens");
+        print_install_note("AI summary configured in ~/.config/ecotokens/config.json");
     }
 }
 
@@ -893,47 +1445,67 @@ fn cmd_uninstall(target: String) {
     let claude_json = default_claude_json_path();
     let gemini_path = install::default_gemini_settings_path();
     let qwen_path = install::default_qwen_settings_path();
+    let hermes_plugin_dir = install::default_hermes_plugin_dir();
+    let codex_plugin_dir = install::default_codex_plugin_dir();
 
     let uninstall_claude = matches!(target.as_str(), "claude" | "all");
     let uninstall_gemini = matches!(target.as_str(), "gemini" | "all");
     let uninstall_qwen = matches!(target.as_str(), "qwen" | "all");
     let uninstall_pi = matches!(target.as_str(), "pi" | "all");
+    let uninstall_hermes = matches!(target.as_str(), "hermes" | "all");
+    let uninstall_codex = matches!(target.as_str(), "codex" | "all");
+    let uninstall_opencode = matches!(target.as_str(), "opencode" | "all");
 
-    if !uninstall_claude && !uninstall_gemini && !uninstall_qwen && !uninstall_pi {
+    if !uninstall_claude
+        && !uninstall_gemini
+        && !uninstall_qwen
+        && !uninstall_pi
+        && !uninstall_hermes
+        && !uninstall_codex
+        && !uninstall_opencode
+    {
         eprintln!(
-            "unknown target '{}'. Valid values: claude, gemini, qwen, pi, all",
+            "unknown target '{}'. Valid values: claude, gemini, qwen, pi, hermes, codex, opencode, all",
             target
         );
         std::process::exit(1);
     }
 
+    let mut first_section = true;
+
     if uninstall_claude {
+        print_install_section(&mut first_section, "Uninstall Claude Code");
         let had_hook = install::is_hook_installed(&claude_path);
         let had_post_hook = install::is_post_hook_installed(&claude_path);
         let had_mcp = install::is_mcp_registered(&claude_path);
         let had_session = install::are_session_hooks_installed(&claude_path);
+        let had_router = install::is_prompt_hook_installed(&claude_path);
         match install::uninstall_hook(&claude_path, &claude_json) {
             Ok(()) => {
+                if had_router {
+                    print_install_item("removed", "router hook", &claude_path);
+                }
+                if let Some(dir) = router::agents::default_agents_dir() {
+                    if let Ok(removed) = router::agents::remove_agents(&dir) {
+                        for path in removed {
+                            print_install_item("removed", "router agent", &path);
+                        }
+                    }
+                }
                 if had_hook {
-                    println!("ecotokens hook removed ← {}", claude_path.display());
+                    print_install_item("removed", "hook", &claude_path);
                 }
                 if had_post_hook {
-                    println!("ecotokens post-hook removed ← {}", claude_path.display());
+                    print_install_item("removed", "post-hook", &claude_path);
                 }
                 if had_mcp {
-                    println!(
-                        "ecotokens MCP server unregistered ← {}",
-                        claude_path.display()
-                    );
+                    print_install_item("removed", "MCP server", &claude_path);
                 }
                 if had_session {
-                    println!(
-                        "ecotokens session hooks removed ← {}",
-                        claude_path.display()
-                    );
+                    print_install_item("removed", "session hooks", &claude_path);
                 }
-                if !had_hook && !had_post_hook && !had_mcp && !had_session {
-                    println!("ecotokens: nothing to uninstall (claude)");
+                if !had_hook && !had_post_hook && !had_mcp && !had_session && !had_router {
+                    print_install_note("nothing to uninstall");
                 }
             }
             Err(e) => {
@@ -944,6 +1516,7 @@ fn cmd_uninstall(target: String) {
     }
 
     if uninstall_gemini {
+        print_install_section(&mut first_section, "Uninstall Gemini CLI");
         match gemini_path {
             Some(ref p) => {
                 let had_hook = install::is_gemini_hook_installed(p);
@@ -952,19 +1525,16 @@ fn cmd_uninstall(target: String) {
                 match install::uninstall_gemini(p) {
                     Ok(()) => {
                         if had_hook {
-                            println!("ecotokens hook removed (Gemini) ← {}", p.display());
+                            print_install_item("removed", "hook", p);
                         }
                         if had_post_hook {
-                            println!("ecotokens post-hook removed (Gemini) ← {}", p.display());
+                            print_install_item("removed", "post-hook", p);
                         }
                         if had_mcp {
-                            println!(
-                                "ecotokens MCP server unregistered (Gemini) ← {}",
-                                p.display()
-                            );
+                            print_install_item("removed", "MCP server", p);
                         }
                         if !had_hook && !had_post_hook && !had_mcp {
-                            println!("ecotokens: nothing to uninstall (gemini)");
+                            print_install_note("nothing to uninstall");
                         }
                     }
                     Err(e) => {
@@ -981,6 +1551,7 @@ fn cmd_uninstall(target: String) {
     }
 
     if uninstall_qwen {
+        print_install_section(&mut first_section, "Uninstall Qwen Code");
         match qwen_path {
             Some(ref p) => {
                 let had_hook = install::is_qwen_hook_installed(p);
@@ -990,19 +1561,16 @@ fn cmd_uninstall(target: String) {
                 match install::uninstall_qwen(p) {
                     Ok(()) => {
                         if had_hook {
-                            println!("ecotokens hook removed (Qwen Code) ← {}", p.display());
+                            print_install_item("removed", "hook", p);
                         }
                         if had_post_hook {
-                            println!("ecotokens post-hook removed (Qwen Code) ← {}", p.display());
+                            print_install_item("removed", "post-hook", p);
                         }
                         if had_mcp {
-                            println!(
-                                "ecotokens MCP server unregistered (Qwen Code) ← {}",
-                                p.display()
-                            );
+                            print_install_item("removed", "MCP server", p);
                         }
                         if !had_hook && !had_post_hook && !had_mcp && !had_session {
-                            println!("ecotokens: nothing to uninstall (qwen)");
+                            print_install_note("nothing to uninstall");
                         }
                     }
                     Err(e) => {
@@ -1013,10 +1581,7 @@ fn cmd_uninstall(target: String) {
                 if had_session {
                     match install::uninstall_session_hooks(p) {
                         Ok(()) => {
-                            println!(
-                                "ecotokens session hooks removed (Qwen Code) ← {}",
-                                p.display()
-                            );
+                            print_install_item("removed", "session hooks", p);
                         }
                         Err(e) => {
                             eprintln!("uninstall error (qwen session hooks): {e}");
@@ -1033,15 +1598,16 @@ fn cmd_uninstall(target: String) {
     }
 
     if uninstall_pi {
+        print_install_section(&mut first_section, "Uninstall Pi");
         match install::default_pi_extension_path() {
             Some(ref p) => {
                 let had = install::is_pi_extension_installed(p);
                 match install::uninstall_pi(p) {
                     Ok(()) => {
                         if had {
-                            println!("ecotokens extension removed (Pi) ← {}", p.display());
+                            print_install_item("removed", "extension", p);
                         } else {
-                            println!("ecotokens: nothing to uninstall (pi)");
+                            print_install_note("nothing to uninstall");
                         }
                     }
                     Err(e) => {
@@ -1056,15 +1622,185 @@ fn cmd_uninstall(target: String) {
             }
         }
     }
+
+    if uninstall_hermes {
+        print_install_section(&mut first_section, "Uninstall Hermes Agent");
+        match hermes_plugin_dir {
+            Some(ref p) => {
+                let had = install::is_hermes_plugin_installed(p);
+                match install::uninstall_hermes_plugin(p) {
+                    Ok(()) => {
+                        if had {
+                            print_install_item("removed", "plugin", p);
+                            let disabled = std::process::Command::new("hermes")
+                                .args(["plugins", "disable", "ecotokens"])
+                                .output();
+                            match disabled {
+                                Ok(out) if out.status.success() => {
+                                    print_install_note("plugin disabled in Hermes");
+                                }
+                                _ => {}
+                            }
+                        } else {
+                            print_install_note("nothing to uninstall");
+                        }
+                    }
+                    Err(e) => {
+                        eprintln!("uninstall error (hermes): {e}");
+                        std::process::exit(1);
+                    }
+                }
+            }
+            None => {
+                eprintln!("cannot determine Hermes plugin path on this system");
+                std::process::exit(1);
+            }
+        }
+    }
+
+    if uninstall_codex {
+        print_install_section(&mut first_section, "Uninstall Codex");
+        let codex_hooks_path = install::default_codex_hooks_path();
+        let codex_config_path = install::default_codex_config_path();
+
+        let had_plugin = codex_plugin_dir
+            .as_ref()
+            .map(|p| install::is_codex_plugin_installed(p))
+            .unwrap_or(false);
+        let had_hook = codex_hooks_path
+            .as_deref()
+            .map(install::is_codex_hook_installed)
+            .unwrap_or(false);
+        let had_post = codex_hooks_path
+            .as_deref()
+            .map(install::is_codex_post_hook_installed)
+            .unwrap_or(false);
+        let had_mcp = codex_config_path
+            .as_deref()
+            .map(install::is_codex_mcp_registered)
+            .unwrap_or(false);
+
+        match codex_plugin_dir {
+            Some(ref p) => match install::uninstall_codex_plugin(p) {
+                Ok(()) => {
+                    if had_plugin {
+                        print_install_item("removed", "plugin", p);
+                    }
+                }
+                Err(e) => {
+                    eprintln!("uninstall error (codex): {e}");
+                    std::process::exit(1);
+                }
+            },
+            None => {
+                eprintln!("cannot determine Codex plugin path on this system");
+                std::process::exit(1);
+            }
+        }
+        match codex_hooks_path {
+            Some(ref h) => match install::uninstall_codex_hooks(h) {
+                Ok(()) => {
+                    if had_hook {
+                        print_install_item("removed", "hook", h);
+                    }
+                    if had_post {
+                        print_install_item("removed", "post-hook", h);
+                    }
+                }
+                Err(e) => {
+                    eprintln!("uninstall error (codex hooks): {e}");
+                    std::process::exit(1);
+                }
+            },
+            None => {
+                eprintln!("cannot determine Codex hooks path on this system");
+                std::process::exit(1);
+            }
+        }
+        match codex_config_path {
+            Some(ref c) => match install::uninstall_codex_mcp_server(c) {
+                Ok(()) => {
+                    if had_mcp {
+                        print_install_item("removed", "MCP server", c);
+                    }
+                }
+                Err(e) => {
+                    eprintln!("uninstall error (codex mcp server): {e}");
+                    std::process::exit(1);
+                }
+            },
+            None => {
+                eprintln!("cannot determine Codex config path on this system");
+                std::process::exit(1);
+            }
+        }
+        if !had_plugin && !had_hook && !had_post && !had_mcp {
+            print_install_note("nothing to uninstall");
+        }
+    }
+
+    if uninstall_opencode {
+        print_install_section(&mut first_section, "Uninstall OpenCode");
+        match install::default_opencode_plugin_path() {
+            Some(ref p) => {
+                let had = install::is_opencode_plugin_installed(p);
+                match install::uninstall_opencode_plugin(p) {
+                    Ok(()) => {
+                        if had {
+                            print_install_item("removed", "plugin", p);
+                        } else {
+                            print_install_note("nothing to uninstall");
+                        }
+                    }
+                    Err(e) => {
+                        eprintln!("uninstall error (opencode): {e}");
+                        std::process::exit(1);
+                    }
+                }
+            }
+            None => {
+                eprintln!("cannot determine OpenCode plugin path on this system");
+                std::process::exit(1);
+            }
+        }
+    }
+
+    post_uninstall_completions(&mut first_section);
 }
 
+fn cmd_router(action: RouterAction) {
+    let settings_path = default_settings_path();
+    let Some(agents_dir) = router::agents::default_agents_dir() else {
+        eprintln!("error: cannot locate the home directory");
+        std::process::exit(1);
+    };
+    let result = match action {
+        RouterAction::On { timeout_ms } => router::cli::on(&settings_path, &agents_dir, timeout_ms),
+        RouterAction::Off => router::cli::off(&settings_path, &agents_dir),
+        RouterAction::Status { json } => router::cli::status(&settings_path, &agents_dir, json),
+        RouterAction::Try {
+            messages,
+            json,
+            timeout_ms,
+        } => std::process::exit(router::cli::try_messages(&messages, json, timeout_ms)),
+        RouterAction::Price { input, output } => router::cli::price(input, output),
+    };
+    if let Err(e) = result {
+        eprintln!("router error: {e}");
+        std::process::exit(1);
+    }
+}
+
+#[allow(clippy::too_many_arguments)]
 fn cmd_config(
     json: bool,
     debug: Option<bool>,
     debuglog: Option<bool>,
-    model: Option<String>,
+    jev: Option<bool>,
+    jev_line_select: Option<bool>,
     embed_provider: Option<String>,
     embed_model: Option<String>,
+    embed_url: Option<String>,
 ) {
     use config::settings::EmbedProvider;
 
@@ -1083,21 +1819,26 @@ fn cmd_config(
         dirty = true;
     }
 
-    if let Some(ref m) = model {
-        if m.is_empty() || !settings.model_pricing.contains_key(m.as_str()) {
-            if !m.is_empty() {
-                eprintln!("unknown model: '{}'", m);
-            }
-            let mut known = config::models::model_names();
-            known.sort();
-            eprintln!("available models:");
-            for name in known {
-                eprintln!("  {}", name);
-            }
-            std::process::exit(1);
-        }
-        settings.default_model = m.clone();
+    if let Some(v) = jev {
+        settings.jev_enabled = v;
         dirty = true;
+        let has_key =
+            matches!(std::env::var(crate::jev::API_KEY_ENV), Ok(k) if !k.trim().is_empty());
+        if v && !has_key {
+            eprintln!(
+                "warning: {} not set; Jev calls will fall back to heuristics",
+                crate::jev::API_KEY_ENV
+            );
+        }
+    }
+
+    if let Some(v) = jev_line_select {
+        settings.jev_line_select_enabled = v;
+        dirty = true;
+    }
+
+    if jev_line_select == Some(true) && !settings.jev_enabled {
+        eprintln!("warning: jev_line_select_enabled has no effect while jev_enabled is false");
     }
 
     // Mutation via --embed-provider
@@ -1109,8 +1850,19 @@ fn cmd_config(
                     .unwrap_or_else(|| "sentence-transformers/all-MiniLM-L6-v2".to_string()),
             },
             "none" => EmbedProvider::None,
+            "ollama" => EmbedProvider::Ollama {
+                url: embed_url
+                    .clone()
+                    .unwrap_or_else(|| "http://localhost:11434".to_string()),
+                model: embed_model
+                    .clone()
+                    .unwrap_or_else(|| "qwen3-embedding:latest".to_string()),
+            },
             other => {
-                eprintln!("unknown provider: '{}'. Valid values: candle, none", other);
+                eprintln!(
+                    "unknown provider: '{}'. Valid values: candle, ollama, none",
+                    other
+                );
                 std::process::exit(1);
             }
         };
@@ -1119,9 +1871,10 @@ fn cmd_config(
         // Changer uniquement le modèle sans toucher au provider
         match &mut settings.embed_provider {
             EmbedProvider::Candle { model } => *model = m.clone(),
+            EmbedProvider::Ollama { model, .. } => *model = m.clone(),
             EmbedProvider::None | EmbedProvider::Legacy => {
                 eprintln!(
-                    "no embed provider configured; set one first with --embed-provider candle"
+                    "no embed provider configured; set one first with --embed-provider candle or ollama"
                 );
                 std::process::exit(1);
             }
@@ -1143,6 +1896,7 @@ fn cmd_config(
         EmbedProvider::None => "none".to_string(),
         EmbedProvider::Legacy => "legacy (will migrate to candle on next save)".to_string(),
         EmbedProvider::Candle { model } => format!("candle model={model}"),
+        EmbedProvider::Ollama { url, model } => format!("ollama url={url} model={model}"),
     };
 
     let hook_installed = install::is_hook_installed(&settings_path);
@@ -1155,7 +1909,14 @@ fn cmd_config(
         println!("hook_installed        : {}", hook_installed);
         println!("debug                 : {}", settings.debug);
         println!("debuglog              : {}", settings.debuglog);
-        println!("default_model         : {}", settings.default_model);
+        println!(
+            "price_input_usd_per_mtok  : {}",
+            config::fmt_price(settings.price_input_usd_per_mtok)
+        );
+        println!(
+            "price_output_usd_per_mtok : {}",
+            config::fmt_price(settings.price_output_usd_per_mtok)
+        );
         println!("exclusions            : {:?}", settings.exclusions);
         println!("embed_provider        : {}", provider_str);
         println!("ai_summary_enabled    : {}", settings.ai_summary_enabled);
@@ -1174,6 +1935,11 @@ fn cmd_config(
                 .unwrap_or("http://localhost:11434 (default)")
         );
         println!("abbreviations_enabled : {}", settings.abbreviations_enabled);
+        println!("jev_enabled           : {}", settings.jev_enabled);
+        println!(
+            "jev_line_select       : {}",
+            settings.jev_line_select_enabled
+        );
 
         let watch_store = config::SessionStore::load();
         let active_sessions: u32 = watch_store.0.values().map(|e| e.sessions).sum();
@@ -1673,6 +2439,7 @@ fn cmd_watch(
     path: Option<PathBuf>,
     index_dir: Option<PathBuf>,
     background: bool,
+    background_worker: bool,
     status: bool,
     stop: bool,
     json: bool,
@@ -1680,7 +2447,7 @@ fn cmd_watch(
     // Purge stale entries when not in --background mode.
     // --background is spawned by session_start right after incrementing the session count
     // (watcher_pid still null at that point); running cleanup here would drop that valid entry.
-    if !background {
+    if !background && !background_worker {
         let mut store = config::SessionStore::load();
         store.cleanup_dead();
         let _ = store.save();
@@ -1714,7 +2481,9 @@ fn cmd_watch(
 
     // If --status is requested, show status and exit.
     if status {
-        let store = config::SessionStore::load();
+        let mut store = config::SessionStore::load();
+        store.cleanup_dead();
+        let _ = store.save();
         let entries: Vec<_> = if let Some(ref p) = path {
             let key = p.display().to_string();
             store
@@ -1808,19 +2577,34 @@ fn cmd_watch(
     let watch_path = path.unwrap_or(cwd);
     let idx_dir = index_dir.unwrap_or_else(default_index_dir);
     let watch_path_str = watch_path.display().to_string();
-    let is_interactive = !background && std::io::IsTerminal::is_terminal(&std::io::stdout());
+    if background_worker {
+        let log_path = watch_log_path(&watch_path);
+        let log_path_str = log_path.to_string_lossy().to_string();
+        let mut store = config::SessionStore::load();
+        store.register_watcher(
+            &watch_path.to_string_lossy(),
+            std::process::id(),
+            Some(log_path_str),
+        );
+        let _ = store.save();
+    }
+
+    let is_background_mode = background || background_worker;
+    let is_interactive =
+        !is_background_mode && std::io::IsTerminal::is_terminal(&std::io::stdout());
 
     // Count only truly indexable files for accurate progress.
     let total_files = search::index::count_indexable_files(&watch_path);
 
     let counter = Arc::new(AtomicUsize::new(0));
     let (log_tx, log_rx) = std::sync::mpsc::channel::<String>();
+    let settings = config::Settings::load();
     let opts = search::index::IndexOptions {
         reset: false,
         path: watch_path.clone(),
         index_dir: idx_dir.clone(),
         progress: Some(counter.clone()),
-        embed_provider: config::Settings::load().embed_provider,
+        embed_provider: settings.embed_provider.clone(),
         log_tx: if is_interactive { Some(log_tx) } else { None },
     };
 
@@ -1894,8 +2678,15 @@ fn cmd_watch(
         let (stop_tx, stop_rx) = std::sync::mpsc::channel::<()>();
         let watch_path_clone = watch_path.clone();
         let idx_dir_clone = idx_dir.clone();
+        let embed_provider = settings.embed_provider.clone();
         let watcher_handle = std::thread::spawn(move || {
-            daemon::watcher::watch_directory(&watch_path_clone, &idx_dir_clone, event_tx, stop_rx)
+            daemon::watcher::watch_directory(
+                &watch_path_clone,
+                &idx_dir_clone,
+                embed_provider,
+                event_tx,
+                stop_rx,
+            )
         });
 
         let index_report = index_result.ok().map(|stats| tui::watch::IndexReport {
@@ -1974,8 +2765,15 @@ fn cmd_watch(
         let (stop_tx, stop_rx) = std::sync::mpsc::channel::<()>();
         let watch_path_clone = watch_path.clone();
         let idx_dir_clone = idx_dir.clone();
+        let embed_provider = settings.embed_provider.clone();
         let watcher_handle = std::thread::spawn(move || {
-            daemon::watcher::watch_directory(&watch_path_clone, &idx_dir_clone, event_tx, stop_rx)
+            daemon::watcher::watch_directory(
+                &watch_path_clone,
+                &idx_dir_clone,
+                embed_provider,
+                event_tx,
+                stop_rx,
+            )
         });
 
         // Background mode: log events to watch.log (only if debug is enabled)
@@ -2041,6 +2839,7 @@ fn cmd_duplicates(threshold: f32, min_lines: usize, index_dir: Option<PathBuf>, 
         index_dir: idx_dir,
         threshold,
         min_lines,
+        project_root: Some(cwd),
     };
     match duplicates::detect::detect_duplicates(&opts) {
         Ok(groups) => {
@@ -2073,10 +2872,9 @@ fn parse_older_than(s: &str) -> Option<chrono::Duration> {
         (n, 'd')
     } else if let Some(n) = s.strip_suffix('w') {
         (n, 'w')
-    } else if let Some(n) = s.strip_suffix('m') {
-        (n, 'm')
     } else {
-        return None;
+        let n = s.strip_suffix('m')?;
+        (n, 'm')
     };
     let n: i64 = num_str.parse().ok()?;
     match unit {
@@ -2096,7 +2894,7 @@ fn cmd_clear(
     yes: bool,
 ) {
     use chrono::{DateTime, NaiveDate, Utc};
-    use metrics::store::{read_from, write_to, CommandFamily};
+    use metrics::store::{delete_ids, read_from, CommandFamily};
 
     let has_filter =
         before.is_some() || older_than.is_some() || family.is_some() || project.is_some();
@@ -2158,50 +2956,56 @@ fn cmd_clear(
         }
     }
 
-    // Partition: items matching all filters → to_delete, rest → to_keep
-    let (to_delete, to_keep): (Vec<_>, Vec<_>) = items.into_iter().partition(|item| {
-        if let Some(dt) = before_dt {
-            match DateTime::parse_from_rfc3339(&item.timestamp) {
-                Ok(ts) => {
-                    if ts.with_timezone(&Utc) >= dt {
-                        return false;
+    // Select the items matching every filter. Only their ids are needed: rows are
+    // deleted by primary key rather than by rewriting a kept-snapshot, so
+    // interceptions appended by a concurrent session (including while the
+    // confirmation prompt below is blocking) are never destroyed.
+    let to_delete: Vec<_> = items
+        .into_iter()
+        .filter(|item| {
+            if let Some(dt) = before_dt {
+                match DateTime::parse_from_rfc3339(&item.timestamp) {
+                    Ok(ts) => {
+                        if ts.with_timezone(&Utc) >= dt {
+                            return false;
+                        }
                     }
+                    Err(_) => return false,
                 }
-                Err(_) => return false,
             }
-        }
 
-        if let Some(cutoff) = cutoff_from_older {
-            match DateTime::parse_from_rfc3339(&item.timestamp) {
-                Ok(ts) => {
-                    if ts.with_timezone(&Utc) >= cutoff {
-                        return false;
+            if let Some(cutoff) = cutoff_from_older {
+                match DateTime::parse_from_rfc3339(&item.timestamp) {
+                    Ok(ts) => {
+                        if ts.with_timezone(&Utc) >= cutoff {
+                            return false;
+                        }
                     }
+                    Err(_) => return false,
                 }
-                Err(_) => return false,
             }
-        }
 
-        if let Some(ref fam) = target_family {
-            if &item.command_family != fam {
-                return false;
+            if let Some(ref fam) = target_family {
+                if &item.command_family != fam {
+                    return false;
+                }
             }
-        }
 
-        if let Some(ref proj) = project {
-            let item_root = item.git_root.as_deref().unwrap_or("").trim();
-            let matches = if proj.trim() == "[undefined]" {
-                item_root.is_empty()
-            } else {
-                item_root == proj.trim()
-            };
-            if !matches {
-                return false;
+            if let Some(ref proj) = project {
+                let item_root = item.git_root.as_deref().unwrap_or("").trim();
+                let matches = if proj.trim() == "[undefined]" {
+                    item_root.is_empty()
+                } else {
+                    item_root == proj.trim()
+                };
+                if !matches {
+                    return false;
+                }
             }
-        }
 
-        true
-    });
+            true
+        })
+        .collect();
 
     let delete_count = to_delete.len();
 
@@ -2223,12 +3027,14 @@ fn cmd_clear(
         }
     }
 
-    if let Err(e) = write_to(&path, &to_keep) {
-        eprintln!("Error writing metrics file: {e}");
-        std::process::exit(1);
+    let ids: Vec<String> = to_delete.into_iter().map(|i| i.id).collect();
+    match delete_ids(&path, &ids) {
+        Ok(deleted) => println!("Deleted {deleted} interception(s)."),
+        Err(e) => {
+            eprintln!("Error writing metrics file: {e}");
+            std::process::exit(1);
+        }
     }
-
-    println!("Deleted {delete_count} interception(s).");
 }
 
 fn stable_hash(s: &str) -> u64 {
@@ -2263,6 +3069,45 @@ fn watch_log_path(watch_path: &std::path::Path) -> PathBuf {
         .join(format!("watch{sanitized}_{fingerprint}.log"))
 }
 
+#[cfg(unix)]
+fn systemd_unit_name_for_watch_path(watch_path: &str) -> String {
+    format!("ecotokens-watch-{:016x}", stable_hash(watch_path))
+}
+
+#[cfg(unix)]
+fn start_auto_watch_process(bin: &std::path::Path, watch_path: &str) -> std::io::Result<()> {
+    let unit = systemd_unit_name_for_watch_path(watch_path);
+    let systemd_status = std::process::Command::new("systemd-run")
+        .args([
+            "--user",
+            "--collect",
+            "--no-block",
+            "--unit",
+            &unit,
+            "--working-directory",
+            watch_path,
+        ])
+        .arg(bin)
+        .args(["watch", "--background-worker", "--path", watch_path])
+        .status();
+
+    match systemd_status {
+        Ok(status) if status.success() => Ok(()),
+        _ => std::process::Command::new(bin)
+            .args(["watch", "--background", "--path", watch_path])
+            .status()
+            .and_then(|status| {
+                if status.success() {
+                    Ok(())
+                } else {
+                    Err(std::io::Error::other(format!(
+                        "watch start exited with status {status}"
+                    )))
+                }
+            }),
+    }
+}
+
 fn cmd_session_start() {
     let settings = config::Settings::load();
 
@@ -2283,9 +3128,20 @@ fn cmd_session_start() {
                 );
             }
         } else if decision.needs_watcher {
-            let _ = std::process::Command::new("ecotokens")
-                .args(["watch", "--background", "--path", &decision.watch_path])
-                .spawn();
+            #[cfg(unix)]
+            {
+                let bin = std::env::current_exe().unwrap_or_else(|_| PathBuf::from("ecotokens"));
+                let result = start_auto_watch_process(&bin, &decision.watch_path);
+                if settings.debug {
+                    match result {
+                        Ok(()) => eprintln!(
+                            "ecotokens auto-watch: started watch on {}.",
+                            decision.watch_path
+                        ),
+                        Err(e) => eprintln!("ecotokens auto-watch: failed to start watch: {e}"),
+                    }
+                }
+            }
         }
     }
 
@@ -2301,17 +3157,42 @@ fn cmd_session_start() {
     }
 }
 
+/// Best-effort check that `pid` still belongs to an ecotokens watch process
+/// before we signal it — otherwise a recycled PID could point at an unrelated
+/// process that we would wrongly kill.
+#[cfg(unix)]
+fn pid_is_ecotokens_watch(pid: u32) -> bool {
+    // Linux: /proc/<pid>/cmdline holds the NUL-separated argv.
+    if let Ok(bytes) = std::fs::read(format!("/proc/{pid}/cmdline")) {
+        let cmdline = String::from_utf8_lossy(&bytes);
+        return cmdline.contains("ecotokens") && cmdline.contains("watch");
+    }
+    // Other unix (e.g. macOS): fall back to `ps`.
+    match std::process::Command::new("ps")
+        .args(["-p", &pid.to_string(), "-o", "command="])
+        .output()
+    {
+        Ok(out) => {
+            let cmd = String::from_utf8_lossy(&out.stdout);
+            cmd.contains("ecotokens") && cmd.contains("watch")
+        }
+        Err(_) => false,
+    }
+}
+
 fn cmd_session_end() {
     let cwd = std::env::current_dir().unwrap_or_else(|_| PathBuf::from("."));
     let cwd_str = cwd.to_string_lossy().to_string();
 
     let mut store = config::SessionStore::load();
-    if let Some(pid) = store.decrement_for_session(&cwd_str) {
+    if let Some(_pid) = store.decrement_for_session(&cwd_str) {
         let _ = store.save();
         #[cfg(unix)]
-        let _ = std::process::Command::new("kill")
-            .args(["-TERM", &pid.to_string()])
-            .status();
+        if pid_is_ecotokens_watch(_pid) {
+            let _ = std::process::Command::new("kill")
+                .args(["-TERM", &_pid.to_string()])
+                .status();
+        }
     } else {
         let _ = store.save();
     }
@@ -2344,7 +3225,10 @@ fn cmd_auto_watch_enable() {
         }
     }
 
-    println!("✓ auto-watch enabled — ecotokens watch will start automatically with Claude Code and Qwen Code");
+    // Codex: auto-watch is not supported. Codex exposes SessionStart but has no SessionEnd
+    // equivalent, so the watch start/stop cycle cannot be completed cleanly.
+
+    println!("✓ auto-watch enabled — ecotokens watch will start automatically with Claude Code, Qwen Code, Pi and Hermes");
 }
 
 fn cmd_auto_watch_disable() {
@@ -2392,10 +3276,239 @@ fn cmd_abbreviations_list() {
     }
 }
 
+/// String value parser that advertises its values (for shell
+/// completion and `--help`) without rejecting anything else at parse time.
+#[derive(Clone)]
+struct LenientPossibleValues(&'static [&'static str]);
+
+impl clap::builder::TypedValueParser for LenientPossibleValues {
+    type Value = String;
+
+    fn parse_ref(
+        &self,
+        _cmd: &clap::Command,
+        _arg: Option<&clap::Arg>,
+        value: &std::ffi::OsStr,
+    ) -> Result<String, clap::Error> {
+        Ok(value.to_string_lossy().into_owned())
+    }
+
+    fn possible_values(
+        &self,
+    ) -> Option<Box<dyn Iterator<Item = clap::builder::PossibleValue> + '_>> {
+        Some(Box::new(
+            self.0
+                .iter()
+                .copied()
+                .map(clap::builder::PossibleValue::new),
+        ))
+    }
+}
+
 fn cmd_completions(shell: Shell) {
     let mut cmd = Cli::command();
     let name = cmd.get_name().to_string();
     generate(shell, &mut cmd, name, &mut std::io::stdout());
+}
+
+fn completion_script(shell: install::CompletionShell) -> String {
+    let clap_shell = match shell {
+        install::CompletionShell::Bash => Shell::Bash,
+        install::CompletionShell::Zsh => Shell::Zsh,
+        install::CompletionShell::Fish => Shell::Fish,
+    };
+    let mut cmd = Cli::command();
+    let name = cmd.get_name().to_string();
+    let mut buf = Vec::new();
+    generate(clap_shell, &mut cmd, name, &mut buf);
+    String::from_utf8_lossy(&buf).into_owned()
+}
+
+/// Post-install step: install or update the shell completion script.
+/// Never aborts the install; failures are reported as warnings.
+fn post_install_completions(first_section: &mut bool) {
+    print_install_section(first_section, "Shell completion");
+    let shell_env = std::env::var("SHELL").ok();
+    let Some(shell) = install::CompletionShell::detect(shell_env.as_deref()) else {
+        print_install_note("unsupported or unknown shell; run `ecotokens completions <shell>`");
+        return;
+    };
+    let Some(path) = install::default_completion_path(shell) else {
+        eprintln!(
+            "warning: cannot determine completion path for {}",
+            shell.name()
+        );
+        return;
+    };
+    match install::install_completion_script(&path, &completion_script(shell)) {
+        Ok(install::CompletionStatus::Created) => print_install_item("ok", "completion", &path),
+        Ok(install::CompletionStatus::Updated) => {
+            print_install_item("updated", "completion", &path)
+        }
+        Ok(install::CompletionStatus::Unchanged) => print_install_item("ok", "completion", &path),
+        Err(e) => eprintln!("warning: could not install completion script: {e}"),
+    }
+    if shell == install::CompletionShell::Zsh {
+        print_install_note("zsh: ensure the site-functions directory is in your fpath");
+    }
+}
+
+/// Post-uninstall step: remove ecotokens completion scripts for every shell.
+/// Never aborts the uninstall; failures are reported as warnings.
+fn post_uninstall_completions(first_section: &mut bool) {
+    print_install_section(first_section, "Shell completion");
+    let mut removed_any = false;
+    for shell in install::CompletionShell::ALL {
+        let Some(path) = install::default_completion_path(shell) else {
+            continue;
+        };
+        match install::uninstall_completion_script(&path) {
+            Ok(true) => {
+                removed_any = true;
+                print_install_item("removed", "completion", &path);
+            }
+            Ok(false) => {}
+            Err(e) => eprintln!("warning: could not remove {}: {e}", path.display()),
+        }
+    }
+    if !removed_any {
+        print_install_note("no completion script found");
+    }
+}
+
+#[cfg(feature = "rewrite")]
+#[allow(clippy::too_many_arguments)]
+fn cmd_rewrite(
+    mode: String,
+    to: Option<String>,
+    file: Option<PathBuf>,
+    model: Option<String>,
+    timeout_ms: u64,
+    save_diff: bool,
+    no_save_diff: bool,
+    json: bool,
+) {
+    let stdin_is_tty = std::io::IsTerminal::is_terminal(&std::io::stdin());
+
+    // Stdin tty-ness alone cannot distinguish "explicitly piped content" from
+    // "non-interactive but empty" (e.g. `< /dev/null`, or any headless/CI
+    // invocation with `--file` and no redirection) — a pure tty check would
+    // wrongly reject the common non-interactive `--file` usage. So when a
+    // file is given and stdin is not a terminal, drain stdin (safe: a
+    // non-terminal stream always reaches EOF, it cannot block forever) and
+    // only treat it as "both supplied" if it actually carried bytes.
+    let stdin_bytes = if stdin_is_tty {
+        Vec::new()
+    } else {
+        let mut buf = Vec::new();
+        let _ = std::io::stdin().read_to_end(&mut buf);
+        buf
+    };
+
+    let text = match &file {
+        Some(_) if !stdin_bytes.is_empty() => {
+            eprintln!("ecotokens: error: supply input via stdin OR --file, not both");
+            std::process::exit(2);
+        }
+        Some(path) => match std::fs::read_to_string(path) {
+            Ok(s) => s,
+            Err(e) => {
+                eprintln!("ecotokens: error: could not read {}: {e}", path.display());
+                std::process::exit(2);
+            }
+        },
+        None if stdin_is_tty => {
+            eprintln!("ecotokens: error: no input — pipe text via stdin or pass --file <PATH>");
+            std::process::exit(2);
+        }
+        None => match String::from_utf8(stdin_bytes) {
+            Ok(s) => s,
+            Err(_) => {
+                eprintln!("ecotokens: error: input is not valid UTF-8");
+                std::process::exit(2);
+            }
+        },
+    };
+
+    let parsed_mode = match rewrite::modes::Mode::parse(&mode, to.as_deref()) {
+        Ok(m) => m,
+        Err(e) => {
+            eprintln!("ecotokens: error: {e}");
+            std::process::exit(1);
+        }
+    };
+
+    let settings = config::Settings::load();
+    let model_name = model
+        .or_else(|| settings.rewrite_model.clone())
+        .or_else(|| settings.ai_summary_model.clone())
+        .unwrap_or_else(|| "llama3.2:3b".to_string());
+
+    let provider = match rewrite::provider::OllamaProvider::new(
+        settings.rewrite_url.as_deref(),
+        model_name.clone(),
+    ) {
+        Ok(p) => p,
+        Err(e) => {
+            eprintln!("ecotokens: error: {e}");
+            std::process::exit(1);
+        }
+    };
+
+    // Precedence per contracts/config-settings.md:
+    // --no-save-diff > --save-diff > rewrite_save_diff > default (false).
+    let effective_save_diff = if no_save_diff {
+        false
+    } else if save_diff {
+        true
+    } else {
+        settings.rewrite_save_diff
+    };
+    let diff_dir = settings
+        .rewrite_diff_dir
+        .clone()
+        .unwrap_or_else(std::env::temp_dir);
+
+    let request = rewrite::RewriteRequest {
+        text,
+        mode: parsed_mode,
+        model: model_name,
+        timeout: std::time::Duration::from_millis(timeout_ms),
+        origin: rewrite::Origin::Cli,
+        truncation_ratio: settings.rewrite_truncation_ratio,
+        context_tokens: settings.rewrite_context_tokens,
+        save_diff: effective_save_diff,
+        diff_dir,
+        diff_retention: settings.rewrite_diff_retention,
+    };
+
+    let judge = jev::judge_from_settings(&settings);
+    let jev_ctx = judge.as_deref().map(|j| jev::JevContext::new(j, &settings));
+    let result = match rewrite::rewrite_with_judge(request, &provider, jev_ctx) {
+        Ok(r) => r,
+        Err(e) => {
+            eprintln!("ecotokens: error: {e}");
+            std::process::exit(1);
+        }
+    };
+
+    if let Some(reason) = &result.reason {
+        eprintln!("ecotokens: {reason}");
+    }
+
+    if json {
+        // `RewriteResult` already carries every field contracts/cli-rewrite.md
+        // requires, including `diff_path` — serialize it directly.
+        println!(
+            "{}",
+            serde_json::to_string_pretty(&result).unwrap_or_default()
+        );
+    } else {
+        print!("{}", result.text);
+        if !result.text.ends_with('\n') {
+            println!();
+        }
+    }
 }
 
 fn parse_version(v: &str) -> Option<(u32, u32, u32)> {
@@ -2465,9 +3578,12 @@ fn cmd_update(check: bool) {
         return;
     }
 
+    // Reconstruct the version from the parsed integers so only `\d+\.\d+\.\d+`
+    // can ever reach `cargo install`, regardless of what the API returned.
+    let version_arg = format!("{}.{}.{}", v_latest.0, v_latest.1, v_latest.2);
     println!("Running: cargo install ecotokens ...");
     match std::process::Command::new("cargo")
-        .args(["install", "ecotokens", "--version", latest])
+        .args(["install", "ecotokens", "--version", &version_arg])
         .status()
     {
         Ok(s) if s.success() => println!("Updated to v{}.", latest),
@@ -2483,35 +3599,73 @@ fn cmd_update(check: bool) {
 }
 
 fn main() {
+    config::env_file::load();
     let cli = Cli::parse();
     match cli.command {
         Commands::Hook => hook::handle(),
         Commands::HookGemini => hook::handle_gemini(),
         Commands::HookQwen => hook::handle_qwen(),
-        Commands::HookPost => hook::handle_post(),
+        Commands::HookPost { agent } => {
+            hook::handle_post(metrics::store::agent_to_hook_type_post(&agent))
+        }
         Commands::HookPostGemini => hook::handle_post_gemini(),
         Commands::HookPostQwen => hook::handle_post_qwen(),
-        Commands::Filter { args, debug, cwd } => cmd_filter(args, debug, cwd),
+        Commands::HookCodex => hook::handle_codex(),
+        Commands::HookPostCodex => hook::handle_post_codex(),
+        Commands::HookPrompt => router::hook::handle_prompt(),
+        Commands::Router { action } => cmd_router(action),
+        Commands::Filter {
+            args,
+            debug,
+            cwd,
+            agent,
+        } => cmd_filter(args, debug, cwd, agent),
+        Commands::FilterOutput {
+            command,
+            exit_code,
+            debug,
+            cwd,
+            hook_type,
+        } => cmd_filter_output(command, exit_code, debug, cwd, hook_type),
+        Commands::Gain {
+            action: Some(GainAction::Price { input, output }),
+            ..
+        } => cmd_gain_price(input, output),
         Commands::Gain {
             period,
             json,
-            model,
             history,
-        } => cmd_gain(period, json, model, history),
+            action: None,
+        } => cmd_gain(period, json, history),
+        Commands::Jev { period, json } => cmd_jev(period, json),
+        Commands::Game { period } => cmd_game(period),
         Commands::Install {
             target,
             ai_summary,
             ai_summary_model,
-        } => cmd_install(target, ai_summary, ai_summary_model),
+            enable_plugin,
+        } => cmd_install(target, ai_summary, ai_summary_model, enable_plugin),
         Commands::Uninstall { target } => cmd_uninstall(target),
         Commands::Config {
             json,
             debug,
             debuglog,
-            model,
+            jev,
+            jev_line_select,
             embed_provider,
             embed_model,
-        } => cmd_config(json, debug, debuglog, model, embed_provider, embed_model),
+            embed_url,
+        } => cmd_config(
+            json,
+            debug,
+            debuglog,
+            jev,
+            jev_line_select,
+            embed_provider,
+            embed_model,
+            embed_url,
+        ),
+        Commands::Doctor { json } => cmd_doctor(json),
         Commands::Index {
             path,
             index_dir,
@@ -2562,10 +3716,19 @@ fn main() {
             path,
             index_dir,
             background,
+            background_worker,
             status,
             stop,
             json,
-        } => cmd_watch(path, index_dir, background, status, stop, json),
+        } => cmd_watch(
+            path,
+            index_dir,
+            background,
+            background_worker,
+            status,
+            stop,
+            json,
+        ),
         Commands::Duplicates {
             threshold,
             min_lines,
@@ -2593,6 +3756,26 @@ fn main() {
             AbbreviationsAction::List => cmd_abbreviations_list(),
         },
         Commands::Completions { shell } => cmd_completions(shell),
+        #[cfg(feature = "rewrite")]
+        Commands::Rewrite {
+            mode,
+            to,
+            file,
+            model,
+            timeout_ms,
+            save_diff,
+            no_save_diff,
+            json,
+        } => cmd_rewrite(
+            mode,
+            to,
+            file,
+            model,
+            timeout_ms,
+            save_diff,
+            no_save_diff,
+            json,
+        ),
         Commands::McpServer { index_dir } => {
             let idx_dir = index_dir.unwrap_or_else(default_index_dir);
             let rt = tokio::runtime::Builder::new_current_thread()

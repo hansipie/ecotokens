@@ -116,8 +116,49 @@ impl PostHookOutput {
     }
 }
 
+/// Extract the text of a Codex Bash `tool_response`.
+///
+/// `stderr` is included, not just `stdout`: it is the only path by which the
+/// Codex hook feeds output into `run_filter_pipeline_with_cwd`, which is in turn
+/// the only place masking runs for that agent. A secret that surfaces solely on
+/// stderr — `curl -v` echoing an `Authorization` header, a tool printing an API
+/// key in an error — would otherwise never enter the pipeline at all, and so
+/// never be redacted.
+pub fn codex_bash_output_text(tool_response: &serde_json::Value) -> String {
+    if let Some(s) = tool_response.as_str() {
+        return s.to_string();
+    }
+    let field = |name: &str| {
+        tool_response
+            .get(name)
+            .and_then(|v| v.as_str())
+            .unwrap_or("")
+    };
+
+    let stdout = match field("output") {
+        "" => field("stdout"),
+        s => s,
+    };
+    let stderr = field("stderr");
+
+    match (stdout.is_empty(), stderr.is_empty()) {
+        (true, true) => String::new(),
+        (false, true) => stdout.to_string(),
+        (true, false) => stderr.to_string(),
+        (false, false) if stdout.ends_with('\n') => format!("{stdout}{stderr}"),
+        (false, false) => format!("{stdout}\n{stderr}"),
+    }
+}
+
 /// Route a PostToolUse input to the appropriate handler.
 /// Returns (PostFilterResult, CommandFamily) for metrics recording.
+///
+/// Every tool payload is passed through `masking::mask` before reaching a
+/// handler, mirroring `filter::run_filter_pipeline_with_cwd` on the Bash path.
+/// This is the single choke point for native Read/Grep/Glob: it keeps secrets
+/// out of the context ecotokens injects, out of the interception rows persisted
+/// by `record_post_metrics`, and — for Gemini, whose `deny` + `reason` replaces
+/// the tool result outright — out of the model's context entirely.
 pub fn handle_post_input(input: &PostHookInput, depth: u32) -> (PostFilterResult, CommandFamily) {
     match input.tool_name.as_str() {
         "Read" => {
@@ -137,9 +178,10 @@ pub fn handle_post_input(input: &PostHookInput, depth: u32) -> (PostFilterResult
                 // Flat format: { "content": "..." }
                 .or_else(|| input.tool_response.get("content").and_then(|v| v.as_str()))
                 .unwrap_or("");
+            let (content, _) = crate::masking::mask(content);
             let result = handle_read(
                 file_path,
-                content,
+                &content,
                 depth,
                 input.cwd.as_deref().map(std::path::Path::new),
             );
@@ -151,11 +193,13 @@ pub fn handle_post_input(input: &PostHookInput, depth: u32) -> (PostFilterResult
                 .get("output")
                 .and_then(|v| v.as_str())
                 .unwrap_or("");
-            let result = handle_grep(grep_output, depth);
+            let (grep_output, _) = crate::masking::mask(grep_output);
+            let result = handle_grep(&grep_output, depth);
             (result, CommandFamily::Grep)
         }
         "Glob" => {
             let filenames = format_glob_output(&input.tool_response);
+            let (filenames, _) = crate::masking::mask(&filenames);
             let result = handle_glob(&filenames);
             (result, CommandFamily::Fs)
         }
@@ -227,6 +271,7 @@ fn record_post_metrics(
     tokens_after: u32,
     content_before: &str,
     final_output: &str,
+    hook_type: HookType,
 ) {
     let mode = if tokens_after < tokens_before {
         FilterMode::Filtered
@@ -245,7 +290,7 @@ fn record_post_metrics(
         Some(content_before.to_string()),
         Some(final_output.to_string()),
     )
-    .with_hook_type(HookType::PostToolUse);
+    .with_hook_type(hook_type);
     if let Some(path) = crate::metrics::store::metrics_path() {
         let _ = crate::metrics::store::append_to(&path, &interception);
     }
@@ -256,6 +301,7 @@ fn process_filter_result(
     input: &PostHookInput,
     family: CommandFamily,
     settings: &Settings,
+    hook_type: HookType,
 ) -> Option<String> {
     match result {
         PostFilterResult::Filtered {
@@ -282,6 +328,7 @@ fn process_filter_result(
                 final_tokens_after,
                 &content_before,
                 &final_output,
+                hook_type,
             );
             Some(final_output)
         }
@@ -290,6 +337,7 @@ fn process_filter_result(
 }
 
 fn run_post_handler<T: Serialize>(
+    hook_type: HookType,
     normalize: Option<fn(&str) -> &str>,
     make_output: impl Fn(Option<String>) -> T,
     fallback: impl Fn(),
@@ -320,7 +368,9 @@ fn run_post_handler<T: Serialize>(
     );
 
     let (result, family) = handle_post_input(&input, depth);
-    let output = make_output(process_filter_result(result, &input, family, &settings));
+    let output = make_output(process_filter_result(
+        result, &input, family, &settings, hook_type,
+    ));
 
     match serde_json::to_string(&output) {
         Ok(json) => {
@@ -340,6 +390,7 @@ fn run_post_handler<T: Serialize>(
 /// Gemini uses `decision: "deny"` + `reason` to substitute the tool result.
 pub fn handle_post_gemini() {
     run_post_handler(
+        HookType::GeminiPostToolUse,
         Some(normalize_gemini_tool_name),
         |o| o.map_or_else(GeminiAfterToolOutput::allow, GeminiAfterToolOutput::deny),
         || {
@@ -354,16 +405,69 @@ pub fn handle_post_gemini() {
 /// Qwen's PostToolUse uses the same additionalContext mechanism as Claude Code.
 pub fn handle_post_qwen() {
     run_post_handler(
+        HookType::QwenPostToolUse,
         Some(normalize_qwen_tool_name),
         |o| o.map_or_else(PostHookOutput::passthrough, PostHookOutput::with_context),
         || print!("{{}}"),
     );
 }
 
-pub fn handle_post() {
+pub fn handle_post(hook_type: HookType) {
     run_post_handler(
+        hook_type,
         None,
         |o| o.map_or_else(PostHookOutput::passthrough, PostHookOutput::with_context),
         || print!("{{}}"),
     );
+}
+
+/// PostToolUse handler for Codex — filters Bash tool output and injects it as additionalContext.
+/// Codex has no native Read/Grep/Glob tools; all shell work goes through the Bash tool.
+/// Pre-tool already rewrites most commands; this acts as a fallback for excluded commands.
+pub fn handle_post_codex() {
+    let input = match read_post_input() {
+        Some(i) => i,
+        None => {
+            print!("{{}}");
+            return;
+        }
+    };
+
+    if input.tool_name != "Bash" {
+        print!("{{}}");
+        return;
+    }
+
+    let command = input
+        .tool_input
+        .get("command")
+        .and_then(|v| v.as_str())
+        .unwrap_or("")
+        .to_string();
+
+    let output_text = codex_bash_output_text(&input.tool_response);
+    if output_text.is_empty() {
+        print!("{{}}");
+        return;
+    }
+
+    let cwd = input.cwd.as_deref().map(std::path::Path::new);
+    let (filtered, tokens_before, tokens_after) = crate::filter::run_filter_pipeline_with_cwd(
+        &command,
+        &output_text,
+        0,
+        cwd,
+        HookType::CodexPostToolUse,
+    );
+
+    let out = if tokens_after < tokens_before {
+        PostHookOutput::with_context(filtered)
+    } else {
+        PostHookOutput::passthrough()
+    };
+
+    match serde_json::to_string(&out) {
+        Ok(s) => print!("{s}"),
+        Err(_) => print!("{{}}"),
+    }
 }

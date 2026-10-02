@@ -6,16 +6,17 @@ const WARNING_THRESHOLD: usize = 10;
 
 /// Filter cargo command output.
 pub fn filter_cargo(command: &str, output: &str) -> String {
-    let cmd = command.trim().to_lowercase();
+    let lower = command.trim().to_lowercase();
+    let mut tokens = lower.split_whitespace();
+    tokens.next(); // program (already classified as cargo, may be an absolute path)
+                   // Skip an optional toolchain override like `+nightly` / `+stable`.
+    let sub = tokens.find(|t| !t.starts_with('+')).unwrap_or("");
 
-    if cmd.starts_with("cargo build") || cmd.starts_with("cargo check") {
-        filter_cargo_build(output)
-    } else if cmd.starts_with("cargo clippy") {
-        filter_cargo_clippy(output)
-    } else if cmd.starts_with("cargo test") {
-        filter_cargo_test(output)
-    } else {
-        filter_generic(output, 500, 51200)
+    match sub {
+        "build" | "check" => filter_cargo_build(output),
+        "clippy" => filter_cargo_clippy(output),
+        "test" => filter_cargo_test(output),
+        _ => filter_generic(output, 500, 51200),
     }
 }
 
@@ -206,18 +207,21 @@ fn filter_cargo_test(output: &str) -> String {
             has_failures = true;
         } else if line.contains("test result:") {
             result.push(*line);
+            // "test result:" ends this suite's failures section; without this
+            // reset, passing test names from later suites would be captured.
+            in_failures_section = false;
         } else if *line == "failures:" || line.starts_with("failures:") {
             in_failures_section = true;
             result.push(*line);
         } else if in_failures_section {
             // Keep everything in failures section (stack traces, panic messages, etc.)
             result.push(*line);
-            // End of failures section: blank line followed by "test result:"
-            if line.trim().is_empty() {
-                // Peek ahead — we'll handle this by just continuing
+        } else {
+            // Only real compiler/test error lines, not prose like "no error found".
+            let lt = line.trim_start();
+            if lt.starts_with("error[") || lt.starts_with("error:") {
+                result.push(*line);
             }
-        } else if line.to_lowercase().contains("error") && !line.starts_with("   Compiling") {
-            result.push(*line);
         }
     }
 

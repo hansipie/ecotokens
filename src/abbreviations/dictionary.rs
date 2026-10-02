@@ -60,6 +60,10 @@ pub fn merged_pairs(custom: &HashMap<String, String>) -> Vec<(String, String)> {
         map.insert(k.to_lowercase(), v.clone());
     }
     let mut out: Vec<(String, String)> = map.into_iter().collect();
+    // Longest key first. This ordering is REQUIRED: `compile_rules` applies the
+    // rules in this order with `replace_all`, so a shorter key must never run
+    // before a longer key that contains it, or it would corrupt the longer key's
+    // match sites. Any future reordering must preserve longest-first.
     out.sort_by(|a, b| b.0.len().cmp(&a.0.len()).then_with(|| a.0.cmp(&b.0)));
     out
 }

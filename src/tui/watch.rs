@@ -98,11 +98,14 @@ pub fn render_indexing(frame: &mut Frame, area: Rect, done: u64, total: u64, log
             .style(Style::default().fg(Color::DarkGray));
         frame.render_widget(placeholder, log_area);
     } else {
+        // Inner height after the block borders. When it is 0 we take 0 items
+        // rather than forcing one line into a zero-height area (which renders
+        // nothing anyway).
         let visible = log_area.height.saturating_sub(2) as usize;
         let items: Vec<ListItem> = logs
             .iter()
             .rev()
-            .take(visible.max(1))
+            .take(visible)
             .rev()
             .map(|msg| {
                 let color = if msg.contains("warning") || msg.contains("Skipping") {

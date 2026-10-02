@@ -9,7 +9,7 @@ pub fn mask(text: &str) -> (String, bool) {
     // ── Cloud ────────────────────────────────────────────────────────────────
 
     // AWS Access Key ID (AKIA, ASIA, ABIA, ACCA, A3T…)
-    let re_aws = regex!(r"(?:A3T[A-Z0-9]|AKIA|ASIA|ABIA|ACCA)[A-Z2-7]{16}");
+    let re_aws = regex!(r"(?:A3T[A-Z0-9]|AKIA|ASIA|ABIA|ACCA)[A-Z0-9]{16}");
     if re_aws.is_match(&out) {
         out = re_aws.replace_all(&out, "[AWS_KEY]").into_owned();
         redacted = true;
@@ -23,7 +23,7 @@ pub fn mask(text: &str) -> (String, bool) {
     }
 
     // Azure AD Client Secret
-    let re_azure = regex!(r"[a-zA-Z0-9_~.]{3}\dQ~[a-zA-Z0-9_~.\-]{31,34}");
+    let re_azure = regex!(r"[a-zA-Z0-9_~.]{3}[a-zA-Z0-9]Q~[a-zA-Z0-9_~.\-]{31,34}");
     if re_azure.is_match(&out) {
         out = re_azure.replace_all(&out, "[AZURE_SECRET]").into_owned();
         redacted = true;
@@ -50,7 +50,7 @@ pub fn mask(text: &str) -> (String, bool) {
     // ── AI APIs ──────────────────────────────────────────────────────────────
 
     // Anthropic API Key
-    let re_anthropic = regex!(r"sk-ant-api03-[a-zA-Z0-9_\-]{93}AA");
+    let re_anthropic = regex!(r"sk-ant-api03-[a-zA-Z0-9_\-]{95}");
     if re_anthropic.is_match(&out) {
         out = re_anthropic
             .replace_all(&out, "[ANTHROPIC_KEY]")
@@ -59,7 +59,7 @@ pub fn mask(text: &str) -> (String, bool) {
     }
 
     // Anthropic Admin API Key
-    let re_anthropic_admin = regex!(r"sk-ant-admin01-[a-zA-Z0-9_\-]{93}AA");
+    let re_anthropic_admin = regex!(r"sk-ant-admin01-[a-zA-Z0-9_\-]{95}");
     if re_anthropic_admin.is_match(&out) {
         out = re_anthropic_admin
             .replace_all(&out, "[ANTHROPIC_KEY]")
@@ -77,7 +77,7 @@ pub fn mask(text: &str) -> (String, bool) {
     }
 
     // HuggingFace Access Token
-    let re_hf = regex!(r"hf_[a-zA-Z0-9_]{34}");
+    let re_hf = regex!(r"hf_[a-zA-Z0-9_]{34,}");
     if re_hf.is_match(&out) {
         out = re_hf.replace_all(&out, "[HF_TOKEN]").into_owned();
         redacted = true;
@@ -151,7 +151,7 @@ pub fn mask(text: &str) -> (String, bool) {
     }
 
     // Twilio API Key
-    let re_twilio = regex!(r"SK[0-9a-fA-F]{32}");
+    let re_twilio = regex!(r"\bSK[0-9a-fA-F]{32}\b");
     if re_twilio.is_match(&out) {
         out = re_twilio.replace_all(&out, "[TWILIO_KEY]").into_owned();
         redacted = true;
@@ -289,7 +289,7 @@ pub fn mask(text: &str) -> (String, bool) {
     // ── Generic ──────────────────────────────────────────────────────────────
 
     // Bearer token
-    let re_bearer = regex!(r"(?i)Bearer\s+[A-Za-z0-9\-._~+/]+=*");
+    let re_bearer = regex!(r"(?i)Bearer\s+[A-Za-z0-9\-._~+/=]+");
     if re_bearer.is_match(&out) {
         out = re_bearer.replace_all(&out, "[BEARER_TOKEN]").into_owned();
         redacted = true;
@@ -304,7 +304,8 @@ pub fn mask(text: &str) -> (String, bool) {
     }
 
     // .env secrets: NAME=value where NAME hints at a secret
-    let re_env = regex!(r"(?i)(SECRET|PASSWORD|API_KEY|PASSWD|TOKEN|PRIVATE_KEY|AUTH)=[^\s\n]+");
+    let re_env =
+        regex!(r"(?i)(SECRET|PASSWORD|API_KEY|PASSWD|TOKEN|PRIVATE_KEY|AUTH)\s*=\s*[^\s\n]+");
     if re_env.is_match(&out) {
         out = re_env.replace_all(&out, "[REDACTED]").into_owned();
         redacted = true;

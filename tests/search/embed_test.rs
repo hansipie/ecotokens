@@ -21,6 +21,21 @@ fn test_legacy_provider_falls_back_to_none() {
     );
 }
 
+// ── Tests Ollama provider ──────────────────────────────────────────────────────
+
+#[test]
+fn test_ollama_provider_unreachable_returns_none() {
+    let provider = EmbedProvider::Ollama {
+        url: "http://127.0.0.1:19999".to_string(),
+        model: "qwen3-embedding:latest".to_string(),
+    };
+    let result = embed_text("hello", &provider);
+    assert!(
+        result.is_none(),
+        "Ollama injoignable doit retourner None (fallback BM25)"
+    );
+}
+
 // ── Tests cosine_similarity ────────────────────────────────────────────────────
 
 #[test]

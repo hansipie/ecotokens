@@ -10,13 +10,16 @@ mod exact {
     use std::sync::OnceLock;
     use tiktoken_rs::CoreBPE;
 
-    static BPE: OnceLock<CoreBPE> = OnceLock::new();
+    static BPE: OnceLock<Option<CoreBPE>> = OnceLock::new();
 
     pub fn count_tokens(text: &str) -> usize {
-        let bpe = BPE.get_or_init(|| {
-            tiktoken_rs::cl100k_base().expect("failed to load cl100k_base tokenizer")
-        });
-        bpe.encode_with_special_tokens(text).len()
+        match BPE.get_or_init(|| tiktoken_rs::cl100k_base().ok()) {
+            Some(bpe) => bpe.encode_with_special_tokens(text).len(),
+            // If the tokenizer fails to load, fall back to the character
+            // heuristic instead of `expect()` — a panic here would also poison
+            // the static and make every subsequent call panic.
+            None => super::estimate_tokens(text),
+        }
     }
 }
 

@@ -15,30 +15,41 @@ const GEMINI_POST_HOOK_MATCHER: &str = "read_file|search_file_content|list_direc
 const QWEN_POST_HOOK_COMMAND: &str = "ecotokens hook-post-qwen";
 const QWEN_POST_HOOK_MATCHER: &str = "read_file|search_files|list_dir";
 
-fn read_settings(path: &Path) -> serde_json::Value {
+/// Read a settings file, returning an error when the existing file contains
+/// invalid JSON. Used on the write path so we never overwrite (and thereby
+/// destroy) a user's settings that we merely failed to parse.
+fn read_settings_checked(path: &Path) -> std::io::Result<serde_json::Value> {
     if path.exists() {
-        let s = std::fs::read_to_string(path).unwrap_or_default();
-        match serde_json::from_str(&s) {
-            Ok(v) => v,
-            Err(e) => {
-                eprintln!(
-                    "ecotokens: warning: {} contains invalid JSON, ignoring: {}",
-                    path.display(),
-                    e
-                );
-                serde_json::json!({})
-            }
+        let s = std::fs::read_to_string(path)?;
+        if s.trim().is_empty() {
+            return Ok(serde_json::json!({}));
         }
+        serde_json::from_str(&s).map_err(|e| {
+            std::io::Error::new(
+                std::io::ErrorKind::InvalidData,
+                format!(
+                    "{} contains invalid JSON; refusing to overwrite it: {e}",
+                    path.display()
+                ),
+            )
+        })
     } else {
-        serde_json::json!({})
+        Ok(serde_json::json!({}))
     }
 }
 
+/// Read a settings file for read-only inspection. Invalid JSON is treated as an
+/// empty object (a corrupt file simply reads as "nothing installed"); callers
+/// that go on to *write* the file must use [`read_settings_checked`] instead.
+fn read_settings(path: &Path) -> serde_json::Value {
+    read_settings_checked(path).unwrap_or_else(|e| {
+        eprintln!("ecotokens: warning: {}, ignoring", e);
+        serde_json::json!({})
+    })
+}
+
 fn write_settings(path: &Path, v: &serde_json::Value) -> InstallResult {
-    if let Some(parent) = path.parent() {
-        std::fs::create_dir_all(parent)?;
-    }
-    std::fs::write(
+    crate::config::atomic_write(
         path,
         serde_json::to_string_pretty(v).expect("serde_json: impossible (non-string key)"),
     )
@@ -155,7 +166,7 @@ pub fn install_mcp_server(settings_path: &Path) -> InstallResult {
         .unwrap_or_else(|_| std::path::PathBuf::from("ecotokens"))
         .to_string_lossy()
         .into_owned();
-    let mut v = read_settings(settings_path);
+    let mut v = read_settings_checked(settings_path)?;
     if !has_ecotokens_mcp_server(&v) {
         v["mcpServers"]["ecotokens"] = serde_json::json!({
             "command": binary,
@@ -168,14 +179,14 @@ pub fn install_mcp_server(settings_path: &Path) -> InstallResult {
 /// Install the PreToolUse hook into ~/.claude/settings.json (idempotent).
 pub fn install_hook(settings_path: &Path, claude_json_path: &Path) -> InstallResult {
     let _ = claude_json_path; // kept for signature compatibility with uninstall callers
-    let mut v = read_settings(settings_path);
+    let mut v = read_settings_checked(settings_path)?;
     let _ = install_hook_generic(&mut v, "PreToolUse", HOOK_MATCHER, HOOK_COMMAND);
     write_settings(settings_path, &v)
 }
 
 /// Install the PostToolUse hook for Read/Grep/Glob into settings.json (idempotent).
 pub fn install_post_hook(settings_path: &Path) -> InstallResult {
-    let mut v = read_settings(settings_path);
+    let mut v = read_settings_checked(settings_path)?;
     let _ = install_hook_generic(&mut v, "PostToolUse", POST_HOOK_MATCHER, POST_HOOK_COMMAND);
     write_settings(settings_path, &v)
 }
@@ -203,18 +214,19 @@ pub fn is_mcp_registered(claude_json_path: &Path) -> bool {
 /// Also cleans up ~/.claude.json for backward compatibility with older installs.
 pub fn uninstall_hook(settings_path: &Path, claude_json_path: &Path) -> InstallResult {
     if settings_path.exists() {
-        let mut v = read_settings(settings_path);
+        let mut v = read_settings_checked(settings_path)?;
         remove_hook_generic(&mut v, "PreToolUse", HOOK_COMMAND);
         remove_hook_generic(&mut v, "PostToolUse", POST_HOOK_COMMAND);
         remove_hook_generic(&mut v, "SessionStart", SESSION_START_COMMAND);
         remove_hook_generic(&mut v, "SessionEnd", SESSION_END_COMMAND);
+        remove_prompt_hook_entry(&mut v);
         remove_ecotokens_mcp_server(&mut v);
         write_settings(settings_path, &v)?;
     }
 
     // Rétrocompatibilité : anciennes installs où le MCP était dans ~/.claude.json
     if claude_json_path.exists() {
-        let mut cv = read_settings(claude_json_path);
+        let mut cv = read_settings_checked(claude_json_path)?;
         if remove_ecotokens_mcp_server(&mut cv) {
             write_settings(claude_json_path, &cv)?;
         }
@@ -232,7 +244,7 @@ const SESSION_END_COMMAND: &str = "ecotokens session-end";
 
 /// Install SessionStart and SessionEnd hooks in ~/.claude/settings.json (idempotent).
 pub fn install_session_hooks(settings_path: &Path) -> InstallResult {
-    let mut v = read_settings(settings_path);
+    let mut v = read_settings_checked(settings_path)?;
     let _ = install_hook_generic(&mut v, "SessionStart", "", SESSION_START_COMMAND);
     let _ = install_hook_generic(&mut v, "SessionEnd", "", SESSION_END_COMMAND);
     write_settings(settings_path, &v)
@@ -250,10 +262,80 @@ pub fn uninstall_session_hooks(settings_path: &Path) -> InstallResult {
     if !settings_path.exists() {
         return Ok(());
     }
-    let mut v = read_settings(settings_path);
+    let mut v = read_settings_checked(settings_path)?;
     remove_hook_generic(&mut v, "SessionStart", SESSION_START_COMMAND);
     remove_hook_generic(&mut v, "SessionEnd", SESSION_END_COMMAND);
     write_settings(settings_path, &v)
+}
+
+// ============================================================================
+// Claude Code UserPromptSubmit hook (model router, `ecotokens router on|off`)
+// ============================================================================
+
+const PROMPT_HOOK_COMMAND: &str = "ecotokens hook-prompt";
+
+/// Install the UserPromptSubmit hook (idempotent). `timeout_secs` is Claude
+/// Code's hard stop, on top of the router's own Jev timeout, so a stuck hook
+/// can never hold a message back for long. An existing entry is replaced so
+/// the timeout follows the setting. No matcher: the event has none.
+pub fn install_prompt_hook(settings_path: &Path, timeout_secs: u64) -> InstallResult {
+    let mut v = read_settings_checked(settings_path)?;
+    remove_hook_generic(&mut v, "UserPromptSubmit", PROMPT_HOOK_COMMAND);
+    let mut hooks = v["hooks"]["UserPromptSubmit"]
+        .as_array()
+        .cloned()
+        .unwrap_or_default();
+    hooks.push(serde_json::json!({
+        "hooks": [{
+            "type": "command",
+            "command": PROMPT_HOOK_COMMAND,
+            "timeout": timeout_secs
+        }]
+    }));
+    v["hooks"]["UserPromptSubmit"] = serde_json::Value::Array(hooks);
+    write_settings(settings_path, &v)
+}
+
+pub fn is_prompt_hook_installed(settings_path: &Path) -> bool {
+    has_hook_command(
+        &read_settings(settings_path),
+        "UserPromptSubmit",
+        PROMPT_HOOK_COMMAND,
+    )
+}
+
+/// Removes our entry, and the event key itself when nothing else is left.
+fn remove_prompt_hook_entry(v: &mut serde_json::Value) -> bool {
+    if v["hooks"]["UserPromptSubmit"].is_null() {
+        return false;
+    }
+    let changed = remove_hook_generic(v, "UserPromptSubmit", PROMPT_HOOK_COMMAND);
+    let empty = v["hooks"]["UserPromptSubmit"]
+        .as_array()
+        .is_some_and(|a| a.is_empty());
+    if empty {
+        if let Some(hooks) = v["hooks"].as_object_mut() {
+            hooks.remove("UserPromptSubmit");
+        }
+    }
+    changed
+}
+
+/// Remove the UserPromptSubmit hook (idempotent, keeps third-party entries).
+pub fn uninstall_prompt_hook(settings_path: &Path) -> InstallResult {
+    if !settings_path.exists() {
+        return Ok(());
+    }
+    let mut v = read_settings_checked(settings_path)?;
+    if remove_prompt_hook_entry(&mut v) {
+        write_settings(settings_path, &v)?;
+    }
+    Ok(())
+}
+
+/// Get the default Claude Code settings path: ~/.claude/settings.json
+pub fn default_claude_settings_path() -> Option<std::path::PathBuf> {
+    dirs::home_dir().map(|d| d.join(".claude").join("settings.json"))
 }
 
 // ============================================================================
@@ -267,7 +349,7 @@ pub fn default_gemini_settings_path() -> Option<std::path::PathBuf> {
 
 /// Install the BeforeTool hook into ~/.gemini/settings.json (idempotent).
 pub fn install_gemini_hook(settings_path: &Path) -> InstallResult {
-    let mut v = read_settings(settings_path);
+    let mut v = read_settings_checked(settings_path)?;
     let _ = install_hook_generic(
         &mut v,
         "BeforeTool",
@@ -293,7 +375,7 @@ pub fn is_gemini_mcp_registered(settings_path: &Path) -> bool {
 
 /// Install the AfterTool post-hook for read_file/search_file_content/list_directory (idempotent).
 pub fn install_gemini_post_hook(settings_path: &Path) -> InstallResult {
-    let mut v = read_settings(settings_path);
+    let mut v = read_settings_checked(settings_path)?;
     let _ = install_hook_generic(
         &mut v,
         "AfterTool",
@@ -317,7 +399,7 @@ pub fn uninstall_gemini(settings_path: &Path) -> InstallResult {
     if !settings_path.exists() {
         return Ok(());
     }
-    let mut v = read_settings(settings_path);
+    let mut v = read_settings_checked(settings_path)?;
     remove_hook_generic(&mut v, "BeforeTool", GEMINI_HOOK_COMMAND);
     remove_hook_generic(&mut v, "AfterTool", GEMINI_POST_HOOK_COMMAND);
     remove_ecotokens_mcp_server(&mut v);
@@ -335,7 +417,7 @@ pub fn default_qwen_settings_path() -> Option<std::path::PathBuf> {
 
 /// Install the PreToolUse hook into ~/.qwen/settings.json (idempotent).
 pub fn install_qwen_hook(settings_path: &Path) -> InstallResult {
-    let mut v = read_settings(settings_path);
+    let mut v = read_settings_checked(settings_path)?;
     let _ = install_hook_generic(&mut v, "PreToolUse", "run_shell_command", QWEN_HOOK_COMMAND);
     write_settings(settings_path, &v)
 }
@@ -356,7 +438,7 @@ pub fn is_qwen_mcp_registered(settings_path: &Path) -> bool {
 
 /// Install the PostToolUse post-hook for read_file/search_files/list_dir (idempotent).
 pub fn install_qwen_post_hook(settings_path: &Path) -> InstallResult {
-    let mut v = read_settings(settings_path);
+    let mut v = read_settings_checked(settings_path)?;
     let _ = install_hook_generic(
         &mut v,
         "PostToolUse",
@@ -380,11 +462,483 @@ pub fn uninstall_qwen(settings_path: &Path) -> InstallResult {
     if !settings_path.exists() {
         return Ok(());
     }
-    let mut v = read_settings(settings_path);
+    let mut v = read_settings_checked(settings_path)?;
     remove_hook_generic(&mut v, "PreToolUse", QWEN_HOOK_COMMAND);
     remove_hook_generic(&mut v, "PostToolUse", QWEN_POST_HOOK_COMMAND);
     remove_ecotokens_mcp_server(&mut v);
     write_settings(settings_path, &v)
+}
+
+// ============================================================================
+// Hermes Agent Support (user plugin in ~/.hermes/plugins/ecotokens/)
+// ============================================================================
+
+const HERMES_PLUGIN_MANIFEST: &str = r#"name: ecotokens
+version: "0.1.0"
+description: "Compress Hermes Agent tool outputs with ecotokens before they enter model context"
+author: "ecotokens"
+kind: standalone
+provides_hooks:
+  - transform_terminal_output
+  - transform_tool_result
+  - on_session_start
+  - on_session_end
+"#;
+
+fn hermes_plugin_init_content(binary: &str) -> String {
+    format!(
+        r#"# Hermes Agent plugin generated by ecotokens.
+# The plugin is intentionally fail-open: if ecotokens is missing, slow, or
+# returns an error, Hermes receives the original tool output.
+
+from __future__ import annotations
+
+import os
+import subprocess
+from typing import Any
+
+ECOTOKENS_BIN = os.environ.get("ECOTOKENS_BIN", {binary:?})
+MIN_CHARS = int(os.environ.get("ECOTOKENS_HERMES_MIN_CHARS", "2000"))
+TIMEOUT_SECONDS = float(os.environ.get("ECOTOKENS_HERMES_TIMEOUT", "10"))
+
+
+def _should_filter(text: Any) -> bool:
+    return isinstance(text, str) and len(text) >= MIN_CHARS
+
+
+def _filter_existing_output(command: str, output: str, exit_code: int = 0, cwd: str | None = None, hook_type: str = "transform-terminal-output") -> str | None:
+    if not _should_filter(output):
+        return None
+    args = [
+        ECOTOKENS_BIN,
+        "filter-output",
+        "--command",
+        command or "hermes-tool",
+        "--exit-code",
+        str(exit_code),
+        "--hook-type",
+        hook_type,
+    ]
+    if cwd:
+        args.extend(["--cwd", cwd])
+    try:
+        completed = subprocess.run(
+            args,
+            input=output,
+            text=True,
+            capture_output=True,
+            timeout=TIMEOUT_SECONDS,
+            check=False,
+        )
+    except Exception:
+        return None
+
+    if completed.returncode != 0:
+        return None
+    if not completed.stdout:
+        return None
+    return completed.stdout
+
+
+def transform_terminal_output(command: str = "", output: str = "", exit_code: int = 0, cwd: str | None = None, **_: Any) -> str | None:
+    first_token = (command.split() or [""])[0]
+    if first_token in (ECOTOKENS_BIN, "ecotokens"):
+        return None
+    return _filter_existing_output(command, output, exit_code, cwd, "transform-terminal-output")
+
+
+def transform_tool_result(tool_name: str = "", result: str = "", cwd: str | None = None, **_: Any) -> str | None:
+    # The terminal tool has a more precise hook above that sees raw stdout
+    # before Hermes builds its JSON wrapper. Avoid double filtering it here.
+    if tool_name == "terminal":
+        return None
+    return _filter_existing_output(f"hermes-tool:{{tool_name}}", result, 0, cwd, "transform-tool-result")
+
+
+def on_session_start(session_id: str = "", model: str = "", platform: str = "", **_: Any) -> None:
+    # Start ecotokens watch in background if auto-watch is enabled in config.
+    # Fail-open: any error is silently ignored so Hermes is never blocked.
+    try:
+        import subprocess as _sp
+        _sp.Popen(
+            [ECOTOKENS_BIN, "session-start"],
+            stdout=_sp.DEVNULL,
+            stderr=_sp.DEVNULL,
+            close_fds=True,
+        )
+    except Exception:
+        pass
+
+
+def on_session_end(session_id: str = "", completed: bool = False, interrupted: bool = False, model: str = "", platform: str = "", **_: Any) -> None:
+    # Stop the background watcher started by on_session_start.
+    # Use a short timeout so Hermes can exit even if ecotokens hangs.
+    try:
+        import subprocess as _sp
+        _sp.run(
+            [ECOTOKENS_BIN, "session-end"],
+            stdout=_sp.DEVNULL,
+            stderr=_sp.DEVNULL,
+            timeout=5,
+            check=False,
+        )
+    except Exception:
+        pass
+
+
+def register(ctx):
+    ctx.register_hook("transform_terminal_output", transform_terminal_output)
+    ctx.register_hook("transform_tool_result", transform_tool_result)
+    ctx.register_hook("on_session_start", on_session_start)
+    ctx.register_hook("on_session_end", on_session_end)
+"#
+    )
+}
+
+/// Get the default Hermes Agent plugin directory: ~/.hermes/plugins/ecotokens
+pub fn default_hermes_plugin_dir() -> Option<std::path::PathBuf> {
+    std::env::var_os("HERMES_HOME")
+        .map(std::path::PathBuf::from)
+        .or_else(|| dirs::home_dir().map(|d| d.join(".hermes")))
+        .map(|d| d.join("plugins").join("ecotokens"))
+}
+
+/// Get the default Hermes Agent config file: ~/.hermes/config.yaml
+pub fn default_hermes_config_path() -> Option<std::path::PathBuf> {
+    std::env::var_os("HERMES_HOME")
+        .map(std::path::PathBuf::from)
+        .or_else(|| dirs::home_dir().map(|d| d.join(".hermes")))
+        .map(|d| d.join("config.yaml"))
+}
+
+/// Add `plugin` to the `plugins.enabled` list in YAML content.
+/// Preserves all existing content and indentation. Idempotent.
+fn yaml_add_to_plugins_enabled(content: &str, plugin: &str) -> String {
+    let plugin_item = format!("- {}", plugin);
+
+    let mut lines: Vec<String> = content.lines().map(|l| l.to_string()).collect();
+
+    // Locate the top-level `plugins:` key.
+    let plugins_idx = lines.iter().position(|l| {
+        let t = l.trim();
+        t == "plugins:" || t.starts_with("plugins: ")
+    });
+
+    if let Some(pi) = plugins_idx {
+        // Look for `  enabled:` inside the plugins block.
+        let enabled_rel = lines[pi + 1..].iter().position(|l| {
+            l.starts_with("  ") && {
+                let t = l.trim();
+                t == "enabled:" || t.starts_with("enabled:") && t.contains(':')
+            }
+        });
+
+        if let Some(ei_rel) = enabled_rel {
+            let ei = pi + 1 + ei_rel;
+            // Skip existing list items to find the insertion point.
+            let skip = lines[ei + 1..]
+                .iter()
+                .take_while(|l| l.starts_with("    -"))
+                .count();
+            // Already present *within the enabled list* — no-op. Scoping the
+            // check here means a `- ecotokens` entry in a `disabled:` list or a
+            // comment does not suppress insertion into `plugins.enabled`.
+            if lines[ei + 1..ei + 1 + skip]
+                .iter()
+                .any(|l| l.trim() == plugin_item)
+            {
+                return content.to_string();
+            }
+            lines.insert(ei + 1 + skip, format!("    - {}", plugin));
+        } else {
+            // `plugins:` exists but has no `enabled:` key — add it.
+            lines.insert(pi + 1, "  enabled:".to_string());
+            lines.insert(pi + 2, format!("    - {}", plugin));
+        }
+    } else {
+        // No `plugins:` section at all — append one.
+        if !lines.is_empty() && !lines.last().map(|l| l.is_empty()).unwrap_or(true) {
+            lines.push(String::new());
+        }
+        lines.push("plugins:".to_string());
+        lines.push("  enabled:".to_string());
+        lines.push(format!("    - {}", plugin));
+    }
+
+    let mut result = lines.join("\n");
+    if content.ends_with('\n') || content.is_empty() {
+        result.push('\n');
+    }
+    result
+}
+
+/// Add `ecotokens` to `plugins.enabled` in the Hermes config file.
+/// Creates the file and any missing structure if needed. Idempotent.
+pub fn enable_hermes_plugin_in_config(config_path: &Path) -> InstallResult {
+    let content = if config_path.exists() {
+        std::fs::read_to_string(config_path)?
+    } else {
+        String::new()
+    };
+    let new_content = yaml_add_to_plugins_enabled(&content, "ecotokens");
+    if new_content == content {
+        return Ok(());
+    }
+    crate::config::atomic_write(config_path, new_content)
+}
+
+/// Return true if `ecotokens` appears in `plugins.enabled` in the Hermes config.
+pub fn is_hermes_plugin_enabled_in_config(config_path: &Path) -> bool {
+    if !config_path.exists() {
+        return false;
+    }
+    std::fs::read_to_string(config_path)
+        .map(|c| c.lines().any(|l| l.trim() == "- ecotokens"))
+        .unwrap_or(false)
+}
+
+/// Install the ecotokens Hermes Agent plugin (idempotent).
+pub fn install_hermes_plugin(plugin_dir: &Path) -> InstallResult {
+    std::fs::create_dir_all(plugin_dir)?;
+    crate::config::atomic_write(&plugin_dir.join("plugin.yaml"), HERMES_PLUGIN_MANIFEST)?;
+    let binary = std::env::current_exe()
+        .unwrap_or_else(|_| std::path::PathBuf::from("ecotokens"))
+        .to_string_lossy()
+        .into_owned();
+    crate::config::atomic_write(
+        &plugin_dir.join("__init__.py"),
+        hermes_plugin_init_content(&binary),
+    )
+}
+
+/// Check if the ecotokens Hermes Agent plugin is installed.
+pub fn is_hermes_plugin_installed(plugin_dir: &Path) -> bool {
+    plugin_dir.join("plugin.yaml").exists() && plugin_dir.join("__init__.py").exists()
+}
+
+/// Remove the ecotokens Hermes Agent plugin directory.
+pub fn uninstall_hermes_plugin(plugin_dir: &Path) -> InstallResult {
+    if plugin_dir.exists() {
+        std::fs::remove_dir_all(plugin_dir)?;
+    }
+    Ok(())
+}
+
+// ============================================================================
+// Codex Support (plugin in ~/.codex/plugins/ecotokens/ + hooks in ~/.codex/hooks.json)
+// ============================================================================
+
+const CODEX_HOOK_COMMAND: &str = "ecotokens hook-codex";
+const CODEX_POST_HOOK_COMMAND: &str = "ecotokens hook-post-codex";
+const CODEX_HOOK_MATCHER: &str = "Bash";
+const CODEX_POST_HOOK_MATCHER: &str = "Bash";
+
+/// Get the default Codex hooks path: ~/.codex/hooks.json
+pub fn default_codex_hooks_path() -> Option<std::path::PathBuf> {
+    std::env::var_os("CODEX_HOME")
+        .map(std::path::PathBuf::from)
+        .or_else(|| dirs::home_dir().map(|d| d.join(".codex")))
+        .map(|d| d.join("hooks.json"))
+}
+
+/// Install the PreToolUse/Bash hook into ~/.codex/hooks.json (idempotent).
+pub fn install_codex_hook(hooks_path: &Path) -> InstallResult {
+    let mut v = read_settings_checked(hooks_path)?;
+    let _ = install_hook_generic(&mut v, "PreToolUse", CODEX_HOOK_MATCHER, CODEX_HOOK_COMMAND);
+    write_settings(hooks_path, &v)
+}
+
+/// Install the PostToolUse/Bash hook into ~/.codex/hooks.json (idempotent).
+pub fn install_codex_post_hook(hooks_path: &Path) -> InstallResult {
+    let mut v = read_settings_checked(hooks_path)?;
+    let _ = install_hook_generic(
+        &mut v,
+        "PostToolUse",
+        CODEX_POST_HOOK_MATCHER,
+        CODEX_POST_HOOK_COMMAND,
+    );
+    write_settings(hooks_path, &v)
+}
+
+/// Check if the ecotokens Codex PreToolUse hook is installed in hooks.json.
+pub fn is_codex_hook_installed(hooks_path: &Path) -> bool {
+    has_hook_command(&read_settings(hooks_path), "PreToolUse", CODEX_HOOK_COMMAND)
+}
+
+/// Check if the ecotokens Codex PostToolUse hook is installed in hooks.json.
+pub fn is_codex_post_hook_installed(hooks_path: &Path) -> bool {
+    has_hook_command(
+        &read_settings(hooks_path),
+        "PostToolUse",
+        CODEX_POST_HOOK_COMMAND,
+    )
+}
+
+/// Remove ecotokens PreToolUse and PostToolUse hooks from ~/.codex/hooks.json.
+pub fn uninstall_codex_hooks(hooks_path: &Path) -> InstallResult {
+    if !hooks_path.exists() {
+        return Ok(());
+    }
+    let mut v = read_settings_checked(hooks_path)?;
+    remove_hook_generic(&mut v, "PreToolUse", CODEX_HOOK_COMMAND);
+    remove_hook_generic(&mut v, "PostToolUse", CODEX_POST_HOOK_COMMAND);
+    write_settings(hooks_path, &v)
+}
+
+// ── Codex MCP server (config.toml) ──────────────────────────────────────────
+
+/// Get the default Codex config path: ~/.codex/config.toml
+pub fn default_codex_config_path() -> Option<std::path::PathBuf> {
+    std::env::var_os("CODEX_HOME")
+        .map(std::path::PathBuf::from)
+        .or_else(|| dirs::home_dir().map(|d| d.join(".codex")))
+        .map(|d| d.join("config.toml"))
+}
+
+fn read_codex_config(path: &Path) -> toml::Value {
+    if path.exists() {
+        let s = std::fs::read_to_string(path).unwrap_or_default();
+        match toml::from_str(&s) {
+            Ok(v) => v,
+            Err(_) => toml::Value::Table(Default::default()),
+        }
+    } else {
+        toml::Value::Table(Default::default())
+    }
+}
+
+fn has_codex_mcp_server_in_config(v: &toml::Value) -> bool {
+    v.get("mcp_servers")
+        .and_then(|s| s.get("ecotokens"))
+        .is_some()
+}
+
+/// Install the ecotokens MCP server entry into ~/.codex/config.toml (idempotent).
+pub fn install_codex_mcp_server(config_path: &Path) -> InstallResult {
+    let binary = std::env::current_exe()
+        .unwrap_or_else(|_| std::path::PathBuf::from("ecotokens"))
+        .to_string_lossy()
+        .into_owned();
+    let mut v = read_codex_config(config_path);
+    if !has_codex_mcp_server_in_config(&v) {
+        let table = v.as_table_mut().expect("toml root is always a table");
+        let mcp_servers = table
+            .entry("mcp_servers")
+            .or_insert_with(|| toml::Value::Table(Default::default()));
+        let servers = mcp_servers
+            .as_table_mut()
+            .expect("mcp_servers is always a table");
+        let mut entry = toml::value::Table::new();
+        entry.insert("command".to_string(), toml::Value::String(binary));
+        entry.insert(
+            "args".to_string(),
+            toml::Value::Array(vec![toml::Value::String("mcp-server".to_string())]),
+        );
+        servers.insert("ecotokens".to_string(), toml::Value::Table(entry));
+    }
+    crate::config::atomic_write(
+        config_path,
+        toml::to_string_pretty(&v).expect("toml serialisation impossible"),
+    )
+}
+
+/// Check if the ecotokens MCP server is registered in ~/.codex/config.toml.
+pub fn is_codex_mcp_registered(config_path: &Path) -> bool {
+    has_codex_mcp_server_in_config(&read_codex_config(config_path))
+}
+
+/// Remove the ecotokens MCP server entry from ~/.codex/config.toml.
+pub fn uninstall_codex_mcp_server(config_path: &Path) -> InstallResult {
+    if !config_path.exists() {
+        return Ok(());
+    }
+    let mut v = read_codex_config(config_path);
+    let changed = if let Some(servers) = v
+        .as_table_mut()
+        .and_then(|t| t.get_mut("mcp_servers"))
+        .and_then(|s| s.as_table_mut())
+    {
+        servers.remove("ecotokens").is_some()
+    } else {
+        false
+    };
+    if changed {
+        crate::config::atomic_write(
+            config_path,
+            toml::to_string_pretty(&v).expect("toml serialisation impossible"),
+        )?;
+    }
+    Ok(())
+}
+
+const CODEX_PLUGIN_MANIFEST: &str = r#"{
+  "name": "ecotokens",
+  "version": "0.1.0",
+  "description": "Keep the ecotokens index warm during Codex sessions.",
+  "author": {
+    "name": "ecotokens"
+  },
+  "license": "MIT",
+  "keywords": [
+    "codex",
+    "watch",
+    "index"
+  ],
+  "interface": {
+    "displayName": "ecotokens",
+    "shortDescription": "Intercepts Codex tool calls for token tracking",
+    "longDescription": "Provides PreToolUse/PostToolUse hooks on Bash so ecotokens can track token usage. Session lifecycle hooks are not installed: Codex exposes SessionStart but has no SessionEnd equivalent, so the auto-watch start/stop cycle cannot be completed.",
+    "developerName": "ecotokens",
+    "category": "Developer Tools",
+    "capabilities": [
+      "Read"
+    ],
+    "defaultPrompt": []
+  }
+}
+"#;
+
+/// Get the default Codex plugin directory: ~/.codex/plugins/ecotokens
+pub fn default_codex_plugin_dir() -> Option<std::path::PathBuf> {
+    std::env::var_os("CODEX_HOME")
+        .map(std::path::PathBuf::from)
+        .or_else(|| dirs::home_dir().map(|d| d.join(".codex")))
+        .map(|d| d.join("plugins").join("ecotokens"))
+}
+
+/// Install the ecotokens Codex plugin (idempotent).
+pub fn install_codex_plugin(plugin_dir: &Path) -> InstallResult {
+    std::fs::create_dir_all(plugin_dir.join(".codex-plugin"))?;
+    crate::config::atomic_write(
+        &plugin_dir.join(".codex-plugin").join("plugin.json"),
+        CODEX_PLUGIN_MANIFEST,
+    )?;
+    // Clean up stale hooks files written by older installs.
+    for stale in &[
+        plugin_dir.join("hooks.json"),
+        plugin_dir.join("hooks").join("hooks.json"),
+    ] {
+        if stale.exists() {
+            let _ = std::fs::remove_file(stale);
+        }
+    }
+    Ok(())
+}
+
+/// Check if the ecotokens Codex plugin is installed.
+pub fn is_codex_plugin_installed(plugin_dir: &Path) -> bool {
+    plugin_dir
+        .join(".codex-plugin")
+        .join("plugin.json")
+        .exists()
+}
+
+/// Remove the ecotokens Codex plugin directory.
+pub fn uninstall_codex_plugin(plugin_dir: &Path) -> InstallResult {
+    if plugin_dir.exists() {
+        std::fs::remove_dir_all(plugin_dir)?;
+    }
+    Ok(())
 }
 
 // ============================================================================
@@ -405,10 +959,7 @@ pub fn default_pi_extension_path() -> Option<std::path::PathBuf> {
 
 /// Install the ecotokens extension for Pi (idempotent).
 pub fn install_pi_extension(extension_path: &Path) -> InstallResult {
-    if let Some(parent) = extension_path.parent() {
-        std::fs::create_dir_all(parent)?;
-    }
-    std::fs::write(extension_path, PI_EXTENSION_CONTENT)
+    crate::config::atomic_write(extension_path, PI_EXTENSION_CONTENT)
 }
 
 /// Check if the ecotokens Pi extension is installed.
@@ -422,4 +973,149 @@ pub fn uninstall_pi(extension_path: &Path) -> InstallResult {
         std::fs::remove_file(extension_path)?;
     }
     Ok(())
+}
+
+// ============================================================================
+// OpenCode Support (plugin TypeScript déposé dans ~/.config/opencode/plugins/)
+// ============================================================================
+
+const OPENCODE_PLUGIN_CONTENT: &str = include_str!("opencode_plugin.ts");
+
+/// Get the default OpenCode plugin path: ~/.config/opencode/plugins/ecotokens.ts
+pub fn default_opencode_plugin_path() -> Option<std::path::PathBuf> {
+    dirs::home_dir().map(|d| {
+        d.join(".config")
+            .join("opencode")
+            .join("plugins")
+            .join("ecotokens.ts")
+    })
+}
+
+/// Install the ecotokens plugin for OpenCode (idempotent).
+pub fn install_opencode_plugin(plugin_path: &Path) -> InstallResult {
+    if let Some(parent) = plugin_path.parent() {
+        std::fs::create_dir_all(parent)?;
+    }
+    crate::config::atomic_write(plugin_path, OPENCODE_PLUGIN_CONTENT)
+}
+
+/// Check if the ecotokens OpenCode plugin is installed.
+pub fn is_opencode_plugin_installed(plugin_path: &Path) -> bool {
+    plugin_path.exists()
+}
+
+/// Remove the ecotokens OpenCode plugin.
+pub fn uninstall_opencode_plugin(plugin_path: &Path) -> InstallResult {
+    if plugin_path.exists() {
+        std::fs::remove_file(plugin_path)?;
+    }
+    Ok(())
+}
+
+// ---------------------------------------------------------------------------
+// Shell completion script (post-install / post-uninstall step)
+// ---------------------------------------------------------------------------
+
+/// Shells for which ecotokens can install a user-level completion script.
+#[derive(Debug, Clone, Copy, PartialEq, Eq)]
+pub enum CompletionShell {
+    Bash,
+    Zsh,
+    Fish,
+}
+
+impl CompletionShell {
+    pub const ALL: [CompletionShell; 3] = [Self::Bash, Self::Zsh, Self::Fish];
+
+    /// Detect the shell from a `$SHELL`-style value (e.g. `/usr/bin/zsh`).
+    pub fn detect(shell_env: Option<&str>) -> Option<Self> {
+        let name = Path::new(shell_env?).file_name()?.to_str()?;
+        match name {
+            "bash" => Some(Self::Bash),
+            "zsh" => Some(Self::Zsh),
+            "fish" => Some(Self::Fish),
+            _ => None,
+        }
+    }
+
+    pub fn name(self) -> &'static str {
+        match self {
+            Self::Bash => "bash",
+            Self::Zsh => "zsh",
+            Self::Fish => "fish",
+        }
+    }
+}
+
+/// Outcome of writing a completion script.
+#[derive(Debug, Clone, Copy, PartialEq, Eq)]
+pub enum CompletionStatus {
+    Created,
+    Updated,
+    Unchanged,
+}
+
+/// User-level completion file location for `shell`, given the XDG base dirs.
+pub fn completion_path_for(
+    shell: CompletionShell,
+    data_home: &Path,
+    config_home: &Path,
+) -> std::path::PathBuf {
+    match shell {
+        CompletionShell::Bash => data_home
+            .join("bash-completion")
+            .join("completions")
+            .join("ecotokens"),
+        CompletionShell::Zsh => data_home
+            .join("zsh")
+            .join("site-functions")
+            .join("_ecotokens"),
+        CompletionShell::Fish => config_home
+            .join("fish")
+            .join("completions")
+            .join("ecotokens.fish"),
+    }
+}
+
+/// Completion file location honouring `XDG_DATA_HOME` / `XDG_CONFIG_HOME`.
+pub fn default_completion_path(shell: CompletionShell) -> Option<std::path::PathBuf> {
+    let xdg = |var: &str| {
+        std::env::var_os(var)
+            .map(std::path::PathBuf::from)
+            .filter(|p| p.is_absolute())
+    };
+    let home = dirs::home_dir();
+    let data = xdg("XDG_DATA_HOME").or_else(|| home.as_ref().map(|h| h.join(".local/share")))?;
+    let config = xdg("XDG_CONFIG_HOME").or_else(|| home.as_ref().map(|h| h.join(".config")))?;
+    Some(completion_path_for(shell, &data, &config))
+}
+
+/// Write (or refresh) the completion script at `path`. Idempotent.
+pub fn install_completion_script(path: &Path, script: &str) -> std::io::Result<CompletionStatus> {
+    let status = match std::fs::read_to_string(path) {
+        Ok(existing) if existing == script => return Ok(CompletionStatus::Unchanged),
+        Ok(_) => CompletionStatus::Updated,
+        Err(e) if e.kind() == std::io::ErrorKind::NotFound => CompletionStatus::Created,
+        // Unreadable / non-UTF8 file: refuse to overwrite something we cannot verify.
+        Err(e) => return Err(e),
+    };
+    if let Some(parent) = path.parent() {
+        std::fs::create_dir_all(parent)?;
+    }
+    std::fs::write(path, script)?;
+    Ok(status)
+}
+
+/// Remove the completion script at `path` if it exists and is an ecotokens
+/// script. Returns whether a file was removed.
+pub fn uninstall_completion_script(path: &Path) -> std::io::Result<bool> {
+    match std::fs::read_to_string(path) {
+        Ok(content) if content.contains("ecotokens") => {
+            std::fs::remove_file(path)?;
+            Ok(true)
+        }
+        Ok(_) => Ok(false),
+        Err(e) if e.kind() == std::io::ErrorKind::NotFound => Ok(false),
+        Err(e) => Err(e),
+    }
 }

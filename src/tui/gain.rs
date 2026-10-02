@@ -355,17 +355,34 @@ fn render_stats(
             Span::raw(format!("{}   ", report.total_interceptions)),
             Span::styled("Since: ", Style::default().fg(Color::Cyan)),
             Span::raw(format!("{since} days   ")),
+            Span::styled("Tokens used: ", Style::default().fg(Color::Cyan)),
+            Span::raw(format!("{}   ", fmt_tok(report.total_tokens_before))),
             Span::styled("Tokens saved: ", Style::default().fg(Color::Cyan)),
-            Span::raw(format!("{saved}   ")),
+            Span::raw(format!("{}   ", fmt_tok(saved))),
             Span::styled("Savings: ", Style::default().fg(Color::Cyan)),
             Span::raw(format!("{:.1}%", report.total_savings_pct)),
         ]),
         Line::from(vec![
             Span::styled("Cost avoided: ", Style::default().fg(Color::Cyan)),
-            Span::raw(format!("${:.4} USD", report.cost_avoided_usd)),
-            Span::raw(format!("   (model: {})", report.model_ref)),
+            Span::raw(match report.cost_avoided_usd {
+                Some(cost) => format!("${cost:.4} USD"),
+                None => "n/a (run: ecotokens gain price --input <usd/Mtok>)".to_string(),
+            }),
         ]),
     ];
+    let text = if report.rewrite_overhead_tokens > 0 {
+        let mut text = text;
+        text.push(Line::from(vec![
+            Span::styled("Rewrite overhead: ", Style::default().fg(Color::Yellow)),
+            Span::raw(format!(
+                "{} tokens (automatic pipeline transformation)",
+                fmt_tok(report.rewrite_overhead_tokens)
+            )),
+        ]));
+        text
+    } else {
+        text
+    };
 
     let title = match last_updated {
         Some(ts) => format!(" ecotokens gain - updated {ts} UTC  [q] quit "),
@@ -793,18 +810,34 @@ fn render_project_detail<'a>(
     )
 }
 
+pub fn fmt_tok(n: u64) -> String {
+    let s = n.to_string();
+    let mut out = String::with_capacity(s.len() + s.len() / 3);
+    for (i, c) in s.chars().rev().enumerate() {
+        if i > 0 && i % 3 == 0 {
+            out.push(',');
+        }
+        out.push(c);
+    }
+    out.chars().rev().collect()
+}
+
 fn is_binary(s: &str) -> bool {
     s.contains('\x00')
 }
 
-/// Truncate a command string to `max` chars, showing `…` + tail when longer.
+/// Truncate a command string to `max` chars, showing head + `…` when longer.
 fn truncate_cmd(s: &str, max: usize) -> String {
+    if max == 0 {
+        // A zero-width column would make `max - 1` underflow below.
+        return String::new();
+    }
     let chars: Vec<char> = s.chars().collect();
     if chars.len() <= max {
         chars.into_iter().collect()
     } else {
-        let tail: String = chars[chars.len() - (max - 1)..].iter().collect();
-        format!("\u{2026}{tail}")
+        let head: String = chars[..max - 1].iter().collect();
+        format!("{}\u{2026}", head)
     }
 }
 
@@ -869,8 +902,8 @@ fn render_details_panel(
             Span::styled("Tokens: ", Style::default().fg(Color::Cyan)),
             Span::raw(format!(
                 "{} → {}  ({}{:.1}%)",
-                item.tokens_before,
-                item.tokens_after,
+                fmt_tok(item.tokens_before as u64),
+                fmt_tok(item.tokens_after as u64),
                 if item.savings_pct >= 0.0 { '-' } else { '+' },
                 item.savings_pct.abs()
             )),
@@ -890,8 +923,13 @@ fn render_details_panel(
             crate::metrics::store::FilterMode::Filtered => "filtered",
             crate::metrics::store::FilterMode::Passthrough => "passthrough",
             crate::metrics::store::FilterMode::Summarized => "summarized",
+            crate::metrics::store::FilterMode::Rewritten => "rewritten",
         }),
         Span::raw(format!("  Duration: {} ms", item.duration_ms)),
+    ]));
+    lines.push(Line::from(vec![
+        Span::styled("Agent:", Style::default().fg(Color::Cyan)),
+        Span::raw(item.hook_type.agent_label()),
     ]));
 
     let max_scroll = lines.len().saturating_sub(visible);
@@ -929,8 +967,12 @@ fn render_diff_panel(
             .and_then(extract_outline_path)
             .map(|p| {
                 let max = 40usize;
-                if p.len() > max {
-                    format!("…{}", &p[p.len() - max..])
+                // Count/keep the last `max` *chars* — byte slicing `&p[p.len()-max..]`
+                // panics when that byte index falls inside a multi-byte codepoint.
+                let char_count = p.chars().count();
+                if char_count > max {
+                    let tail: String = p.chars().skip(char_count - max).collect();
+                    format!("…{tail}")
                 } else {
                     p.to_string()
                 }
@@ -947,8 +989,8 @@ fn render_diff_panel(
     if is_binary(before_text) || is_binary(after_text) {
         let block = Block::default().borders(Borders::ALL).title(format!(
             " Diff : {name} · {cmd_short} · {}→{} tok ({}{:.0}%) · {ts_short}  [d] cycle ",
-            item.tokens_before,
-            item.tokens_after,
+            fmt_tok(item.tokens_before as u64),
+            fmt_tok(item.tokens_after as u64),
             if item.savings_pct >= 0.0 { '-' } else { '+' },
             item.savings_pct.abs(),
         ));
@@ -970,8 +1012,8 @@ fn render_diff_panel(
         0.0
     };
 
-    let before_prefix = format!(" BEFORE  {:>8} tokens  ", tb);
-    let after_prefix = format!(" AFTER  {:>8} tokens  ", ta);
+    let before_prefix = format!(" BEFORE  {:>13} tokens  ", fmt_tok(tb as u64));
+    let after_prefix = format!(" AFTER  {:>13} tokens  ", fmt_tok(ta as u64));
     let dash_fill = available_width.saturating_sub(before_prefix.len());
     let dashes: String = "─".repeat(dash_fill);
 
@@ -992,7 +1034,7 @@ fn render_diff_panel(
                 Style::default().fg(Color::Red).add_modifier(Modifier::BOLD),
             ),
             Span::styled(
-                format!("{:>8} tokens  ", tb),
+                format!("{:>13} tokens  ", fmt_tok(tb as u64)),
                 Style::default().fg(Color::White),
             ),
             Span::styled(dashes, Style::default().fg(Color::DarkGray)),
@@ -1005,7 +1047,7 @@ fn render_diff_panel(
                     .add_modifier(Modifier::BOLD),
             ),
             Span::styled(
-                format!("{:>8} tokens  ", ta),
+                format!("{:>13} tokens  ", fmt_tok(ta as u64)),
                 Style::default().fg(Color::White),
             ),
             Span::styled(bar, Style::default().fg(Color::Green)),
@@ -1051,7 +1093,9 @@ fn render_diff_panel(
             let truncate = changes.len() > MAX_HUNK_LINES && (all_delete || all_insert);
 
             if truncate {
-                let omitted = changes.len() - 2 * KEEP_LINES;
+                // saturating_sub: the invariant (len > MAX_HUNK_LINES ≥ 2*KEEP_LINES)
+                // holds today, but keep it explicit so a constant change can't panic.
+                let omitted = changes.len().saturating_sub(2 * KEEP_LINES);
                 for change in &changes[..KEEP_LINES] {
                     push_diff_line(&mut lines, change);
                 }
@@ -1091,7 +1135,8 @@ fn render_diff_panel(
     };
     let block = Block::default().borders(Borders::ALL).title(format!(
         " Diff : {name} · {cmd_short} · {}→{} tok · {ts_short} · {scroll_hint}",
-        item.tokens_before, item.tokens_after,
+        fmt_tok(item.tokens_before as u64),
+        fmt_tok(item.tokens_after as u64),
     ));
     let inner = block.inner(area);
     frame.render_widget(block, area);

@@ -1,3 +1,4 @@
+use std::collections::HashMap;
 use std::path::Path;
 
 use super::symbols::Symbol;
@@ -22,6 +23,10 @@ pub fn index_text_doc(path: &Path, rel_path: &str) -> Result<Vec<Symbol>, std::i
 
 fn extract_markdown(content: &str, rel_path: &str) -> Vec<Symbol> {
     let mut symbols = Vec::new();
+    // Disambiguate repeated headings (e.g. two `## Usage`) so the second is not
+    // permanently shadowed by the first at lookup time. The first keeps its
+    // plain id for backward compatibility; later duplicates get a `-N` suffix.
+    let mut seen: HashMap<String, u32> = HashMap::new();
     for (line_idx, line) in content.lines().enumerate() {
         let (level, text) = if let Some(t) = line.strip_prefix("### ") {
             ("h3", t)
@@ -33,7 +38,14 @@ fn extract_markdown(content: &str, rel_path: &str) -> Vec<Symbol> {
             continue;
         };
         let name = text.trim().to_string();
-        let id = format!("{rel_path}::{name}#{level}");
+        let base_id = format!("{rel_path}::{name}#{level}");
+        let count = seen.entry(base_id.clone()).or_insert(0);
+        *count += 1;
+        let id = if *count == 1 {
+            base_id
+        } else {
+            format!("{base_id}-{count}")
+        };
         symbols.push(Symbol {
             id,
             name,
@@ -83,16 +95,25 @@ fn extract_json(content: &str, rel_path: &str) -> Vec<Symbol> {
         return vec![];
     };
     obj.keys()
-        .enumerate()
-        .map(|(i, key)| {
+        .map(|key| {
+            // Locate the key's real line in the source rather than using the map
+            // iteration index, which is meaningless (and alphabetically ordered).
+            let needle = format!("\"{key}\"");
+            let line_no = content
+                .lines()
+                .position(|l| {
+                    let t = l.trim_start();
+                    t.starts_with(&needle) && t[needle.len()..].trim_start().starts_with(':')
+                })
+                .unwrap_or(0) as u64;
             let id = format!("{rel_path}::{key}#key");
             Symbol {
                 id,
                 name: key.clone(),
                 kind: "key".to_string(),
                 file_path: rel_path.to_string(),
-                line_start: i as u64,
-                line_end: i as u64,
+                line_start: line_no,
+                line_end: line_no,
                 source: key.clone(),
             }
         })

@@ -36,7 +36,17 @@ fn filter_go_test(output: &str) -> String {
 
         if line.starts_with("--- FAIL:") {
             in_failure = true;
-            failed += 1;
+            // Count only top-level test failures: a parent test and its subtests
+            // (`TestFoo` and `TestFoo/Sub1`) must not both increment the counter.
+            let test_name = line.trim_start_matches("--- FAIL:").trim();
+            if !test_name
+                .split_whitespace()
+                .next()
+                .unwrap_or("")
+                .contains('/')
+            {
+                failed += 1;
+            }
             failures.push(line);
         } else if line.starts_with("--- PASS:") || line.starts_with("=== RUN") {
             in_failure = false;

@@ -19,9 +19,9 @@ mod tests {
         }
     }
 
-    // T060 — migration: config ollama legacy → désérialisée en EmbedProvider::Legacy
+    // T060 — config ollama typée → désérialisée en EmbedProvider::Ollama
     #[test]
-    fn ollama_legacy_deserializes_to_legacy_variant() {
+    fn ollama_typed_deserializes_to_ollama_variant() {
         let json = r#"{
             "embed_provider": {
                 "type": "ollama",
@@ -30,7 +30,32 @@ mod tests {
             }
         }"#;
         let settings: Settings = serde_json::from_str(json).expect("json parse failed");
-        assert_eq!(settings.embed_provider, EmbedProvider::Legacy);
+        assert_eq!(
+            settings.embed_provider,
+            EmbedProvider::Ollama {
+                url: "http://localhost:11434".to_string(),
+                model: "nomic-embed-text".to_string(),
+            }
+        );
+    }
+
+    // T_OLLAMA — nécessite Ollama en marche avec qwen3-embedding:latest → ignore en CI
+    #[test]
+    #[ignore]
+    fn ollama_provider_embeds_text() {
+        use ecotokens::search::embed::embed_text;
+
+        let provider = EmbedProvider::Ollama {
+            url: "http://localhost:11434".to_string(),
+            model: "qwen3-embedding:latest".to_string(),
+        };
+        let vec = embed_text("hello world", &provider).expect("ollama embed failed");
+        assert!(!vec.is_empty(), "expected non-empty vector");
+        let norm: f32 = vec.iter().map(|x| x * x).sum::<f32>().sqrt();
+        assert!(
+            (norm - 1.0).abs() < 0.01,
+            "vector should be L2-normalised, got norm={norm}"
+        );
     }
 
     // T061 — migration: config lm_studio legacy → désérialisée en EmbedProvider::Legacy

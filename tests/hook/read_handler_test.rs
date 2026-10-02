@@ -2,6 +2,7 @@ use ecotokens::config::default_index_dir;
 use ecotokens::hook::post_handler::PostFilterResult;
 use ecotokens::hook::read_handler::handle_read;
 use std::path::PathBuf;
+use tempfile::TempDir;
 
 fn index_dir() -> PathBuf {
     default_index_dir()
@@ -84,17 +85,17 @@ fn read_indexed_file_returns_filtered_or_passthrough() {
     }
 }
 
-/// Integration test: file indexed, outline empty (e.g. binary or non-Rust) → Passthrough
+/// A nonempty Rust file with no symbols has no outline to substitute.
 #[test]
 fn read_outline_empty_returns_passthrough() {
-    // Use a JSON file (outline_path returns no symbols for JSON or empty result)
-    let result = handle_read(
-        concat!(env!("CARGO_MANIFEST_DIR"), "/Cargo.toml"),
-        "[package]\nname = \"ecotokens\"\n",
-        1,
-        None,
+    let dir = TempDir::new().unwrap();
+    let path = dir.path().join("comments.rs");
+    let content = "// No functions or types are declared here.\n";
+    std::fs::write(&path, content).unwrap();
+
+    let result = handle_read(path.to_str().unwrap(), content, 1, Some(dir.path()));
+    assert!(
+        matches!(result, PostFilterResult::Passthrough),
+        "a file without symbols must pass through unchanged"
     );
-    // Toml may or may not have symbols — either result is acceptable
-    // The test just verifies no panic occurs
-    let _ = result;
 }

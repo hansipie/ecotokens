@@ -5,50 +5,59 @@ pub fn generate_proposals(segments: &[CodeSegment], similarity: f32) -> Vec<Refa
         return vec![];
     }
 
-    let a = &segments[0];
-    let b = &segments[1];
+    // Every member of the group, so proposals cover 3+ members instead of only
+    // the first two.
+    let locations: Vec<String> = segments
+        .iter()
+        .map(|s| format!("{}:{}", s.file_path, s.line_start))
+        .collect();
+    let all = locations.join(", ");
 
     // Check exact duplicate (100% similarity)
     if (similarity - 100.0).abs() < f32::EPSILON {
         return vec![RefactoringProposal {
             kind: ProposalKind::ExactDuplicate,
             text: format!(
-                "Exact duplicate detected: {}:{} and {}:{}. \
+                "Exact duplicate detected across {} locations: {all}. \
                 Consider extracting to a shared function to eliminate redundancy.",
-                a.file_path, a.line_start, b.file_path, b.line_start
+                segments.len()
             ),
         }];
     }
 
-    // Check subset relationship
-    if is_subset(&a.content, &b.content) {
-        return vec![RefactoringProposal {
-            kind: ProposalKind::SubsetOf,
-            text: format!(
-                "{}:{} appears to be a subset of {}:{}. \
-                Consider refactoring to reuse the larger implementation.",
-                a.file_path, a.line_start, b.file_path, b.line_start
-            ),
-        }];
+    // Check subset relationships across all ordered pairs.
+    let mut proposals = Vec::new();
+    for i in 0..segments.len() {
+        for j in 0..segments.len() {
+            if i == j {
+                continue;
+            }
+            if is_subset(&segments[i].content, &segments[j].content) {
+                proposals.push(RefactoringProposal {
+                    kind: ProposalKind::SubsetOf,
+                    text: format!(
+                        "{}:{} appears to be a subset of {}:{}. \
+                        Consider refactoring to reuse the larger implementation.",
+                        segments[i].file_path,
+                        segments[i].line_start,
+                        segments[j].file_path,
+                        segments[j].line_start
+                    ),
+                });
+            }
+        }
     }
-    if is_subset(&b.content, &a.content) {
-        return vec![RefactoringProposal {
-            kind: ProposalKind::SubsetOf,
-            text: format!(
-                "{}:{} appears to be a subset of {}:{}. \
-                Consider refactoring to reuse the larger implementation.",
-                b.file_path, b.line_start, a.file_path, a.line_start
-            ),
-        }];
+    if !proposals.is_empty() {
+        return proposals;
     }
 
     // Near duplicate
     vec![RefactoringProposal {
         kind: ProposalKind::NearDuplicate,
         text: format!(
-            "Near-duplicate code ({:.1}% similar) found at {}:{} and {}:{}. \
+            "Near-duplicate code ({similarity:.1}% similar) found across {} locations: {all}. \
             Consider extracting common logic into a shared abstraction.",
-            similarity, a.file_path, a.line_start, b.file_path, b.line_start
+            segments.len()
         ),
     }]
 }

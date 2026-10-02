@@ -48,6 +48,10 @@ impl CandleProvider {
         let config_str = std::fs::read_to_string(&config_path)?;
         let config: Config = serde_json::from_str(&config_str)?;
 
+        // SAFETY: `model_path` was produced by `acquire_model_files` and points at
+        // a safetensors file that exists on disk. mmap is unsafe because another
+        // process could mutate the file underneath us; the model cache is
+        // ecotokens-owned, so we accept that risk as the upstream candle API does.
         let vb =
             unsafe { VarBuilder::from_mmaped_safetensors(&[model_path], DType::F32, &device)? };
         let model = BertModel::load(vb, &config)?;
@@ -102,8 +106,11 @@ impl CandleProvider {
             let token_count = mask_t.to_dtype(DType::F32)?.sum_keepdim(1)?;
             let mean = sum.broadcast_div(&token_count)?;
 
-            // L2 normalisation
+            // L2 normalisation. Clamp the norm away from zero: an all-zero input
+            // would otherwise divide by 0 and produce NaNs that silently poison
+            // the HNSW index.
             let norm = mean.sqr()?.sum_keepdim(1)?.sqrt()?;
+            let norm = norm.clamp(1e-12f32, f32::MAX)?;
             let normalised = mean.broadcast_div(&norm)?;
 
             let vec: Vec<f32> = normalised.squeeze(0)?.to_vec1()?;
@@ -171,11 +178,26 @@ fn try_hf_cache(model_id: &str) -> Option<(PathBuf, PathBuf, PathBuf)> {
 fn ecotokens_model_dir(
     model_id: &str,
 ) -> Result<PathBuf, Box<dyn std::error::Error + Send + Sync>> {
+    // Sanitize the model id into a single safe path component: keep '/'→"--"
+    // (existing cache layout), map any other path-unsafe character to '-', and
+    // neutralize ".." so a malicious/mistyped id cannot escape the cache dir.
+    let safe: String = model_id
+        .replace('/', "--")
+        .chars()
+        .map(|c| {
+            if c.is_ascii_alphanumeric() || matches!(c, '-' | '_' | '.') {
+                c
+            } else {
+                '-'
+            }
+        })
+        .collect();
+    let safe = safe.replace("..", "--");
     let dir = dirs::cache_dir()
         .ok_or("cannot determine cache directory")?
         .join("ecotokens")
         .join("models")
-        .join(model_id.replace('/', "--"));
+        .join(safe);
     std::fs::create_dir_all(&dir)?;
     Ok(dir)
 }

@@ -22,8 +22,10 @@ pub fn check_staleness(index_dir: &Path, source_path: &Path) -> Option<StaleWarn
 }
 
 fn walk_newest_mtime(dir: &Path) -> Option<SystemTime> {
+    // hidden(true) (the default) excludes `.git/` internals so routine git
+    // operations (fetch, gc) don't falsely mark the index as stale.
     let walker = ignore::WalkBuilder::new(dir)
-        .hidden(false)
+        .hidden(true)
         .git_ignore(true)
         .build();
 

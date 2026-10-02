@@ -142,8 +142,9 @@ fn filter_vitest(output: &str) -> String {
     let mut in_failure = false;
 
     for line in &lines {
-        // Vitest failure markers
-        if line.contains(" × ") || line.contains(" ✗ ") || line.trim_start().starts_with("× ") {
+        // Vitest failure markers. Only match a leading `× ` (after indentation),
+        // not a mid-line `×`, which appears in assertion output like "3 × 4 = 12".
+        if line.contains(" ✗ ") || line.trim_start().starts_with("× ") {
             in_failure = true;
             failed += 1;
             failures.push(*line);

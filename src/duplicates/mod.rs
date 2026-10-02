@@ -53,4 +53,9 @@ pub struct DetectionOptions {
     pub index_dir: PathBuf,
     pub threshold: f32,
     pub min_lines: usize,
+    /// When set, symbols whose stored (index-relative) file_path does not
+    /// resolve to an existing file under this root are skipped. The index
+    /// directory is shared across every project the user has indexed, so
+    /// without this a scan surfaces duplicates from unrelated repos.
+    pub project_root: Option<PathBuf>,
 }

@@ -141,6 +141,22 @@ fn filter_git_status(output: &str) -> String {
         } else if line.trim_start().starts_with("renamed:") {
             let rest = line.trim_start().trim_start_matches("renamed:").trim();
             compact.push(format!("R {}", rest));
+        } else if line.trim_start().starts_with("typechange:") {
+            let file = line.trim_start().trim_start_matches("typechange:").trim();
+            compact.push(format!("T {}", file));
+        } else if let Some(rest) = [
+            "both modified:",
+            "both added:",
+            "added by us:",
+            "added by them:",
+            "deleted by us:",
+            "deleted by them:",
+        ]
+        .iter()
+        .find_map(|m| line.trim_start().strip_prefix(m))
+        {
+            // Merge-conflict (unmerged) entries must not be dropped.
+            compact.push(format!("U {}", rest.trim()));
         } else if !header_done {
             // Keep branch/upstream info lines at the top
             compact.push((*line).to_string());
@@ -153,7 +169,12 @@ fn filter_git_status(output: &str) -> String {
     let changed_count = compact
         .iter()
         .filter(|l| {
-            l.starts_with("M ") || l.starts_with("A ") || l.starts_with("D ") || l.starts_with("R ")
+            l.starts_with("M ")
+                || l.starts_with("A ")
+                || l.starts_with("D ")
+                || l.starts_with("R ")
+                || l.starts_with("U ")
+                || l.starts_with("T ")
         })
         .count();
 
@@ -184,11 +205,15 @@ fn filter_git_status(output: &str) -> String {
             .copied()
             .collect();
         let omitted = changed.len().saturating_sub(10);
-        format!(
-            "{}\n[ecotokens] ... {} more changed files omitted ({} total changes) ...",
-            shown.join("\n"),
-            omitted,
-            changed.len(),
-        )
+        if omitted > 0 {
+            format!(
+                "{}\n[ecotokens] ... {} more changed files omitted ({} total changes) ...",
+                shown.join("\n"),
+                omitted,
+                changed.len(),
+            )
+        } else {
+            shown.join("\n")
+        }
     }
 }

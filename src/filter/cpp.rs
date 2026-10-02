@@ -16,16 +16,20 @@ fn filter_compiler_output(output: &str) -> String {
     let summary_re = regex!(
         r"^(\d+ (warnings?|errors?) generated\.|collect2: error:|clang(\+\+)?(:|-\d+:) error:|g\+\+: error:|gcc: error:|cc1: all warnings being treated as errors|ninja: build stopped:|make(\[\d+\])?: \*\*\*|CMake Error|ld: error:)"
     );
-    let success_re = regex!(r"(?i)(build succeeded|build completed|linking|finished)");
+    // `\blinking\b` so "symlinking"/"checking linking libraries" don't count as
+    // build-success lines.
+    let success_re = regex!(r"(?i)(build succeeded|build completed|\blinking\b|finished)");
 
     let mut result: Vec<String> = Vec::new();
     let mut warning_count = 0;
     let mut kept_warning_samples = 0;
+    let mut has_error = false;
     let mut i = 0;
 
     while i < lines.len() {
         let line = lines[i];
         if error_re.is_match(line) {
+            has_error = true;
             result.push(line.to_string());
             i += 1;
 
@@ -90,11 +94,11 @@ fn filter_compiler_output(output: &str) -> String {
     }
 
     // Only success/summary lines were captured, no real diagnostics — let generic handle it
-    if warning_count == 0 && !result.iter().any(|l| error_re.is_match(l)) {
+    if warning_count == 0 && !has_error {
         return filter_generic(output, 200, 51200);
     }
 
-    if warning_count <= WARNING_THRESHOLD && !result.iter().any(|line| error_re.is_match(line)) {
+    if warning_count <= WARNING_THRESHOLD && !has_error {
         return output.to_string();
     }
 

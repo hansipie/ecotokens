@@ -37,9 +37,10 @@ fn filter_curl(output: &str) -> String {
 
 fn is_curl_progress(line: &str) -> bool {
     let t = line.trim();
-    t.contains("% Total")
-        || t.contains("Dload")
-        || (t.contains('%') && t.split_whitespace().count() > 3)
+    // Match curl's transfer-meter header and data rows specifically, instead of
+    // any line containing '%', so API prose like "Rate limit: 80% used" or
+    // "Downloaded 100% of packages" is not dropped.
+    t.contains("% Total") || t.contains("Dload") || t.contains("Xferd") || t.contains("--:--:--")
 }
 
 fn filter_wget(output: &str) -> String {

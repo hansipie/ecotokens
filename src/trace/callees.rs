@@ -23,7 +23,8 @@ pub fn find_callees(
         Err(_) => return Err(TraceError::IndexNotFound),
     };
 
-    let (_, file_path_field, content_field, kind_field, _, symbol_id_field) = build_schema();
+    let (_, file_path_field, content_field, kind_field, line_start_field, symbol_id_field) =
+        build_schema();
 
     let reader = index
         .reader_builder()
@@ -35,14 +36,15 @@ pub fn find_callees(
     let kind_term = Term::from_field_text(kind_field, "symbol");
     let kind_query = TermQuery::new(kind_term, IndexRecordOption::Basic);
     let all_symbols = searcher.search(&kind_query, &TopDocs::with_limit(MAX_SYMBOL_DOCS))?;
-    if all_symbols.len() >= MAX_SYMBOL_DOCS {
+    if all_symbols.len() > MAX_SYMBOL_DOCS {
         eprintln!(
             "ecotokens: warning: symbol limit ({MAX_SYMBOL_DOCS}) reached; some callees may be missing"
         );
     }
 
     let mut symbol_names: HashSet<String> = HashSet::new();
-    let mut symbol_docs: Vec<(String, String, String, String)> = Vec::new(); // (sid, name, file, source)
+    // (sid, name, file, source, line_start)
+    let mut symbol_docs: Vec<(String, String, String, String, u64)> = Vec::new();
 
     for (_score, addr) in &all_symbols {
         let doc: TantivyDocument = searcher.doc(*addr)?;
@@ -61,6 +63,10 @@ pub fn find_callees(
             .and_then(|v| v.as_str())
             .unwrap_or("")
             .to_string();
+        let line_start = doc
+            .get_first(line_start_field)
+            .and_then(|v| v.as_u64())
+            .unwrap_or(0);
         let name = sid
             .split("::")
             .last()
@@ -70,7 +76,7 @@ pub fn find_callees(
             .unwrap_or("")
             .to_string();
         symbol_names.insert(name.clone());
-        symbol_docs.push((sid, name, file, source));
+        symbol_docs.push((sid, name, file, source, line_start));
     }
 
     let mut visited = HashSet::new();
@@ -89,7 +95,7 @@ pub fn find_callees(
 
 fn find_callees_recursive(
     symbol_name: &str,
-    symbol_docs: &[(String, String, String, String)],
+    symbol_docs: &[(String, String, String, String, u64)],
     known_symbols: &HashSet<String>,
     depth: u32,
     visited: &mut HashSet<String>,
@@ -100,49 +106,35 @@ fn find_callees_recursive(
     }
     visited.insert(symbol_name.to_string());
 
-    // Find the symbol's source
-    let source = symbol_docs
+    // Consider every symbol that shares this (short) name, not just the first
+    // match — otherwise two same-named symbols in different modules would
+    // silently use the wrong body for callee extraction.
+    let bodies: Vec<(&str, u64)> = symbol_docs
         .iter()
-        .find(|(_, name, _, _)| name == symbol_name)
-        .map(|(_, _, _, src)| src.as_str())
-        .unwrap_or("");
+        .filter(|(_, name, _, _, _)| name == symbol_name)
+        .map(|(_, _, _, src, ls)| (src.as_str(), *ls))
+        .collect();
 
-    if source.is_empty() {
+    if bodies.iter().all(|(src, _)| src.is_empty()) {
         return;
     }
 
-    // Filter out comment lines to reduce false positives
-    let non_comment_source: String = source
-        .lines()
-        .filter(|l| {
-            let t = l.trim();
-            !t.starts_with("//")
-                && !t.starts_with('#')
-                && !t.starts_with("--")
-                && !t.starts_with('*')
-        })
-        .collect::<Vec<_>>()
-        .join("\n");
-
-    // Find all calls to known symbols within this source
+    // Find all calls to known symbols within these sources
     for known in known_symbols {
         if known == symbol_name {
             continue; // skip self-recursion as callee
         }
-        let call_pattern = format!("{known}(");
-        if non_comment_source.contains(&call_pattern) {
-            // Find the line
-            let call_line = non_comment_source
-                .lines()
-                .enumerate()
-                .find(|(_, l)| l.contains(&call_pattern))
-                .map(|(i, _)| i as u64)
-                .unwrap_or(0);
+        // First body that calls `known`, offset by that body's starting line so
+        // the reported line is a real file line, not an index into a stripped copy.
+        let call_line = bodies
+            .iter()
+            .find_map(|(src, ls)| super::find_call_line(src, known).map(|within| ls + within));
 
+        if let Some(call_line) = call_line {
             // Find the callee's file and ID
-            let (sid, _, file, _) = symbol_docs
+            let (sid, _, file, _, _) = symbol_docs
                 .iter()
-                .find(|(_, name, _, _)| name == known)
+                .find(|(_, name, _, _, _)| name == known)
                 .cloned()
                 .unwrap_or_default();
 

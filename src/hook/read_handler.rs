@@ -96,7 +96,12 @@ pub fn handle_read(
     let path = Path::new(file_path);
     let cwd = cwd
         .map(|p| p.to_path_buf())
-        .unwrap_or_else(|| std::env::current_dir().unwrap_or_else(|_| PathBuf::from(".")));
+        .or_else(|| std::env::current_dir().ok())
+        // `current_dir` can fail if the working directory was removed (common in
+        // ephemeral CI); fall back to the target file's own directory rather than
+        // a bare "." that would resolve against an unknown location.
+        .or_else(|| path.parent().map(|p| p.to_path_buf()))
+        .unwrap_or_else(|| PathBuf::from("."));
 
     let symbols = match crate::search::outline::outline_path(OutlineOptions {
         path: path.to_path_buf(),

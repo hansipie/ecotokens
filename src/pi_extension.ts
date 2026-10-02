@@ -44,7 +44,7 @@ function callHookPost(
     cwd,
   });
 
-  const result = spawnSync("ecotokens", ["hook-post"], {
+  const result = spawnSync("ecotokens", ["hook-post", "--agent", "pi"], {
     input: payload,
     encoding: "utf-8",
     timeout: 10_000,
@@ -91,7 +91,7 @@ export default function (pi: ExtensionAPI) {
     if (event.toolName !== "bash") return;
     const input = event.input as { command?: string };
     if (!input.command) return;
-    input.command = `ecotokens filter --cwd ${JSON.stringify(ctx.cwd)} -- bash -c ${JSON.stringify(input.command)}`;
+    input.command = `ecotokens filter --agent pi --cwd ${JSON.stringify(ctx.cwd)} -- bash -c ${JSON.stringify(input.command)}`;
   });
 
   // ── 2. Outils natifs post-execution : équivalent PostToolUse ─────────────
@@ -112,14 +112,14 @@ export default function (pi: ExtensionAPI) {
   });
 
   // ── 3. Session lifecycle : auto-watch ────────────────────────────────────
-  pi.on("session_start", async (event, _ctx) => {
+  pi.on("session_start", async (event, ctx) => {
     if (event.reason === "startup") {
-      spawnSync("ecotokens", ["session-start"], { stdio: "ignore" });
+      spawnSync("ecotokens", ["session-start"], { stdio: "ignore", cwd: ctx.cwd });
     }
   });
 
-  pi.on("session_shutdown", async (_event, _ctx) => {
-    spawnSync("ecotokens", ["session-end"], { stdio: "ignore" });
+  pi.on("session_shutdown", async (_event, ctx) => {
+    spawnSync("ecotokens", ["session-end"], { stdio: "ignore", cwd: ctx.cwd });
   });
 
   // ── 4. Commandes slash ────────────────────────────────────────────────────

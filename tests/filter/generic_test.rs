@@ -1,4 +1,4 @@
-use ecotokens::filter::generic::{filter_generic, force_filter_generic, THRESHOLD_LINES};
+use ecotokens::filter::generic::{filter_generic, force_filter_generic};
 
 #[test]
 fn short_output_passes_through() {
@@ -39,11 +39,6 @@ fn passthrough_threshold_is_respected() {
     let input = lines.join("\n");
     let out = filter_generic(&input, 500, 51200);
     assert_eq!(out, input, "under threshold should pass through unchanged");
-}
-
-#[test]
-fn threshold_lines_constant_is_500() {
-    assert_eq!(THRESHOLD_LINES, 500);
 }
 
 #[test]

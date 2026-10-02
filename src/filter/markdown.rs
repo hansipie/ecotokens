@@ -11,13 +11,21 @@ pub fn filter_markdown(content: &str) -> String {
         return content.to_string();
     }
 
-    // Extract headings H1–H3
+    // Extract headings H1–H3, skipping any `#` lines inside fenced code blocks
+    // (```/~~~), which are code comments, not real headings.
     let heading_re = regex!(r"^(#{1,3})\s+(.+)");
-    let headings: Vec<(usize, &str)> = lines
-        .iter()
-        .enumerate()
-        .filter_map(|(i, line)| heading_re.captures(line).map(|_| (i, *line)))
-        .collect();
+    let mut in_fence = false;
+    let mut headings: Vec<(usize, &str)> = Vec::new();
+    for (i, line) in lines.iter().enumerate() {
+        let trimmed = line.trim_start();
+        if trimmed.starts_with("```") || trimmed.starts_with("~~~") {
+            in_fence = !in_fence;
+            continue;
+        }
+        if !in_fence && heading_re.is_match(line) {
+            headings.push((i, *line));
+        }
+    }
 
     if headings.is_empty() {
         return filter_generic(content, MD_LINE_THRESHOLD as u32, 51200);

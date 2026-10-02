@@ -273,7 +273,7 @@ fn stripe_key_is_masked() {
 
 #[test]
 fn stripe_rk_prod_key_is_masked() {
-    let key = format!("rk_prod_abcdefghijklmnopqrstuvwx");
+    let key = "rk_prod_abcdefghijklmnopqrstuvwx".to_string();
     let (out, redacted) = mask(&key);
     assert!(out.contains("[STRIPE_KEY]"), "got: {out}");
     assert!(redacted);

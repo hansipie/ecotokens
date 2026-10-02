@@ -81,7 +81,13 @@ fn filter_ls(output: &str) -> String {
             if tokens.is_empty() {
                 return true; // Keep blank lines (section separators)
             }
-            let name = tokens.last().unwrap_or(&"");
+            // For `ls -l` symlink lines (`name -> target`) the entry name is the
+            // token before ` -> `, not the target.
+            let name: &str = if let Some(idx) = line.find(" -> ") {
+                line[..idx].split_whitespace().last().unwrap_or("")
+            } else {
+                tokens.last().copied().unwrap_or("")
+            };
             !is_noisy_entry(name)
         })
         .collect();
@@ -250,7 +256,14 @@ pub fn filter_diff(output: &str) -> String {
     let significant: Vec<&str> = lines
         .iter()
         .copied()
-        .filter(|l| l.starts_with('+') || l.starts_with('-') || l.starts_with("@@"))
+        .filter(|l| {
+            l.starts_with('+')
+                || l.starts_with('-')
+                || l.starts_with("@@")
+                // Keep git diff headers too, consistent with git.rs::compact_diff.
+                || l.starts_with("diff --git")
+                || l.starts_with("index ")
+        })
         .collect();
 
     const MAX_DIFF_LINES: usize = 200;

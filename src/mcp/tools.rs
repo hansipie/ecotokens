@@ -1,10 +1,12 @@
 use rmcp::schemars;
 use serde::Deserialize;
 
-/// Deserialize an optional integer that may arrive as a JSON string or number.
-/// Claude Code sometimes sends numeric parameters as strings (e.g. `"5"` instead of `5`).
-macro_rules! impl_de_opt_num {
-    ($name:ident, $type:ty, $as_method:ident, $err_msg:expr) => {
+/// Optional unsigned integer that may arrive as a JSON string or number (Claude
+/// Code sometimes sends numeric params as strings, e.g. `"5"`). Uses
+/// `TryFrom<u64>` so an out-of-range value errors instead of silently truncating
+/// (notably `u64`→`usize` on 32-bit targets).
+macro_rules! impl_de_opt_uint {
+    ($name:ident, $type:ty, $err_msg:expr) => {
         fn $name<'de, D>(d: D) -> Result<Option<$type>, D::Error>
         where
             D: serde::Deserializer<'de>,
@@ -12,10 +14,14 @@ macro_rules! impl_de_opt_num {
             let v = Option::<serde_json::Value>::deserialize(d)?;
             match v {
                 None => Ok(None),
-                Some(serde_json::Value::Number(n)) => n
-                    .$as_method()
-                    .map(|n| Some(n as $type))
-                    .ok_or_else(|| serde::de::Error::custom($err_msg)),
+                Some(serde_json::Value::Number(n)) => {
+                    let u = n
+                        .as_u64()
+                        .ok_or_else(|| serde::de::Error::custom($err_msg))?;
+                    <$type>::try_from(u)
+                        .map(Some)
+                        .map_err(|_| serde::de::Error::custom($err_msg))
+                }
                 Some(serde_json::Value::String(s)) => s
                     .parse::<$type>()
                     .map(Some)
@@ -28,9 +34,37 @@ macro_rules! impl_de_opt_num {
     };
 }
 
-impl_de_opt_num!(de_opt_usize, usize, as_u64, "expected non-negative integer");
-impl_de_opt_num!(de_opt_u32, u32, as_u64, "expected non-negative integer");
-impl_de_opt_num!(de_opt_f32, f32, as_f64, "expected number");
+/// Optional `f32`. `f64`→`f32` narrowing is an intentional, lossless-enough cast.
+fn de_opt_f32<'de, D>(d: D) -> Result<Option<f32>, D::Error>
+where
+    D: serde::Deserializer<'de>,
+{
+    let v = Option::<serde_json::Value>::deserialize(d)?;
+    match v {
+        None => Ok(None),
+        Some(serde_json::Value::Number(n)) => n
+            .as_f64()
+            .map(|n| Some(n as f32))
+            .ok_or_else(|| serde::de::Error::custom("expected number")),
+        Some(serde_json::Value::String(s)) => {
+            s.parse::<f32>().map(Some).map_err(serde::de::Error::custom)
+        }
+        Some(other) => Err(serde::de::Error::custom(format!(
+            "expected number or string, got {other}"
+        ))),
+    }
+}
+
+impl_de_opt_uint!(
+    de_opt_usize,
+    usize,
+    "expected non-negative integer that fits in usize"
+);
+impl_de_opt_uint!(
+    de_opt_u32,
+    u32,
+    "expected non-negative integer that fits in u32"
+);
 
 #[derive(Debug, Deserialize, schemars::JsonSchema)]
 pub struct SearchParams {
@@ -84,4 +118,23 @@ pub struct DuplicatesParams {
     #[schemars(description = "Maximum number of duplicate groups to return (default: 10)")]
     #[serde(default, deserialize_with = "de_opt_usize")]
     pub top_k: Option<usize>,
+}
+
+// Not itself gated on the `rewrite` feature: it's a plain data struct with no
+// dependency on `crate::rewrite`, and the `#[tool_router]` macro on
+// `EcotokensServer` needs `ecotokens_rewrite`'s signature to exist
+// unconditionally (see the cfg split in src/mcp/server.rs's `rewrite_tool_impl`
+// — cfg on an individual method inside a `#[tool_router]` impl block does not
+// reliably suppress the macro's registration of that method).
+#[cfg_attr(not(feature = "rewrite"), allow(dead_code))]
+#[derive(Debug, Deserialize, schemars::JsonSchema)]
+pub struct RewriteParams {
+    #[schemars(description = "The prose to transform")]
+    pub text: String,
+    #[schemars(description = "paraphrase | tone | reading-level | translate")]
+    pub mode: String,
+    #[schemars(description = "Target for tone/reading-level/translate (forbidden for paraphrase)")]
+    pub target: Option<String>,
+    #[schemars(description = "Override the configured model")]
+    pub model: Option<String>,
 }

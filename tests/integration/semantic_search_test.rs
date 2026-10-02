@@ -1,9 +1,12 @@
 use ecotokens::search::query::SearchResult;
-use serde_json;
 
 #[cfg(test)]
 mod tests {
     use super::*;
+    use std::io::{Read, Write};
+    use std::net::TcpListener;
+    use std::sync::atomic::{AtomicBool, AtomicUsize, Ordering};
+    use std::sync::Arc;
 
     // T022 — SearchResult must expose line_end and retrieval_source
     #[test]
@@ -111,13 +114,42 @@ pub fn propagate(x: i32) -> Result<i32, String> {
         assert!(has_vector, "expected at least one Vector or Both result");
     }
 
-    // T033 — incremental reindex must reuse embeddings for unchanged files
+    // T033 — unchanged files must not trigger another embedding request.
     #[test]
-    #[ignore]
     fn incremental_reindex_reuses_embeddings() {
         use ecotokens::config::settings::EmbedProvider;
         use ecotokens::search::index::{index_directory, IndexOptions};
         use tempfile::TempDir;
+
+        let listener = TcpListener::bind("127.0.0.1:0").expect("bind mock embedding server");
+        let port = listener.local_addr().unwrap().port();
+        listener.set_nonblocking(true).unwrap();
+        let requests = Arc::new(AtomicUsize::new(0));
+        let stop = Arc::new(AtomicBool::new(false));
+        let server_requests = Arc::clone(&requests);
+        let server_stop = Arc::clone(&stop);
+        let server = std::thread::spawn(move || {
+            while !server_stop.load(Ordering::SeqCst) {
+                match listener.accept() {
+                    Ok((mut stream, _)) => {
+                        let mut buf = [0u8; 4096];
+                        let _n = stream.read(&mut buf).expect("read embedding request");
+                        server_requests.fetch_add(1, Ordering::SeqCst);
+                        let body = r#"{"embedding":[0.1,0.2,0.3,0.4]}"#;
+                        write!(
+                            stream,
+                            "HTTP/1.1 200 OK\r\nContent-Type: application/json\r\nContent-Length: {}\r\nConnection: close\r\n\r\n{body}",
+                            body.len()
+                        )
+                        .expect("send embedding response");
+                    }
+                    Err(e) if e.kind() == std::io::ErrorKind::WouldBlock => {
+                        std::thread::sleep(std::time::Duration::from_millis(10));
+                    }
+                    Err(e) => panic!("mock embedding server: {e}"),
+                }
+            }
+        });
 
         let corpus = TempDir::new().unwrap();
         let index_dir = TempDir::new().unwrap();
@@ -125,12 +157,13 @@ pub fn propagate(x: i32) -> Result<i32, String> {
         std::fs::write(corpus.path().join("a.rs"), "fn foo() {}").unwrap();
         std::fs::write(corpus.path().join("b.rs"), "fn bar() {}").unwrap();
 
-        let provider = EmbedProvider::Candle {
-            model: "sentence-transformers/all-MiniLM-L6-v2".to_string(),
+        let provider = EmbedProvider::Ollama {
+            url: format!("http://127.0.0.1:{port}"),
+            model: "test-embedding-model".to_string(),
         };
 
         // First full index
-        index_directory(IndexOptions {
+        let first = index_directory(IndexOptions {
             reset: true,
             path: corpus.path().to_path_buf(),
             index_dir: index_dir.path().to_path_buf(),
@@ -140,15 +173,18 @@ pub fn propagate(x: i32) -> Result<i32, String> {
         })
         .unwrap();
 
-        let bin1_size = std::fs::metadata(index_dir.path().join("hnsw_index.bin"))
-            .map(|m| m.len())
-            .unwrap_or(0);
+        let first_requests = requests.load(Ordering::SeqCst);
+        assert_eq!(first.file_count, 2);
+        assert_eq!(first.vector_count, 2);
+        assert_eq!(first_requests, 2, "one request per initial symbol");
 
+        // The index currently stores mtimes at one-second resolution.
+        std::thread::sleep(std::time::Duration::from_millis(1100));
         // Modify only b.rs
-        std::fs::write(corpus.path().join("b.rs"), "fn bar() { /* changed */ }").unwrap();
+        std::fs::write(corpus.path().join("b.rs"), "fn bar() { let changed = 42; }").unwrap();
 
         // Incremental reindex
-        index_directory(IndexOptions {
+        let second = index_directory(IndexOptions {
             reset: false,
             path: corpus.path().to_path_buf(),
             index_dir: index_dir.path().to_path_buf(),
@@ -158,14 +194,14 @@ pub fn propagate(x: i32) -> Result<i32, String> {
         })
         .unwrap();
 
-        let bin2_size = std::fs::metadata(index_dir.path().join("hnsw_index.bin"))
-            .map(|m| m.len())
-            .unwrap_or(0);
-
-        // Index was rebuilt (file changed), but total size should be similar (1 chunk difference)
-        assert!(
-            bin1_size > 0 && bin2_size > 0,
-            "hnsw_index.bin should exist after both runs"
+        assert_eq!(second.file_count, 1, "only b.rs should be reindexed");
+        assert_eq!(second.vector_count, 2, "both vectors must remain available");
+        assert_eq!(
+            requests.load(Ordering::SeqCst),
+            first_requests + 1,
+            "only the changed file should require a new embedding"
         );
+        stop.store(true, Ordering::SeqCst);
+        server.join().unwrap();
     }
 }

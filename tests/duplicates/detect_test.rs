@@ -37,6 +37,7 @@ fn test_identical_functions_form_one_group() {
         index_dir: idx.path().to_path_buf(),
         threshold: 70.0,
         min_lines: 5,
+        project_root: None,
     };
     let groups = ecotokens::duplicates::detect::detect_duplicates(&opts).unwrap();
     assert_eq!(groups.len(), 1, "expected 1 duplicate group");
@@ -62,6 +63,7 @@ fn test_short_symbol_excluded() {
         index_dir: idx.path().to_path_buf(),
         threshold: 70.0,
         min_lines: 5,
+        project_root: None,
     };
     let groups = ecotokens::duplicates::detect::detect_duplicates(&opts).unwrap();
     assert!(groups.is_empty(), "short symbols should be excluded");
@@ -87,6 +89,7 @@ fn test_no_duplicates() {
         index_dir: idx.path().to_path_buf(),
         threshold: 90.0,
         min_lines: 5,
+        project_root: None,
     };
     let groups = ecotokens::duplicates::detect::detect_duplicates(&opts).unwrap();
     assert!(
@@ -114,6 +117,7 @@ fn test_union_find_merges_similar_group() {
         index_dir: idx.path().to_path_buf(),
         threshold: 70.0,
         min_lines: 5,
+        project_root: None,
     };
     let groups = ecotokens::duplicates::detect::detect_duplicates(&opts).unwrap();
     assert!(!groups.is_empty(), "should detect at least one group");
@@ -141,6 +145,7 @@ fn test_single_file_zero_groups() {
         index_dir: idx.path().to_path_buf(),
         threshold: 70.0,
         min_lines: 5,
+        project_root: None,
     };
     let groups = ecotokens::duplicates::detect::detect_duplicates(&opts).unwrap();
     assert_eq!(groups.len(), 0, "single symbol → 0 groups");
