@@ -6,6 +6,7 @@ pub mod doctor;
 pub mod duplicates;
 pub mod embed;
 pub mod filter;
+pub mod handoff;
 pub mod hook;
 pub mod install;
 pub mod jev;

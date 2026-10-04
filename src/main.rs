@@ -20,6 +20,7 @@ mod doctor;
 mod duplicates;
 mod embed;
 mod filter;
+mod handoff;
 mod hook;
 mod install;
 mod jev;
@@ -74,6 +75,13 @@ enum Commands {
     Router {
         #[command(subcommand)]
         action: RouterAction,
+    },
+    /// Session handoff: SessionStart hook that re-injects a saved state (reads JSON from stdin)
+    HookHandoff,
+    /// Session handoff: save the state of a session and carry it across /clear or a compaction
+    Handoff {
+        #[command(subcommand)]
+        action: HandoffAction,
     },
     /// Execute a command, filter its output, record metrics
     Filter {
@@ -415,6 +423,85 @@ enum RouterAction {
         input: Option<f64>,
         #[arg(long)]
         output: Option<f64>,
+    },
+}
+
+#[derive(Subcommand)]
+enum HandoffAction {
+    /// Install the SessionStart hook and the /handoff skills in ~/.claude
+    On {
+        /// Age in hours after which an injected handoff is flagged as stale (saved as handoff_stale_hours)
+        #[arg(long)]
+        stale_hours: Option<u64>,
+        /// Size limit of a handoff in characters, at most 9000 (saved as handoff_max_chars)
+        #[arg(long)]
+        max_chars: Option<usize>,
+    },
+    /// Remove the hook and the skills (saved handoffs are kept)
+    Off,
+    /// Show the setup, the thresholds and what has been injected
+    Status {
+        /// Output as JSON
+        #[arg(long)]
+        json: bool,
+    },
+    /// Step 1: write the handoff of a session from its transcript (no model call)
+    Write {
+        /// Session id (${CLAUDE_SESSION_ID} in the skill)
+        #[arg(long)]
+        session: String,
+        /// Working directory the handoff belongs to (default: current directory)
+        #[arg(long)]
+        cwd: Option<PathBuf>,
+        /// Output as JSON
+        #[arg(long)]
+        json: bool,
+    },
+    /// Step 2: fill the model-written fields of a handoff
+    Set {
+        #[arg(long)]
+        session: String,
+        #[arg(long)]
+        objective: Option<String>,
+        #[arg(long)]
+        problem: Option<String>,
+        /// Planned next steps
+        #[arg(long = "next")]
+        next_steps: Option<String>,
+        /// An abandoned hypothesis (repeatable)
+        #[arg(long)]
+        abandoned: Vec<String>,
+        /// Read a JSON object {objective, problem, next_steps, abandoned} from stdin
+        #[arg(long)]
+        stdin: bool,
+        /// Output as JSON
+        #[arg(long)]
+        json: bool,
+    },
+    /// List the saved handoffs of this directory
+    List {
+        /// Every directory, not only this one
+        #[arg(long)]
+        all: bool,
+        /// Output as JSON
+        #[arg(long)]
+        json: bool,
+    },
+    /// Print a saved handoff (used by /handoff-load) and mark it consumed
+    Load {
+        id: String,
+        /// Output as JSON
+        #[arg(long)]
+        json: bool,
+    },
+    /// Delete handoffs older than handoff_retention_days
+    Clean {
+        /// Show what would be removed without removing it
+        #[arg(long)]
+        dry_run: bool,
+        /// Output as JSON
+        #[arg(long)]
+        json: bool,
     },
 }
 
@@ -1518,8 +1605,19 @@ fn cmd_uninstall(target: String) {
         let had_mcp = install::is_mcp_registered(&claude_path);
         let had_session = install::are_session_hooks_installed(&claude_path);
         let had_router = install::is_prompt_hook_installed(&claude_path);
+        let had_handoff = install::is_handoff_hook_installed(&claude_path);
         match install::uninstall_hook(&claude_path, &claude_json) {
             Ok(()) => {
+                if had_handoff {
+                    print_install_item("removed", "handoff hook", &claude_path);
+                }
+                if let Some(dir) = handoff::skills::default_skills_dir() {
+                    if let Ok(removed) = handoff::skills::remove_skills(&dir) {
+                        for path in removed {
+                            print_install_item("removed", "handoff skill", &path);
+                        }
+                    }
+                }
                 if had_router {
                     print_install_item("removed", "router hook", &claude_path);
                 }
@@ -1802,6 +1900,125 @@ fn cmd_uninstall(target: String) {
     }
 
     post_uninstall_completions(&mut first_section);
+}
+
+fn cmd_handoff(action: HandoffAction) {
+    let Some(dir) = handoff::store::default_dir() else {
+        eprintln!("error: cannot locate the configuration directory");
+        std::process::exit(1);
+    };
+    let settings_path = default_settings_path();
+    let Some(skills_dir) = handoff::skills::default_skills_dir() else {
+        eprintln!("error: cannot locate the home directory");
+        std::process::exit(1);
+    };
+    let mut settings = config::Settings::load();
+    let now = chrono::Utc::now();
+    let cwd_now = std::env::current_dir()
+        .map(|p| p.to_string_lossy().into_owned())
+        .unwrap_or_default();
+    let (outcome, save) = match action {
+        HandoffAction::On {
+            stale_hours,
+            max_chars,
+        } => (
+            handoff::cli::on(
+                &mut settings,
+                &settings_path,
+                &skills_dir,
+                stale_hours,
+                max_chars,
+            ),
+            true,
+        ),
+        HandoffAction::Off => (
+            handoff::cli::off(&mut settings, &settings_path, &skills_dir),
+            true,
+        ),
+        HandoffAction::Status { json } => (
+            handoff::cli::status(
+                &settings,
+                &settings_path,
+                &skills_dir,
+                &dir,
+                &cwd_now,
+                handoff::stats::handoff_db_path().as_deref(),
+                json,
+                now,
+            ),
+            false,
+        ),
+        HandoffAction::Write { session, cwd, json } => {
+            let cwd = cwd
+                .map(|p| p.to_string_lossy().into_owned())
+                .or_else(|| Some(cwd_now.clone()));
+            (
+                handoff::cli::write(&dir, &settings, &session, cwd.as_deref(), json, now),
+                false,
+            )
+        }
+        HandoffAction::Set {
+            session,
+            objective,
+            problem,
+            next_steps,
+            abandoned,
+            stdin,
+            json,
+        } => {
+            let stdin_json = if stdin {
+                let mut buf = String::new();
+                let limit = hook::MAX_STDIN_BYTES as u64;
+                match std::io::stdin().take(limit + 1).read_to_string(&mut buf) {
+                    Ok(_) if buf.len() as u64 <= limit => Some(buf),
+                    _ => {
+                        eprintln!("error: stdin is unreadable or larger than {limit} bytes");
+                        std::process::exit(1);
+                    }
+                }
+            } else {
+                None
+            };
+            let input = handoff::cli::SetInput {
+                objective,
+                problem,
+                next_steps,
+                abandoned,
+            };
+            (
+                handoff::cli::set(
+                    &dir,
+                    &settings,
+                    &session,
+                    input,
+                    stdin_json.as_deref(),
+                    json,
+                    now,
+                ),
+                false,
+            )
+        }
+        HandoffAction::List { all, json } => (
+            handoff::cli::list(&dir, &settings, &cwd_now, all, json, now),
+            false,
+        ),
+        HandoffAction::Load { id, json } => {
+            (handoff::cli::load(&dir, &settings, &id, json, now), false)
+        }
+        HandoffAction::Clean { dry_run, json } => (
+            handoff::cli::clean(&dir, &settings, dry_run, json, now),
+            false,
+        ),
+    };
+    if save && outcome.code == 0 {
+        if let Err(e) = settings.save() {
+            eprintln!("error: could not save settings: {e}");
+            std::process::exit(1);
+        }
+    }
+    print!("{}", outcome.out);
+    eprint!("{}", outcome.err);
+    std::process::exit(outcome.code);
 }
 
 fn cmd_router(action: RouterAction) {
@@ -3686,6 +3903,8 @@ fn main() {
         Commands::HookPostCodex => hook::handle_post_codex(),
         Commands::HookPrompt => router::hook::handle_prompt(),
         Commands::Router { action } => cmd_router(action),
+        Commands::HookHandoff => handoff::hook::handle(),
+        Commands::Handoff { action } => cmd_handoff(action),
         Commands::Filter {
             args,
             debug,

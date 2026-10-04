@@ -15,8 +15,10 @@ pub fn mask(text: &str) -> (String, bool) {
         redacted = true;
     }
 
-    // GCP API Key
-    let re_gcp = regex!(r"AIza[\w\-]{35}");
+    // GCP API Key. Patterns using `\w` are ASCII-only (`(?-u)`): a Unicode `\w` makes
+    // bounded repetitions cost tens of milliseconds to compile, paid once per process.
+    // See tests/masking/word_class_test.rs.
+    let re_gcp = regex!(r"(?-u)AIza[\w\-]{35}");
     if re_gcp.is_match(&out) {
         out = re_gcp.replace_all(&out, "[GCP_KEY]").into_owned();
         redacted = true;
@@ -93,7 +95,7 @@ pub fn mask(text: &str) -> (String, bool) {
     }
 
     // GitHub Fine-Grained PAT
-    let re_gh_fgpat = regex!(r"github_pat_\w{82}");
+    let re_gh_fgpat = regex!(r"(?-u)github_pat_\w{82}");
     if re_gh_fgpat.is_match(&out) {
         out = re_gh_fgpat.replace_all(&out, "[GITHUB_TOKEN]").into_owned();
         redacted = true;
@@ -121,7 +123,7 @@ pub fn mask(text: &str) -> (String, bool) {
     }
 
     // GitLab Personal Access Token
-    let re_glpat = regex!(r"glpat-[\w\-]{20}");
+    let re_glpat = regex!(r"(?-u)glpat-[\w\-]{20}");
     if re_glpat.is_match(&out) {
         out = re_glpat.replace_all(&out, "[GITLAB_TOKEN]").into_owned();
         redacted = true;
@@ -174,7 +176,7 @@ pub fn mask(text: &str) -> (String, bool) {
     }
 
     // PyPI Upload Token
-    let re_pypi = regex!(r"pypi-AgEIcHlwaS5vcmc[\w\-]{50,200}");
+    let re_pypi = regex!(r"(?-u)pypi-AgEIcHlwaS5vcmc[\w\-]{50,200}");
     if re_pypi.is_match(&out) {
         out = re_pypi.replace_all(&out, "[PYPI_TOKEN]").into_owned();
         redacted = true;

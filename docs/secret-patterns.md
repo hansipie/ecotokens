@@ -39,3 +39,5 @@ Sensitive values are detected and replaced before any content reaches the model.
 | URL credentials (`user:pass@host`) | `[CREDENTIALS]` |
 
 The implementation lives in [`src/masking/patterns.rs`](../src/masking/patterns.rs).
+
+The GCP, GitHub fine-grained, GitLab and PyPI patterns match ASCII characters only (`(?-u)`): the credentials they target are ASCII, and a Unicode `\w` makes the first masking call about 95 ms slower. `tests/masking/word_class_test.rs` keeps it that way.

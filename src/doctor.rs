@@ -95,6 +95,11 @@ fn run_with_paths(paths: DoctorPaths) -> DoctorReport {
             env::var(crate::jev::API_KEY_ENV).ok().as_deref(),
             paths.claude_settings_path.as_deref(),
         ),
+        check_handoff(
+            &settings,
+            paths.claude_settings_path.as_deref(),
+            crate::handoff::skills::default_skills_dir().as_deref(),
+        ),
     ];
     DoctorReport { checks }
 }
@@ -207,6 +212,43 @@ pub fn check_router(
     };
     DoctorCheck {
         name: "Router",
+        status,
+        message,
+        path: claude_settings.map(|p| p.display().to_string()),
+    }
+}
+
+/// Reports the session handoff state: the SessionStart hook and the two skills
+/// must both be there for `/handoff` and the re-injection to work.
+pub fn check_handoff(
+    settings: &config::Settings,
+    claude_settings: Option<&Path>,
+    skills_dir: Option<&Path>,
+) -> DoctorCheck {
+    let hook = claude_settings.is_some_and(install::is_handoff_hook_installed);
+    let skills = skills_dir.is_some_and(crate::handoff::skills::are_skills_installed);
+    let (status, message) = if !settings.handoff_enabled {
+        (DoctorStatus::Ok, "session handoff off".to_string())
+    } else if !hook {
+        (
+            DoctorStatus::Warning,
+            "session handoff on but the SessionStart hook is missing; run `ecotokens handoff on`"
+                .to_string(),
+        )
+    } else if !skills {
+        (
+            DoctorStatus::Warning,
+            "session handoff on but the /handoff skills are missing; run `ecotokens handoff on`"
+                .to_string(),
+        )
+    } else {
+        (
+            DoctorStatus::Ok,
+            "session handoff on; hook and skills are installed".to_string(),
+        )
+    };
+    DoctorCheck {
+        name: "Handoff",
         status,
         message,
         path: claude_settings.map(|p| p.display().to_string()),
@@ -470,6 +512,41 @@ mod tests {
         let check = check_auto_watch(&config::Settings::default(), Some(&settings_path));
 
         assert_eq!(check.status, DoctorStatus::Ok);
+    }
+
+    #[test]
+    fn handoff_is_ok_when_off_and_warns_when_its_pieces_are_missing() {
+        let dir = tempdir().unwrap();
+        let settings_path = dir.path().join("settings.json");
+        let skills = dir.path().join("skills");
+        std::fs::write(&settings_path, "{}").unwrap();
+
+        let off = config::Settings::default();
+        assert_eq!(
+            check_handoff(&off, Some(&settings_path), Some(&skills)).status,
+            DoctorStatus::Ok
+        );
+
+        let on = config::Settings {
+            handoff_enabled: true,
+            ..Default::default()
+        };
+        let check = check_handoff(&on, Some(&settings_path), Some(&skills));
+        assert_eq!(check.status, DoctorStatus::Warning);
+        assert!(
+            check.message.contains("ecotokens handoff on"),
+            "{}",
+            check.message
+        );
+
+        install::install_handoff_hook(&settings_path).unwrap();
+        let check = check_handoff(&on, Some(&settings_path), Some(&skills));
+        assert_eq!(check.status, DoctorStatus::Warning, "skills still missing");
+
+        crate::handoff::skills::install_skills(&skills).unwrap();
+        let check = check_handoff(&on, Some(&settings_path), Some(&skills));
+        assert_eq!(check.status, DoctorStatus::Ok);
+        assert_eq!(check.name, "Handoff");
     }
 
     #[test]

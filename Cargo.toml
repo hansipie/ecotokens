@@ -460,3 +460,75 @@ path = "tests/jev/context_stats_test.rs"
 [[test]]
 name = "jev_tui_test"
 path = "tests/tui/jev_test.rs"
+
+[[test]]
+name = "handoff_format_test"
+path = "tests/handoff/format_test.rs"
+
+[[test]]
+name = "handoff_trim_test"
+path = "tests/handoff/trim_test.rs"
+
+[[test]]
+name = "handoff_store_test"
+path = "tests/handoff/store_test.rs"
+
+[[test]]
+name = "handoff_transcript_test"
+path = "tests/handoff/transcript_test.rs"
+
+[[test]]
+name = "handoff_skills_test"
+path = "tests/handoff/skills_test.rs"
+
+[[test]]
+name = "handoff_cli_test"
+path = "tests/handoff/cli_test.rs"
+
+[[test]]
+name = "handoff_hook_test"
+path = "tests/handoff/hook_test.rs"
+
+[[test]]
+name = "handoff_hook_source_test"
+path = "tests/handoff/hook_source_test.rs"
+
+[[test]]
+name = "handoff_masking_test"
+path = "tests/handoff/masking_test.rs"
+
+[[test]]
+name = "handoff_matching_test"
+path = "tests/handoff/matching_test.rs"
+
+[[test]]
+name = "handoff_list_load_clean_test"
+path = "tests/handoff/list_load_clean_test.rs"
+
+[[test]]
+name = "handoff_stats_test"
+path = "tests/handoff/stats_test.rs"
+
+[[test]]
+name = "handoff_install_test"
+path = "tests/handoff/install_test.rs"
+
+[[test]]
+name = "handoff_skills_install_test"
+path = "tests/handoff/skills_install_test.rs"
+
+[[test]]
+name = "handoff_status_test"
+path = "tests/handoff/status_test.rs"
+
+[[test]]
+name = "handoff_hardening_test"
+path = "tests/handoff/hardening_test.rs"
+
+[[test]]
+name = "handoff_perf_test"
+path = "tests/handoff/perf_test.rs"
+
+[[test]]
+name = "masking_word_class_test"
+path = "tests/masking/word_class_test.rs"

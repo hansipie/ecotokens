@@ -190,3 +190,52 @@ fn embed_provider_missing_in_json_defaults_to_candle() {
         }
     );
 }
+
+// ── Session handoff settings ────────────────────────────────────────────────
+
+#[test]
+fn handoff_defaults() {
+    let s = Settings::default();
+    assert!(!s.handoff_enabled);
+    assert_eq!(s.handoff_max_chars, 4000);
+    assert_eq!(s.handoff_stale_hours, 24);
+    assert_eq!(s.handoff_retention_days, 30);
+    assert!(!s.handoff_inject_startup);
+}
+
+#[test]
+fn old_config_without_handoff_keys_still_loads() {
+    let s: Settings = serde_json::from_str(r#"{"debug": true}"#).unwrap();
+    assert!(s.debug);
+    assert!(!s.handoff_enabled);
+    assert_eq!(s.handoff_max_chars, 4000);
+    assert_eq!(s.handoff_stale_hours, 24);
+    assert_eq!(s.handoff_retention_days, 30);
+}
+
+#[test]
+fn handoff_max_chars_is_capped_below_the_claude_code_injection_limit() {
+    let mut s = Settings::default();
+    assert_eq!(s.effective_handoff_max_chars(), 4000);
+    s.handoff_max_chars = 9000;
+    assert_eq!(s.effective_handoff_max_chars(), 9000);
+    s.handoff_max_chars = 50_000;
+    assert_eq!(s.effective_handoff_max_chars(), 9000);
+}
+
+#[test]
+fn handoff_settings_round_trip() {
+    let s = Settings {
+        handoff_enabled: true,
+        handoff_max_chars: 2500,
+        handoff_stale_hours: 6,
+        handoff_retention_days: 10,
+        handoff_inject_startup: true,
+        ..Default::default()
+    };
+    let back: Settings = serde_json::from_str(&serde_json::to_string(&s).unwrap()).unwrap();
+    assert!(back.handoff_enabled && back.handoff_inject_startup);
+    assert_eq!(back.handoff_max_chars, 2500);
+    assert_eq!(back.handoff_stale_hours, 6);
+    assert_eq!(back.handoff_retention_days, 10);
+}

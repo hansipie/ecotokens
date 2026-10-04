@@ -370,6 +370,49 @@ Metrics integrity:
 - `ecotokens gain --json` output is byte-identical, field for field, before and after any number of
   `Cli`/`Mcp`-origin rewrites are recorded — local rewrites must never move `total_savings_pct`
 
+### K. Session handoff
+
+Objective: confirm `ecotokens handoff`, the `/handoff` and `/handoff-load` skills and the
+`ecotokens hook-handoff` `SessionStart` hook save and restore a session state without ever blocking a
+session, leaking a secret or touching anything outside their own directory. Touching this feature also
+triggers sections C, D and G (hooks, install, security); the masking module is only called, not changed.
+
+Install and uninstall (section D rules apply):
+- `handoff on` twice leaves one `SessionStart` entry (no matcher, `timeout` 5) and two managed skills
+- Third-party `SessionStart` entries and the existing `ecotokens session-start` entry survive `on`, `off`
+  and the full `ecotokens uninstall`
+- A skill file the user wrote under the same name is never overwritten or removed
+- `ecotokens doctor` reports `Handoff` as a warning when it is on and the hook or skills are missing
+
+Save and restore:
+- `/handoff` then `/clear` loads the objective, the failed attempt and the next step into the new session
+  without restating them; `/compact` adds the same state after the native summary
+- After injection the file is `status: consumed` and is not injected again; `/handoff-load <id>` still loads it
+- Two pending handoffs for one directory give a short list only, and nothing is consumed
+- A handoff older than `handoff_stale_hours` is injected with the stale line
+- `startup`, `resume` and `fork` inject nothing unless `handoff_inject_startup` is set
+- A handoff written for another working directory is never injected
+
+Security and resilience (section G rules apply):
+- A planted secret (token in a failing command, in the text the model writes, or added by hand to the file)
+  is absent from the file, the injected text and every `--json` field
+- A hostile session id (`../x`, an absolute path, NUL) creates and reads nothing outside the handoff directory
+- The handoff directory is `0700` and its files `0600`
+- Garbage, empty, non-UTF-8 and oversized (over 10 MB) stdin, a read-only handoff directory, a corrupted
+  handoff file and a deleted transcript each end in a normal session start (exit `0`)
+- The injected text never exceeds 10,000 characters, whatever the file holds
+
+Performance (section I rules apply):
+- `hook-handoff` with nothing saved stays within 10% of the existing `session-start` hook (about 4 ms)
+- `hook-handoff` injecting a handoff stays under 20 ms at p90 (about 10 ms measured); a jump to about 100 ms
+  means a masking pattern with a Unicode `\w` was added (`tests/masking/word_class_test.rs` guards this);
+  record p50 and p90 with the script in `specs/011-session-handoff/quickstart.md`
+- `handoff write` on a 5 MB transcript stays under 2 s (`cargo test --release --test handoff_perf_test -- --nocapture`)
+
+Manual end-to-end (cannot be automated: needs a real Claude Code session): the 13 steps of
+`specs/011-session-handoff/quickstart.md`, in particular that `${CLAUDE_SESSION_ID}` is substituted inside the
+skill and whether the session id changes across `/clear` (the design does not depend on it).
+
 ## Priority matrix
 
 ### P0: must test before every release
@@ -382,6 +425,7 @@ Metrics integrity:
 - Gain JSON and history output
 - Search and watch if code-intelligence modules changed
 - Rewrite fail-open behavior and diff masking (section J)
+- Handoff secret masking and fail-open behavior (section K)
 
 ### P1: test when related code changes
 
@@ -392,6 +436,7 @@ Metrics integrity:
 - TUI interaction details
 - Exact-token feature build
 - Rewrite chunk reassembly and the automatic pipeline stage (section J)
+- Session handoff save and restore, install and uninstall (section K)
 
 ### P2: periodic or pre-major-release checks
 

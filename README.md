@@ -45,6 +45,7 @@ Full methodology and per-family breakdown: [`docs/BENCHMARKS.md`](docs/BENCHMARK
 | **AI summarization** *(optional)* | Large outputs compressed by a local Ollama model instead of being truncated |
 | **Word abbreviations** *(optional)* | Replace common words with shorter forms (`function`→`fn`, `configuration`→`config`, …) in narrative text, and nudge the model to do the same via a SessionStart instruction |
 | **Model router** *(optional)* | Claude Code only: a `UserPromptSubmit` hook has Jev size each message (tiny / everyday / large / hardest) and delegates it to a helper agent on a matching model (Haiku / Sonnet / Opus / Fable), so small jobs stop running on the biggest model. Fail-open, see [Model router](docs/model-router.md) |
+| **Session handoff** *(optional)* | Claude Code only: `/handoff` saves the objective, key files, failed attempts and next steps of a long session; after `/clear` (or a compaction) a `SessionStart` hook loads them back. Local, secrets masked, fail-open, see [Session handoff](docs/handoff.md) |
 | **Zero config** | One `ecotokens install` command - works automatically from there |
 
 > Full compatibility matrix: [harness feature matrix](docs/harness-feature-matrix.md)
@@ -188,6 +189,7 @@ command or a message.
 | AI summarization and text rewrite (local Ollama) | [`docs/local-models.md`](docs/local-models.md) |
 | Jev judgments (TypeSafe, optional) | [`docs/jev-integration.md`](docs/jev-integration.md) |
 | Model router (Claude Code, optional) | [`docs/model-router.md`](docs/model-router.md) |
+| Session handoff (Claude Code, optional) | [`docs/handoff.md`](docs/handoff.md) |
 | Recovering the full output | [`docs/raw-output-recovery.md`](docs/raw-output-recovery.md) |
 | Terminal views (gain, jev, game, outline, trace, watch) | [`docs/TUI.md`](docs/TUI.md) |
 | Word abbreviations | [`docs/abbreviations.md`](docs/abbreviations.md), [`docs/abbreviations-pipeline.md`](docs/abbreviations-pipeline.md) |

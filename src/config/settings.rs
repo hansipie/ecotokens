@@ -239,6 +239,25 @@ pub struct Settings {
     #[serde(default = "default_router_followup_min_prob")]
     pub router_followup_min_prob: f64,
 
+    // ── Session handoff (`/handoff` skill + SessionStart hook) ──
+    /// Feature switch, toggled by `ecotokens handoff on|off`. Off by default.
+    #[serde(default)]
+    pub handoff_enabled: bool,
+    /// Size limit of a handoff, in characters. Capped at 9000 when read (see
+    /// [`Settings::effective_handoff_max_chars`]).
+    #[serde(default = "default_handoff_max_chars")]
+    pub handoff_max_chars: usize,
+    /// Age in hours after which an injected handoff is flagged as stale.
+    #[serde(default = "default_handoff_stale_hours")]
+    pub handoff_stale_hours: u64,
+    /// Handoff files older than this many days are deleted.
+    #[serde(default = "default_handoff_retention_days")]
+    pub handoff_retention_days: u64,
+    /// Also inject on `startup`, `resume` and `fork` (always on for `clear`
+    /// and `compact`).
+    #[serde(default)]
+    pub handoff_inject_startup: bool,
+
     // ── Raw output recovery (`ecotokens show <id>`) ──
     /// Save the full (secret-masked) output whenever filtering shrinks it
     /// noticeably, and print `ecotokens show <id>` after the filtered text.
@@ -332,6 +351,16 @@ fn default_router_followup_min_prob() -> f64 {
     0.5
 }
 
+fn default_handoff_max_chars() -> usize {
+    4000
+}
+fn default_handoff_stale_hours() -> u64 {
+    24
+}
+fn default_handoff_retention_days() -> u64 {
+    30
+}
+
 fn default_raw_recovery_retention_days() -> u32 {
     7
 }
@@ -391,6 +420,11 @@ impl Default for Settings {
             router_timeout_ms: default_router_timeout_ms(),
             router_min_confidence: default_router_min_confidence(),
             router_followup_min_prob: default_router_followup_min_prob(),
+            handoff_enabled: false,
+            handoff_max_chars: default_handoff_max_chars(),
+            handoff_stale_hours: default_handoff_stale_hours(),
+            handoff_retention_days: default_handoff_retention_days(),
+            handoff_inject_startup: false,
             raw_recovery_enabled: true,
             raw_recovery_retention_days: default_raw_recovery_retention_days(),
             raw_recovery_max_entries: default_raw_recovery_max_entries(),
@@ -399,6 +433,13 @@ impl Default for Settings {
 }
 
 impl Settings {
+    /// The handoff size limit actually applied: Claude Code truncates injected
+    /// hook output above 10,000 characters, so the setting never goes above 9,000.
+    pub fn effective_handoff_max_chars(&self) -> usize {
+        self.handoff_max_chars
+            .min(crate::handoff::MAX_CHARS_CEILING)
+    }
+
     pub fn config_path() -> Option<PathBuf> {
         dirs::config_dir().map(|d| d.join("ecotokens").join("config.json"))
     }

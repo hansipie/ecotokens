@@ -5,6 +5,16 @@ All notable changes to this project will be documented in this file.
 The format is based on [Keep a Changelog](https://keepachangelog.com/en/1.0.0/),
 and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0.html).
 
+## [Unreleased]
+
+### Added
+
+- **Session handoff** (Claude Code): `/handoff` saves the objective, problem, key files, failed attempts and next steps of a session in a short Markdown file; after `/clear` or a compaction a `SessionStart` hook loads it back. New commands `ecotokens handoff on|off|status|write|set|list|load|clean` and hook `ecotokens hook-handoff`, new settings `handoff_enabled`, `handoff_max_chars`, `handoff_stale_hours`, `handoff_retention_days` and `handoff_inject_startup`, new `ecotokens doctor` check. All JSON output is new and additive; no existing schema changes. See [docs/handoff.md](docs/handoff.md).
+
+### Changed
+
+- **Faster secret masking**: the GCP API key, GitHub fine-grained token, GitLab token and PyPI token patterns are now ASCII-only (`(?-u)`). They made the first call to the masking function take about 95 ms, because the regex crate compiles a Unicode `\w{n}` very slowly; it now takes under 2 ms, for every command and hook that masks. Real tokens of these services are ASCII and are masked as before; text made only of non-ASCII look-alike letters is no longer treated as a credential.
+
 ## [0.28.0] - 2026-10-02
 
 ### Added

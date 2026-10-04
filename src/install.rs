@@ -220,6 +220,7 @@ pub fn uninstall_hook(settings_path: &Path, claude_json_path: &Path) -> InstallR
         remove_hook_generic(&mut v, "SessionStart", SESSION_START_COMMAND);
         remove_hook_generic(&mut v, "SessionEnd", SESSION_END_COMMAND);
         remove_prompt_hook_entry(&mut v);
+        remove_hook_entry_dropping_empty(&mut v, "SessionStart", HANDOFF_HOOK_COMMAND);
         remove_ecotokens_mcp_server(&mut v);
         write_settings(settings_path, &v)?;
     }
@@ -304,21 +305,24 @@ pub fn is_prompt_hook_installed(settings_path: &Path) -> bool {
     )
 }
 
-/// Removes our entry, and the event key itself when nothing else is left.
-fn remove_prompt_hook_entry(v: &mut serde_json::Value) -> bool {
-    if v["hooks"]["UserPromptSubmit"].is_null() {
+/// Removes our entry for `event`, and the event key itself when nothing else
+/// is left. Returns true if something was removed.
+fn remove_hook_entry_dropping_empty(v: &mut serde_json::Value, event: &str, command: &str) -> bool {
+    if v["hooks"][event].is_null() {
         return false;
     }
-    let changed = remove_hook_generic(v, "UserPromptSubmit", PROMPT_HOOK_COMMAND);
-    let empty = v["hooks"]["UserPromptSubmit"]
-        .as_array()
-        .is_some_and(|a| a.is_empty());
+    let changed = remove_hook_generic(v, event, command);
+    let empty = v["hooks"][event].as_array().is_some_and(|a| a.is_empty());
     if empty {
         if let Some(hooks) = v["hooks"].as_object_mut() {
-            hooks.remove("UserPromptSubmit");
+            hooks.remove(event);
         }
     }
     changed
+}
+
+fn remove_prompt_hook_entry(v: &mut serde_json::Value) -> bool {
+    remove_hook_entry_dropping_empty(v, "UserPromptSubmit", PROMPT_HOOK_COMMAND)
 }
 
 /// Remove the UserPromptSubmit hook (idempotent, keeps third-party entries).
@@ -328,6 +332,56 @@ pub fn uninstall_prompt_hook(settings_path: &Path) -> InstallResult {
     }
     let mut v = read_settings_checked(settings_path)?;
     if remove_prompt_hook_entry(&mut v) {
+        write_settings(settings_path, &v)?;
+    }
+    Ok(())
+}
+
+// ============================================================================
+// Claude Code SessionStart hook for the session handoff (`ecotokens handoff on|off`)
+// ============================================================================
+
+const HANDOFF_HOOK_COMMAND: &str = "ecotokens hook-handoff";
+/// Claude Code's hard stop for the hook. The hook is local and fast, so a
+/// stuck one must never hold a session start back for long.
+const HANDOFF_HOOK_TIMEOUT_SECS: u64 = 5;
+
+/// Install the SessionStart hook of the handoff feature (idempotent). No
+/// matcher: the hook records every session and decides in code which sources
+/// receive a handoff.
+pub fn install_handoff_hook(settings_path: &Path) -> InstallResult {
+    let mut v = read_settings_checked(settings_path)?;
+    remove_hook_generic(&mut v, "SessionStart", HANDOFF_HOOK_COMMAND);
+    let mut hooks = v["hooks"]["SessionStart"]
+        .as_array()
+        .cloned()
+        .unwrap_or_default();
+    hooks.push(serde_json::json!({
+        "hooks": [{
+            "type": "command",
+            "command": HANDOFF_HOOK_COMMAND,
+            "timeout": HANDOFF_HOOK_TIMEOUT_SECS
+        }]
+    }));
+    v["hooks"]["SessionStart"] = serde_json::Value::Array(hooks);
+    write_settings(settings_path, &v)
+}
+
+pub fn is_handoff_hook_installed(settings_path: &Path) -> bool {
+    has_hook_command(
+        &read_settings(settings_path),
+        "SessionStart",
+        HANDOFF_HOOK_COMMAND,
+    )
+}
+
+/// Remove the handoff SessionStart hook (idempotent, keeps third-party entries).
+pub fn uninstall_handoff_hook(settings_path: &Path) -> InstallResult {
+    if !settings_path.exists() {
+        return Ok(());
+    }
+    let mut v = read_settings_checked(settings_path)?;
+    if remove_hook_entry_dropping_empty(&mut v, "SessionStart", HANDOFF_HOOK_COMMAND) {
         write_settings(settings_path, &v)?;
     }
     Ok(())
