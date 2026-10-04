@@ -569,15 +569,38 @@ pub fn list(
 }
 
 fn available_ids(dir: &Path, settings: &Settings, now: DateTime<Utc>) -> String {
-    let ids: Vec<String> = list_entries(dir, None, settings.handoff_stale_hours, now)
+    let lines: Vec<String> = list_entries(dir, None, settings.handoff_stale_hours, now)
         .into_iter()
         .filter(|e| e.state != EntryState::Corrupted)
-        .map(|e| e.id)
+        .map(|e| {
+            let status = if e.stale && e.state == EntryState::Pending {
+                "stale"
+            } else {
+                e.state.as_str()
+            };
+            let objective = e
+                .handoff
+                .as_ref()
+                .and_then(|h| one_line(h.objective.as_deref()))
+                .unwrap_or_else(|| NOT_PROVIDED.into());
+            format!(
+                "  {:<38} {:<10} {:<10} {objective}",
+                e.id,
+                human_age(e.age),
+                status
+            )
+        })
         .collect();
-    if ids.is_empty() {
+    if lines.is_empty() {
         "no handoff is saved".to_string()
     } else {
-        format!("available ids: {}", ids.join(", "))
+        format!(
+            "available handoffs:\n  {:<38} {:<10} {:<10} OBJECTIVE\n{}",
+            "ID",
+            "AGE",
+            "STATUS",
+            lines.join("\n")
+        )
     }
 }
 
