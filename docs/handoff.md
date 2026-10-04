@@ -75,7 +75,7 @@ You can edit the file by hand before it is injected. Text you add is kept.
 | `ecotokens handoff write --session <id>` | step 1 (used by `/handoff`) |
 | `ecotokens handoff set --session <id> [--stdin]` | step 2 (used by `/handoff`) |
 | `ecotokens handoff list [--all] [--json]` | the saved handoffs of this directory, newest first |
-| `ecotokens handoff load <id> [--json]` | prints a handoff (used by `/handoff-load`) and marks it consumed |
+| `ecotokens handoff load [<id>] [--json]` | prints a handoff (the newest pending one of this directory without an id) (used by `/handoff-load`) and marks it consumed |
 | `ecotokens handoff clean [--dry-run] [--json]` | removes handoffs and session records older than the retention |
 
 Every structured command has `--json`. Exit codes: `0` success, `1` operational error, `2` invalid argument.

@@ -489,7 +489,8 @@ enum HandoffAction {
     },
     /// Print a saved handoff (used by /handoff-load) and mark it consumed
     Load {
-        id: String,
+        /// Session id; without it, the newest pending handoff of this directory
+        id: Option<String>,
         /// Output as JSON
         #[arg(long)]
         json: bool,
@@ -2002,9 +2003,10 @@ fn cmd_handoff(action: HandoffAction) {
             handoff::cli::list(&dir, &settings, &cwd_now, all, json, now),
             false,
         ),
-        HandoffAction::Load { id, json } => {
-            (handoff::cli::load(&dir, &settings, &id, json, now), false)
-        }
+        HandoffAction::Load { id, json } => (
+            handoff::cli::load_or_latest(&dir, &settings, &cwd_now, id.as_deref(), json, now),
+            false,
+        ),
         HandoffAction::Clean { dry_run, json } => (
             handoff::cli::clean(&dir, &settings, dry_run, json, now),
             false,

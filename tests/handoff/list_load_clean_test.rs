@@ -3,7 +3,7 @@ mod common;
 use common::*;
 
 use ecotokens::config::Settings;
-use ecotokens::handoff::cli::{clean, list, load};
+use ecotokens::handoff::cli::{clean, list, load, load_or_latest};
 use ecotokens::handoff::hook::process;
 use ecotokens::handoff::store::{read_handoff, write_handoff, write_session_record};
 use ecotokens::handoff::{SessionRecord, Status};
@@ -111,6 +111,38 @@ fn load_prints_the_injectable_text_and_consumes_a_pending_handoff() {
         read_handoff(dir.path(), "abc123").unwrap().status,
         Status::Consumed
     );
+}
+
+#[test]
+fn load_without_an_id_takes_the_newest_pending_handoff_of_the_directory() {
+    let dir = TempDir::new().unwrap();
+    put(dir.path(), "older", CWD, 5);
+    put(dir.path(), "newer", CWD, 1);
+    put(dir.path(), "elsewhere", "/home/u/other", 0);
+    let out = load_or_latest(dir.path(), &settings(), CWD, None, false, fixed_now());
+    assert_eq!(out.code, 0, "{}", out.err);
+    assert!(out.out.contains("objective of newer"), "{}", out.out);
+    // A blank `$ARGUMENTS` behaves like no id: the next pending one is `older`.
+    let out = load_or_latest(dir.path(), &settings(), CWD, Some("  "), false, fixed_now());
+    assert!(out.out.contains("objective of older"), "{}", out.out);
+    assert_eq!(
+        read_handoff(dir.path(), "newer").unwrap().status,
+        Status::Consumed
+    );
+    assert_eq!(
+        read_handoff(dir.path(), "elsewhere").unwrap().status,
+        Status::Pending
+    );
+}
+
+#[test]
+fn load_without_an_id_and_without_a_pending_handoff_lists_the_ids() {
+    let dir = TempDir::new().unwrap();
+    put(dir.path(), "only", "/home/u/other", 1);
+    let out = load_or_latest(dir.path(), &settings(), CWD, None, false, fixed_now());
+    assert_eq!(out.code, 1);
+    assert!(out.err.contains("no pending handoff"), "{}", out.err);
+    assert!(out.err.contains("only"), "{}", out.err);
 }
 
 #[test]

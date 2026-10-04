@@ -581,6 +581,34 @@ fn available_ids(dir: &Path, settings: &Settings, now: DateTime<Utc>) -> String 
     }
 }
 
+/// `load` for the CLI: without an `id` (an empty `$ARGUMENTS` in the
+/// `/handoff-load` skill), the newest pending handoff written for `cwd`.
+pub fn load_or_latest(
+    dir: &Path,
+    settings: &Settings,
+    cwd: &str,
+    id: Option<&str>,
+    json: bool,
+    now: DateTime<Utc>,
+) -> Outcome {
+    if let Some(id) = id.map(str::trim).filter(|i| !i.is_empty()) {
+        return load(dir, settings, id, json, now);
+    }
+    let newest = list_entries(dir, Some(cwd), settings.handoff_stale_hours, now)
+        .into_iter()
+        .find(|e| e.state == EntryState::Pending);
+    match newest {
+        Some(e) => load(dir, settings, &e.id, json, now),
+        None => Outcome::fail(
+            1,
+            &format!(
+                "error: no pending handoff for this directory; {}",
+                available_ids(dir, settings, now)
+            ),
+        ),
+    }
+}
+
 /// Prints the injectable text of a handoff and marks it consumed.
 pub fn load(dir: &Path, settings: &Settings, id: &str, json: bool, now: DateTime<Utc>) -> Outcome {
     let unknown = || {
