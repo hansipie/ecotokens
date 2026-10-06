@@ -20,6 +20,7 @@ ecotokens ships several interactive terminal views built with [ratatui](https://
 - **Interactive terminal only.** Every view opens on the alternate screen in raw mode, and only when stdout is a terminal. When stdout is piped or redirected, the same command prints plain text instead (or JSON with `--json`), and `ecotokens game` exits with an error. The terminal state is always restored on exit, including on panic.
 - **Quit keys.** `q`, `Q`, `Esc` and `Ctrl-C` quit every view. Any other key is view-specific.
 - **`--period`.** `gain`, `jev` and `game` accept `--period all|today|week|month` (default `all`). It restricts the data to the last 24 hours (`today`), 7 days (`week`), 30 days (`month`), or everything (`all`).
+- **`--project`.** `gain` and `jev` accept `--project PATH` to show a single project. A directory inside a repository stands for its git root (outside git, the directory itself). The filter applies to the TUI, the plain-text output and `--json`, survives the 10-second refresh, and is kept when `v` switches between the two views. Jev calls recorded before 0.30.0 have no project and do not appear in a filtered view.
 - **Live refresh.** The gain and Jev views reload their data every 10 seconds, and the game picks up new interceptions on the same cadence. The gain dashboard and Jev view show the last refresh time (UTC) in their title.
 - **Empty data.** No view crashes on an empty store. Each one shows an explicit placeholder, described in its section.
 
@@ -28,6 +29,7 @@ ecotokens ships several interactive terminal views built with [ratatui](https://
 ```bash
 ecotokens gain                    # all time
 ecotokens gain --period today     # also: week, month
+ecotokens gain --project .        # only the current project
 ```
 
 Shows how many tokens ecotokens saved, grouped by command family or by project. The `--json` and `--history` flags bypass the TUI and print a report instead.
@@ -94,6 +96,7 @@ With no interceptions the gauge panel shows `No data yet.`. Before anything is s
 ecotokens jev                     # all time
 ecotokens jev --period week
 ecotokens jev --json              # print the summary as JSON, no TUI
+ecotokens jev --project ~/Code/x  # only the calls made in that project
 ```
 
 Shows how the optional [Jev integration](jev-integration.md) is being used: how many calls were made, how often ecotokens fell back to its local heuristic, latency, tokens and cost. From `ecotokens jev`, pressing `v` opens the gain dashboard. From the gain dashboard, `v` opens this view.

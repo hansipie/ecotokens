@@ -24,7 +24,8 @@ Every `ecotokens` command, shell completions, the gain dashboard and the filter 
 | `ecotokens gain --period PERIOD` | Filter TUI to a time window (`all`, `today`, `week`, `month`) |
 | `ecotokens gain --history` | Print a savings summary table for 24h / 7 days / 30 days |
 | `ecotokens gain --json` | JSON report |
-| `ecotokens jev [--period PERIOD] [--json]` | TUI with detailed Jev usage - calls, fallbacks, latency, tokens, cost, recent calls (also `v` in `gain`) |
+| `ecotokens gain --project PATH` | Only the interceptions of one project (a directory inside a repository stands for its git root); works with the TUI, `--json` and `--history` |
+| `ecotokens jev [--period PERIOD] [--project PATH] [--json]` | TUI with detailed Jev usage - calls, fallbacks, latency, tokens, cost, recent calls (also `v` in `gain`); `--project` keeps the calls made in one project |
 | `ecotokens game [--period PERIOD]` | Space Invaders mini-game - filtered commands spawn enemies scaled by tokens saved |
 | `ecotokens config [--debug true\|false]` | Show or update global configuration (including debug mode) |
 | `ecotokens doctor [--json]` | Diagnose PATH, config, hook, MCP, and metrics setup without mutating files |
@@ -61,6 +62,7 @@ Every `ecotokens` command, shell completions, the gain dashboard and the filter 
 | `ecotokens router status [--json]` | Messages per size and decision, Jev requests, tokens, latency and estimated cost |
 | `ecotokens router try MESSAGE... [--json] [--timeout-ms N]` | Size sample messages with Jev (live, not recorded, works while the router is off) |
 | `ecotokens router price --input USD --output USD` | Set the Jev price per million tokens used for cost estimates |
+| `ecotokens handoff on\|off\|status\|list\|load\|clean` | Session handoff across `/clear` and compaction (Claude Code only) — see [Session handoff](handoff.md) |
 
 ## Shell completions
 
@@ -101,11 +103,12 @@ ecotokens gain --period week                            # last 7 days
 ecotokens gain --period month                           # last 30 days
 ecotokens gain --history                                # summary table: 24h / 7d / 30d
 ecotokens gain --history --json                         # same, as JSON
+ecotokens gain --project .                              # only the current project
 ```
 
 Cost avoided is computed from the input price you set with `ecotokens gain price --input <USD per 1M tokens> --output <USD per 1M tokens>`. Without a price it shows `n/a` (`null` in `--json`). Running `ecotokens gain price` with no flag shows the current values.
 
-Interactive TUI showing token savings per command family and per project, with a sparkline. The `--period` flag filters both the stats and the history panels. All terminal views (gain, jev, game, outline, trace, watch) are described in [`docs/TUI.md`](TUI.md).
+Interactive TUI showing token savings per command family and per project, with a sparkline. The `--period` flag filters both the stats and the history panels. `--project PATH` keeps only the interceptions whose git root is the project of `PATH`; the filter stays on when you switch to the Jev view with `v`. All terminal views (gain, jev, game, outline, trace, watch) are described in [`docs/TUI.md`](TUI.md).
 
 Keybindings for every view are listed in [TUI.md](TUI.md#gain-dashboard).
 
