@@ -126,6 +126,11 @@ pub fn filter_by_period(items: &[Interception], period: &Period) -> Vec<Intercep
         .collect()
 }
 
+/// Keeps only the interceptions of `project` (a git root, as stored in `git_root`).
+pub fn keep_project(items: &mut Vec<Interception>, project: &str) {
+    items.retain(|i| i.git_root.as_deref() == Some(project));
+}
+
 /// Aggregate interceptions into a Report.
 pub fn aggregate(items: &[Interception], period: Period) -> Report {
     aggregate_with_price(items, period, Settings::load().price_input_usd_per_mtok)

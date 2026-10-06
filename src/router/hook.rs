@@ -23,6 +23,9 @@ pub const JEV_DOWN_TTL: Duration = Duration::from_secs(300);
 struct PromptHookInput {
     #[serde(default)]
     prompt: String,
+    /// The session's working directory: Jev calls are recorded in its project.
+    #[serde(default)]
+    cwd: Option<PathBuf>,
 }
 
 #[derive(Debug, Serialize)]
@@ -124,6 +127,9 @@ pub fn handle_prompt() {
     let Ok(input) = serde_json::from_str::<PromptHookInput>(&buf) else {
         return;
     };
+    if let Some(cwd) = &input.cwd {
+        crate::jev::stats::set_project_dir(cwd);
+    }
     let Some(marker) = jev_down_marker_path() else {
         return;
     };

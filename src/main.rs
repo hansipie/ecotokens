@@ -128,6 +128,9 @@ enum Commands {
         /// Show savings for last 24h, 7 days, and 30 days at once
         #[arg(long)]
         history: bool,
+        /// Only this project (a directory inside it: its git root is used)
+        #[arg(long, value_name = "PATH")]
+        project: Option<PathBuf>,
         #[command(subcommand)]
         action: Option<GainAction>,
     },
@@ -138,6 +141,9 @@ enum Commands {
         /// Output as JSON
         #[arg(long)]
         json: bool,
+        /// Only the calls made in this project (a directory inside it: its git root is used)
+        #[arg(long, value_name = "PATH")]
+        project: Option<PathBuf>,
     },
     /// Play a Space Invaders mini-game where each filtered command spawns an enemy
     Game {
@@ -497,15 +503,15 @@ enum HandoffAction {
     },
     /// Delete handoffs past handoff_retention_days or handoff_consumed_retention_hours
     Clean {
+        /// Also delete every consumed handoff, whatever its age
+        #[arg(long)]
+        consumed: bool,
         /// Show what would be removed without removing it
         #[arg(long)]
         dry_run: bool,
         /// Output as JSON
         #[arg(long)]
         json: bool,
-        /// Also delete every consumed handoff, whatever its age
-        #[arg(long)]
-        consumed: bool,
     },
 }
 
@@ -773,10 +779,18 @@ fn run_gain_tui<B: ratatui::backend::Backend>(
     terminal: &mut Terminal<B>,
     period: &metrics::report::Period,
     path: &std::path::Path,
+    project: Option<&str>,
 ) {
-    use metrics::report::{aggregate, filter_by_period};
+    use metrics::report::{aggregate, filter_by_period, keep_project};
     use metrics::store::read_from;
-    let mut items = read_from(path).unwrap_or_default();
+    let read_items = || {
+        let mut items = read_from(path).unwrap_or_default();
+        if let Some(key) = project {
+            keep_project(&mut items, key);
+        }
+        items
+    };
+    let mut items = read_items();
     let mut report = aggregate(&items, period.clone());
     let mut filtered_items = filter_by_period(&items, period);
     let mut gain_mode = tui::gain::GainMode::default();
@@ -796,7 +810,7 @@ fn run_gain_tui<B: ratatui::backend::Backend>(
     loop {
         // Reload data every 10 seconds regardless of incoming key events
         if last_reload.elapsed() >= std::time::Duration::from_secs(10) {
-            items = read_from(path).unwrap_or_default();
+            items = read_items();
             report = aggregate(&items, period.clone());
             filtered_items = filter_by_period(&items, period);
             sorted_projects = sorted_projects_from(&report);
@@ -837,7 +851,7 @@ fn run_gain_tui<B: ratatui::backend::Backend>(
                     break;
                 }
                 if key.code == KeyCode::Char('v') {
-                    tui::jev::run(terminal, period);
+                    tui::jev::run(terminal, period, project);
                     continue;
                 }
                 let switch_mode = (key.code == KeyCode::Char('p')
@@ -991,7 +1005,7 @@ fn run_gain_tui<B: ratatui::backend::Backend>(
     }
 }
 
-fn cmd_gain(period: metrics::report::Period, json: bool, history: bool) {
+fn cmd_gain(period: metrics::report::Period, json: bool, history: bool, project: Option<PathBuf>) {
     use metrics::report::{aggregate, aggregate_history};
     use metrics::store::read_from;
 
@@ -1002,7 +1016,11 @@ fn cmd_gain(period: metrics::report::Period, json: bool, history: bool) {
             std::process::exit(1);
         }
     };
-    let items = read_from(&path).unwrap_or_default();
+    let key = project.as_deref().map(jev::stats::project_key);
+    let mut items = read_from(&path).unwrap_or_default();
+    if let Some(key) = &key {
+        metrics::report::keep_project(&mut items, key);
+    }
 
     if history {
         let hist = aggregate_history(&items);
@@ -1028,7 +1046,7 @@ fn cmd_gain(period: metrics::report::Period, json: bool, history: bool) {
         let _guard = TerminalGuard::stdout();
         let backend = CrosstermBackend::new(std::io::stdout());
         if let Ok(mut terminal) = Terminal::new(backend) {
-            run_gain_tui(&mut terminal, &period, &path);
+            run_gain_tui(&mut terminal, &period, &path, key.as_deref());
         }
     } else {
         println!("=== ecotokens gain ({period}) ===");
@@ -1061,9 +1079,10 @@ fn cmd_gain(period: metrics::report::Period, json: bool, history: bool) {
     }
 }
 
-fn cmd_jev(period: metrics::report::Period, json: bool) {
+fn cmd_jev(period: metrics::report::Period, json: bool, project: Option<PathBuf>) {
     let settings = config::Settings::load();
-    let summary = tui::jev::load_summary(&settings, &period);
+    let key = project.as_deref().map(jev::stats::project_key);
+    let summary = tui::jev::load_summary(&settings, &period, key.as_deref());
     if json {
         println!("{}", serde_json::to_string_pretty(&summary).unwrap());
     } else if std::io::IsTerminal::is_terminal(&std::io::stdout()) {
@@ -1076,9 +1095,9 @@ fn cmd_jev(period: metrics::report::Period, json: bool) {
         let _guard = TerminalGuard::stdout();
         let backend = CrosstermBackend::new(std::io::stdout());
         if let Ok(mut terminal) = Terminal::new(backend) {
-            if tui::jev::run(&mut terminal, &period) {
+            if tui::jev::run(&mut terminal, &period, key.as_deref()) {
                 if let Some(path) = metrics::store::metrics_path() {
-                    run_gain_tui(&mut terminal, &period, &path);
+                    run_gain_tui(&mut terminal, &period, &path, key.as_deref());
                 }
             }
         }
@@ -3935,9 +3954,14 @@ fn main() {
             period,
             json,
             history,
+            project,
             action: None,
-        } => cmd_gain(period, json, history),
-        Commands::Jev { period, json } => cmd_jev(period, json),
+        } => cmd_gain(period, json, history, project),
+        Commands::Jev {
+            period,
+            json,
+            project,
+        } => cmd_jev(period, json, project),
         Commands::Game { period } => cmd_game(period),
         Commands::Install {
             target,

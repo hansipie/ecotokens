@@ -5,6 +5,7 @@
 use std::collections::BTreeMap;
 use std::io;
 use std::path::{Path, PathBuf};
+use std::sync::OnceLock;
 
 use rusqlite::{params, Connection};
 use serde::Serialize;
@@ -95,6 +96,29 @@ impl CallRecord {
     }
 }
 
+/// Project the calls of this process belong to (a git root, like the
+/// interceptions' `git_root`). Set once by whoever knows the session's working
+/// directory; otherwise the process's own directory is used.
+static PROJECT: OnceLock<Option<String>> = OnceLock::new();
+
+pub fn set_project_dir(dir: &Path) {
+    let _ = PROJECT.set(crate::filter::project_root_for_cwd(dir));
+}
+
+fn current_project() -> Option<String> {
+    match PROJECT.get() {
+        Some(p) => p.clone(),
+        None => std::env::current_dir()
+            .ok()
+            .and_then(|d| crate::filter::project_root_for_cwd(&d)),
+    }
+}
+
+/// The project a `--project` path stands for: its git root, or the path itself.
+pub fn project_key(dir: &Path) -> String {
+    crate::filter::project_root_for_cwd(dir).unwrap_or_else(|| dir.to_string_lossy().to_string())
+}
+
 pub fn db_path() -> Option<PathBuf> {
     if let Some(p) = std::env::var_os(DB_ENV).filter(|p| !p.is_empty()) {
         return Some(PathBuf::from(p));
@@ -123,14 +147,19 @@ fn open(path: &Path) -> io::Result<Connection> {
          );",
     )
     .map_err(io::Error::other)?;
-    // Databases created before the `agent` column existed: add it once.
-    let has_agent = conn
-        .prepare("SELECT 1 FROM pragma_table_info('jev_calls') WHERE name = 'agent'")
-        .and_then(|mut q| q.exists([]))
-        .map_err(io::Error::other)?;
-    if !has_agent {
-        conn.execute("ALTER TABLE jev_calls ADD COLUMN agent TEXT", [])
+    // Databases created before the `agent` / `project` columns existed: add them once.
+    for column in ["agent", "project"] {
+        let exists = conn
+            .prepare("SELECT 1 FROM pragma_table_info('jev_calls') WHERE name = ?1")
+            .and_then(|mut q| q.exists([column]))
             .map_err(io::Error::other)?;
+        if !exists {
+            conn.execute(
+                &format!("ALTER TABLE jev_calls ADD COLUMN {column} TEXT"),
+                [],
+            )
+            .map_err(io::Error::other)?;
+        }
     }
     Ok(conn)
 }
@@ -144,13 +173,23 @@ pub fn record_at(
     call: &CallRecord,
     at: chrono::DateTime<chrono::Utc>,
 ) -> io::Result<()> {
+    record_in(path, call, at, current_project().as_deref())
+}
+
+/// Stores `call` as made in `project` (`None`: no project known).
+pub fn record_in(
+    path: &Path,
+    call: &CallRecord,
+    at: chrono::DateTime<chrono::Utc>,
+    project: Option<&str>,
+) -> io::Result<()> {
     let conn = open(path)?;
     let usage = call.usage.unwrap_or_default();
     conn.execute(
         "INSERT INTO jev_calls
              (timestamp, purpose, ok, error_kind, http_status,
-              latency_ms, input_tokens, output_tokens, agent)
-         VALUES (?1, ?2, ?3, ?4, ?5, ?6, ?7, ?8, ?9)",
+              latency_ms, input_tokens, output_tokens, agent, project)
+         VALUES (?1, ?2, ?3, ?4, ?5, ?6, ?7, ?8, ?9, ?10)",
         params![
             at.to_rfc3339(),
             call.purpose.as_str(),
@@ -161,6 +200,7 @@ pub fn record_at(
             usage.input_tokens as i64,
             usage.output_tokens as i64,
             call.agent,
+            project,
         ],
     )
     .map_err(io::Error::other)?;
@@ -223,11 +263,14 @@ pub struct JevSummary {
 pub const TIMELINE_BUCKETS: usize = 40;
 pub const RECENT_LIMIT: usize = 200;
 
-/// Summary of the calls made at or after `since` (`None` = all of them).
+/// Summary of the calls made at or after `since` (`None` = all of them),
+/// in `project` only when one is given (calls recorded before projects were
+/// stored have none and are then left out).
 pub fn summarize(
     path: &Path,
     settings: &Settings,
     since: Option<chrono::DateTime<chrono::Utc>>,
+    project: Option<&str>,
 ) -> io::Result<JevSummary> {
     let mut s = JevSummary::default();
     for p in Purpose::ALL {
@@ -244,11 +287,11 @@ pub fn summarize(
         .prepare(
             "SELECT timestamp, purpose, ok, error_kind, http_status,
                     latency_ms, input_tokens, output_tokens, agent
-             FROM jev_calls ORDER BY id",
+             FROM jev_calls WHERE ?1 IS NULL OR project = ?1 ORDER BY id",
         )
         .map_err(io::Error::other)?;
     let rows = stmt
-        .query_map([], |r| {
+        .query_map([project], |r| {
             Ok(CallRow {
                 timestamp: r.get(0)?,
                 purpose: r.get(1)?,

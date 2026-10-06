@@ -1,5 +1,5 @@
 use chrono::Utc;
-use ecotokens::metrics::report::{aggregate, aggregate_with_price, Period};
+use ecotokens::metrics::report::{aggregate, aggregate_with_price, keep_project, Period};
 use ecotokens::metrics::store::{CommandFamily, FilterMode, HookType, Interception};
 
 fn make_interception_ago(
@@ -187,4 +187,23 @@ fn history_ordered_by_date_descending() {
     let report = aggregate(&items, Period::All);
     // simply verify the report has the correct count — ordering is the consumer's responsibility
     assert_eq!(report.total_interceptions, 3);
+}
+
+#[test]
+fn keep_project_retains_only_that_git_root() {
+    let mut items = make_items();
+    let mut other = make_interception_ago(5, CommandFamily::Git, 100, 10);
+    other.git_root = Some("/other".into());
+    let mut none = make_interception_ago(5, CommandFamily::Git, 100, 10);
+    none.git_root = None;
+    let repo_count = items.len();
+    items.push(other);
+    items.push(none);
+
+    keep_project(&mut items, "/repo");
+    assert_eq!(items.len(), repo_count);
+    assert!(items.iter().all(|i| i.git_root.as_deref() == Some("/repo")));
+
+    keep_project(&mut items, "/missing");
+    assert!(items.is_empty());
 }

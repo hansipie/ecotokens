@@ -324,10 +324,13 @@ pub fn status_from_settings(settings: &crate::config::Settings) -> JevStatus {
 pub fn load_summary(
     settings: &crate::config::Settings,
     period: &crate::metrics::report::Period,
+    project: Option<&str>,
 ) -> JevSummary {
     let since = crate::metrics::report::period_start(period);
     match crate::jev::stats::db_path() {
-        Some(path) => crate::jev::stats::summarize(&path, settings, since).unwrap_or_default(),
+        Some(path) => {
+            crate::jev::stats::summarize(&path, settings, since, project).unwrap_or_default()
+        }
         None => JevSummary::default(),
     }
 }
@@ -336,18 +339,19 @@ pub fn load_summary(
 pub fn run<B: ratatui::backend::Backend>(
     terminal: &mut ratatui::Terminal<B>,
     period: &crate::metrics::report::Period,
+    project: Option<&str>,
 ) -> bool {
     use ratatui::crossterm::event::{poll, read, Event, KeyCode, KeyEventKind, KeyModifiers};
 
     let settings = crate::config::Settings::load();
     let status = status_from_settings(&settings);
-    let mut summary = load_summary(&settings, period);
+    let mut summary = load_summary(&settings, period, project);
     let mut last_reload = std::time::Instant::now();
     let mut selected: Option<usize> = None;
     let mut scroll = 0usize;
     loop {
         if last_reload.elapsed() >= std::time::Duration::from_secs(10) {
-            summary = load_summary(&settings, period);
+            summary = load_summary(&settings, period, project);
             last_reload = std::time::Instant::now();
         }
         let ts = chrono::Utc::now().format("%H:%M:%S").to_string();

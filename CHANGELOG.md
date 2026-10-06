@@ -10,6 +10,7 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 ### Added
 
 - **Handoff cleanup of consumed files**: new setting `handoff_consumed_retention_hours` (default `48`) deletes a consumed handoff that long after it was injected, instead of keeping it for the full `handoff_retention_days`; new flag `ecotokens handoff clean --consumed` removes every consumed handoff at once. `handoff status --json` gains the additive key `consumed_retention_hours`.
+- **Per-project Jev and gain views**: `ecotokens jev --project <PATH>` and `ecotokens gain --project <PATH>` keep only the calls and interceptions of one project, in `--json`, plain and interactive output alike (switching between the two screens keeps the filter). A directory inside a repository stands for its git root. Jev calls now record their project (the git root of the session's working directory, as `git_root` does for interceptions) in a new `project` column of `jev_calls`, added automatically to existing databases; calls recorded before this version have no project and are left out of a filtered view.
 
 ## [0.29.0] - 2026-10-04
 

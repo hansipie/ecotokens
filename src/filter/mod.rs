@@ -224,6 +224,10 @@ fn filter_pipeline_core(
     cwd: Option<&std::path::Path>,
     hook_type: crate::metrics::store::HookType,
 ) -> (String, u32, u32) {
+    // Jev calls made while filtering belong to the same project as the interception.
+    if let Some(dir) = cwd {
+        crate::jev::stats::set_project_dir(dir);
+    }
     let settings = crate::config::Settings::load();
     let (masked, redacted) = crate::masking::mask(raw);
     let filtered = if raw.len() < 200 {

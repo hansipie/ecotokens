@@ -68,7 +68,7 @@ fn ask_for_records_only_for_recording_judges() {
         .ask_for(Purpose::Verify, json!({}), Questions::new(), t)
         .is_err());
 
-    let s = summarize(&db, &settings, None).unwrap();
+    let s = summarize(&db, &settings, None, None).unwrap();
     assert_eq!((s.calls, s.ok, s.fallbacks), (2, 1, 1));
     assert_eq!(s.by_purpose["classify"].input_tokens, 7);
     assert_eq!(s.errors["timeout"], 1);
