@@ -17,6 +17,93 @@ fn shell_single_quote(value: &str) -> String {
     format!("'{}'", value.replace('\'', "'\"'\"'"))
 }
 
+/// Decode a single shell-quoted token: `'…'` with `'\''` escapes, or `"…"`
+/// with backslash escapes (JSON-style: `\"`, `\\`, `\n`, `\uXXXX`, …).
+/// Returns `None` when `s` is not exactly one such quoted token.
+fn unquote_token(s: &str) -> Option<String> {
+    let s = s.trim();
+    let chars: Vec<char> = s.chars().collect();
+    let quote = *chars.first()?;
+    if quote != '\'' && quote != '"' {
+        return None;
+    }
+    let mut out = String::new();
+    let mut i = 1usize;
+    loop {
+        let c = *chars.get(i)?;
+        if quote == '\'' {
+            if c == '\'' {
+                if chars.get(i + 1) == Some(&'\\')
+                    && chars.get(i + 2) == Some(&'\'')
+                    && chars.get(i + 3) == Some(&'\'')
+                {
+                    out.push('\'');
+                    i += 4;
+                    continue;
+                }
+                i += 1;
+                break;
+            }
+            out.push(c);
+            i += 1;
+        } else {
+            match c {
+                '\\' => {
+                    let n = *chars.get(i + 1)?;
+                    match n {
+                        'n' => out.push('\n'),
+                        't' => out.push('\t'),
+                        'r' => out.push('\r'),
+                        'u' => {
+                            let hex: String = chars.iter().skip(i + 2).take(4).collect();
+                            out.push(char::from_u32(u32::from_str_radix(&hex, 16).ok()?)?);
+                            i += 6;
+                            continue;
+                        }
+                        other => out.push(other),
+                    }
+                    i += 2;
+                }
+                '"' => {
+                    i += 1;
+                    break;
+                }
+                other => {
+                    out.push(other);
+                    i += 1;
+                }
+            }
+        }
+    }
+
+    if chars[i..].iter().all(|c| c.is_whitespace()) {
+        Some(out)
+    } else {
+        None
+    }
+}
+
+/// Peel `ecotokens filter … -- bash -c '<inner>'` layers until a non-ecotokens
+/// shell command is reached.
+///
+/// Returns `Some(inner)` for a fully peelable wrapper chain, `None` when `cmd`
+/// starts with `ecotokens` but is not a peelable filter wrapper (`ecotokens
+/// gain`, a direct `ecotokens filter …` invocation without `bash -c`, or a
+/// corrupt chain) — callers must leave such commands untouched instead of
+/// wrapping them again.
+fn peel_ecotokens_wrapper(cmd: &str) -> Option<String> {
+    let mut s = cmd.trim().to_string();
+    while s.starts_with("ecotokens") {
+        if !s.starts_with("ecotokens filter") {
+            return None;
+        }
+        let marker = " -- bash -c ";
+        let idx = s.find(marker)?;
+        s = unquote_token(&s[idx + marker.len()..])?;
+    }
+    Some(s)
+}
+
 /// Shared payload structure for Gemini BeforeTool and Qwen PreToolUse hooks.
 #[derive(Debug, Deserialize)]
 struct ShellToolPayload {
@@ -44,6 +131,12 @@ struct ShellHookSpecificOutput {
 
 /// Determine hook action for a given command and exclusion list.
 ///
+/// Re-entrancy: a command that is already an `ecotokens filter … -- bash -c …`
+/// wrapper (written by an earlier rewrite *or* by the model itself — models
+/// copy their already-wrapped tool calls out of the transcript and wrap them
+/// again) is peeled back to the original shell command and re-wrapped exactly
+/// once. This heals nested chains instead of growing them.
+///
 /// Security note: an excluded command is returned as `Passthrough`, so it is
 /// never rewritten to run under `ecotokens filter` — the only place
 /// `masking::mask` is applied on the Bash path. Its output therefore reaches the
@@ -51,20 +144,43 @@ struct ShellHookSpecificOutput {
 /// that output at all. Excluding a command is a deliberate opt-out of both
 /// filtering *and* secret masking. Note also that matching is by prefix, so
 /// `git` excludes every command starting with those characters.
+///
+/// The same `Passthrough` applies to commands starting with `ecotokens` that
+/// are not peelable wrappers (`ecotokens gain`, a direct `ecotokens filter`
+/// invocation…): they already are ecotokens CLI calls and must not be wrapped
+/// into another `ecotokens filter`.
 pub fn handle_hook_input(
     input: &HookInput,
     exclusions: &[String],
     _debug: bool,
     agent: &str,
 ) -> HookOutput {
-    let cmd = input.command.trim();
+    let raw = input.command.trim();
 
     // Check exclusion list (prefix match) — see the security note above: this
     // bypasses masking, not just filtering.
-    for exclusion in exclusions {
-        if cmd.starts_with(exclusion.as_str()) || cmd == exclusion.as_str() {
-            return HookOutput::Passthrough;
+    let excluded = |s: &str| {
+        exclusions
+            .iter()
+            .any(|e| s.starts_with(e.as_str()) || s == e.as_str())
+    };
+    if excluded(raw) {
+        return HookOutput::Passthrough;
+    }
+
+    let cmd = if raw.starts_with("ecotokens") {
+        match peel_ecotokens_wrapper(raw) {
+            Some(inner) => inner,
+            None => return HookOutput::Passthrough,
         }
+    } else {
+        raw.to_string()
+    };
+
+    // An excluded command stays excluded even when the model resubmits it
+    // inside an `ecotokens filter` wrapper.
+    if cmd != raw && excluded(&cmd) {
+        return HookOutput::Passthrough;
     }
 
     // Rewrite to ecotokens filter
@@ -73,12 +189,12 @@ pub fn handle_hook_input(
             "ecotokens filter --agent {} --cwd {} -- bash -c {}",
             agent,
             shell_single_quote(cwd),
-            shell_single_quote(cmd)
+            shell_single_quote(&cmd)
         ),
         None => format!(
             "ecotokens filter --agent {} -- bash -c {}",
             agent,
-            shell_single_quote(cmd)
+            shell_single_quote(&cmd)
         ),
     };
     HookOutput::Rewrite(rewritten)

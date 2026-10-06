@@ -21,7 +21,91 @@ function extractText(content: unknown[]): string {
   return (content as Array<{ type: string; text?: string }>)
     .filter((c) => c?.type === "text")
     .map((c) => c.text ?? "")
-    .join("\n");
+    .join("");
+}
+
+/**
+ * Échappement POSIX single-quote : `'foo'` → `'foo'\''bar'`.
+ * Contrairement à JSON.stringify (guillemets doubles), le résultat est passé
+ * tel quel au shell — pas d'expansion de $VAR, $(…), `…` ni `!`.
+ */
+function shQuote(s: string): string {
+  return `'${s.replace(/'/g, `'\\''`)}'`;
+}
+
+/**
+ * Décode un jeton shell entre guillemets : `'…'` avec `'\''`, ou `"…"` avec
+ * échappements backslash (style JSON `\"`, `\\`, `\n`, `\uXXXX`).
+ * Retourne null si `s` n'est pas exactement un tel jeton.
+ */
+function unquoteToken(s: string): string | null {
+  const t = s.trim();
+  if (t.startsWith("'")) {
+    let out = "";
+    let i = 1;
+    while (i < t.length) {
+      if (t[i] === "'") {
+        if (t.startsWith("'\\''", i)) {
+          out += "'";
+          i += 4;
+          continue;
+        }
+        i++;
+        return t.slice(i).trim() === "" ? out : null;
+      }
+      out += t[i];
+      i++;
+    }
+    return null;
+  }
+  if (t.startsWith('"')) {
+    let out = "";
+    let i = 1;
+    while (i < t.length) {
+      const c = t[i];
+      if (c === "\\") {
+        const n = t[i + 1];
+        if (n === "n") out += "\n";
+        else if (n === "t") out += "\t";
+        else if (n === "r") out += "\r";
+        else if (n === "u") {
+          out += String.fromCharCode(parseInt(t.slice(i + 2, i + 6), 16));
+          i += 6;
+          continue;
+        } else out += n ?? "";
+        i += 2;
+        continue;
+      }
+      if (c === '"') {
+        i++;
+        return t.slice(i).trim() === "" ? out : null;
+      }
+      out += c;
+      i++;
+    }
+    return null;
+  }
+  return null;
+}
+
+/**
+ * Retire les couches `ecotokens filter … -- bash -c '<inner>'` jusqu'à la
+ * commande shell d'origine. Retourne null quand `cmd` commence par `ecotokens`
+ * mais n'est pas un wrapper filtrable (`ecotokens gain`, un `ecotokens filter …`
+ * direct…) — il ne faut alors ni le toucher ni l'empiler à nouveau.
+ */
+function peelEcotokensWrapper(cmd: string): string | null {
+  let s = cmd.trim();
+  while (s.startsWith("ecotokens")) {
+    if (!s.startsWith("ecotokens filter")) return null;
+    const marker = " -- bash -c ";
+    const idx = s.indexOf(marker);
+    if (idx === -1) return null;
+    const inner = unquoteToken(s.slice(idx + marker.length));
+    if (inner === null) return null;
+    s = inner;
+  }
+  return s;
 }
 
 /**
@@ -91,7 +175,20 @@ export default function (pi: ExtensionAPI) {
     if (event.toolName !== "bash") return;
     const input = event.input as { command?: string };
     if (!input.command) return;
-    input.command = `ecotokens filter --agent pi --cwd ${JSON.stringify(ctx.cwd)} -- bash -c ${JSON.stringify(input.command)}`;
+    // Garde anti-récursion + auto-guérison : le modèle recopie ses tool-calls
+    // déjà wrappés depuis le transcript et les re-wrappe — on retire toutes les
+    // couches puis on re-wrpe une seule fois. Les commandes `ecotokens …` non
+    // dépliables (gain, search, filter direct) restent intactes.
+    const raw = input.command.trim();
+    let inner: string;
+    if (raw.startsWith("ecotokens")) {
+      const peeled = peelEcotokensWrapper(raw);
+      if (peeled === null) return;
+      inner = peeled;
+    } else {
+      inner = raw;
+    }
+    input.command = `ecotokens filter --agent pi --cwd ${shQuote(ctx.cwd)} -- bash -c ${shQuote(inner)}`;
   });
 
   // ── 2. Outils natifs post-execution : équivalent PostToolUse ─────────────

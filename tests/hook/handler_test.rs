@@ -163,6 +163,117 @@ fn hot_reload_exclusion_respected() {
     );
 }
 
+// ── Re-entrancy: peeling of already-wrapped commands ──────────────────────────
+
+/// Simulate the model/plugin double-quote wrap style (`JSON.stringify`-like):
+/// quote the payload for a `bash -c "…"` layer, escaping backslashes and
+/// double quotes.
+fn nest_double_quoted(cmd: &str, levels: usize) -> String {
+    let mut s = cmd.to_string();
+    for _ in 0..levels {
+        s = format!(
+            "ecotokens filter --agent opencode --cwd \"/tmp/x\" -- bash -c \"{}\"",
+            s.replace('\\', "\\\\").replace('"', "\\\"")
+        );
+    }
+    s
+}
+
+#[test]
+fn single_quote_wrapper_is_normalized_to_one_wrap() {
+    let exclusions: Vec<String> = vec![];
+    let input = make_input("ecotokens filter --agent claude -- bash -c 'git status'");
+    let out = handle_hook_input(&input, &exclusions, false, "claude");
+    match out {
+        HookOutput::Rewrite(cmd) => assert_eq!(
+            cmd,
+            "ecotokens filter --agent claude -- bash -c 'git status'"
+        ),
+        _ => panic!("expected Rewrite"),
+    }
+}
+
+#[test]
+fn deeply_nested_wrapper_is_healed_to_a_single_wrap() {
+    // Regression: models copy their already-wrapped tool calls from the
+    // transcript and wrap them again, growing exponentially-escaped chains
+    // (observed up to 7 levels in the wild).
+    let exclusions: Vec<String> = vec![];
+    let inner = "ls -la app/src/main.kt && head -15 app/src/main.kt";
+    let nested = nest_double_quoted(inner, 7);
+    assert!(
+        nested.matches("ecotokens filter").count() == 7,
+        "fixture must contain 7 wrapper levels"
+    );
+
+    let input = make_input(&nested);
+    let out = handle_hook_input(&input, &exclusions, false, "claude");
+    match out {
+        HookOutput::Rewrite(cmd) => {
+            assert_eq!(
+                cmd,
+                format!("ecotokens filter --agent claude -- bash -c '{inner}'")
+            );
+            assert_eq!(
+                cmd.matches("ecotokens filter").count(),
+                1,
+                "healed command must contain exactly one wrapper"
+            );
+        }
+        _ => panic!("expected Rewrite"),
+    }
+}
+
+#[test]
+fn mixed_quote_styles_are_peeled() {
+    // Single-quote layer (shQuote) wrapping a double-quote layer (old plugin
+    // JSON.stringify) wrapping the real command.
+    let exclusions: Vec<String> = vec![];
+    let double = nest_double_quoted("echo hello", 1);
+    let mixed = format!("ecotokens filter --agent opencode -- bash -c '{double}'");
+    let input = make_input(&mixed);
+    let out = handle_hook_input(&input, &exclusions, false, "claude");
+    match out {
+        HookOutput::Rewrite(cmd) => {
+            assert_eq!(
+                cmd,
+                "ecotokens filter --agent claude -- bash -c 'echo hello'"
+            )
+        }
+        _ => panic!("expected Rewrite"),
+    }
+}
+
+#[test]
+fn opaque_ecotokens_commands_pass_through() {
+    let exclusions: Vec<String> = vec![];
+    // Non-wrapper ecotokens subcommand: must not be wrapped into another filter.
+    for cmd in [
+        "ecotokens gain",
+        "ecotokens gain --json",
+        "ecotokens filter --debug -- cargo test",
+        "ecotokens search 'foo'",
+    ] {
+        let input = make_input(cmd);
+        let out = handle_hook_input(&input, &exclusions, false, "claude");
+        assert!(
+            matches!(out, HookOutput::Passthrough),
+            "opaque ecotokens command should pass through: {cmd}"
+        );
+    }
+}
+
+#[test]
+fn excluded_inner_command_stays_excluded_when_resubmitted_wrapped() {
+    let exclusions = vec!["git".to_string()];
+    let input = make_input("ecotokens filter --agent claude -- bash -c 'git status'");
+    let out = handle_hook_input(&input, &exclusions, false, "claude");
+    assert!(
+        matches!(out, HookOutput::Passthrough),
+        "exclusion must apply to the peeled inner command"
+    );
+}
+
 // ── Gemini BeforeTool hook handler tests ──────────────────────────────────────
 
 mod gemini_handler {
