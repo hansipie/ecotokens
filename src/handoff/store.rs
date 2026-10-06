@@ -238,30 +238,41 @@ fn modified_at(path: &Path) -> Option<DateTime<Utc>> {
 }
 
 /// Deletes handoffs and session records older than `retention_days`, consumed
-/// or not. A file that cannot be parsed is aged by its modification time.
+/// or not, and consumed handoffs whose consumption is at least
+/// `consumed_retention_hours` old (0 removes every consumed handoff). A file
+/// that cannot be parsed is aged by its modification time.
 pub fn clean(
     dir: &Path,
     retention_days: u64,
+    consumed_retention_hours: u64,
     now: DateTime<Utc>,
     dry_run: bool,
 ) -> io::Result<Cleaned> {
     let retention =
         chrono::Duration::days(i64::try_from(retention_days).unwrap_or(i64::MAX / 86_400_000));
+    let consumed_retention = chrono::Duration::hours(
+        i64::try_from(consumed_retention_hours).unwrap_or(i64::MAX / 3_600_000),
+    );
     let mut cleaned = Cleaned::default();
-    let mut consider = |path: PathBuf, written: Option<DateTime<Utc>>| {
-        let old = written.is_some_and(|t| now - t > retention);
-        if old && (dry_run || std::fs::remove_file(&path).is_ok()) {
+    let mut consider = |path: PathBuf, expired: bool| {
+        if expired && (dry_run || std::fs::remove_file(&path).is_ok()) {
             cleaned.removed.push(path);
         } else {
             cleaned.kept += 1;
         }
     };
+    let older_than_retention =
+        |written: Option<DateTime<Utc>>| written.is_some_and(|t| now - t > retention);
     for path in handoff_files(dir) {
-        let written = read_handoff_file(&path)
-            .ok()
-            .map(|h| h.created)
-            .or_else(|| modified_at(&path));
-        consider(path, written);
+        let expired = match read_handoff_file(&path) {
+            Ok(h) => {
+                let used_up = h.status == Status::Consumed
+                    && now - h.consumed.unwrap_or(h.created) >= consumed_retention;
+                used_up || older_than_retention(Some(h.created))
+            }
+            Err(_) => older_than_retention(modified_at(&path)),
+        };
+        consider(path, expired);
     }
     if let Ok(entries) = std::fs::read_dir(dir.join(SESSIONS_DIR)) {
         for entry in entries.filter_map(Result::ok) {
@@ -276,7 +287,7 @@ pub fn clean(
                 .and_then(|t| serde_json::from_str::<SessionRecord>(&t).ok())
                 .map(|r| r.recorded)
                 .or_else(|| modified_at(&path));
-            consider(path, written);
+            consider(path, older_than_retention(written));
         }
     }
     cleaned.removed.sort();

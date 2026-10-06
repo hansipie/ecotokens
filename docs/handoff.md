@@ -76,14 +76,14 @@ You can edit the file by hand before it is injected. Text you add is kept.
 | `ecotokens handoff set --session <id> [--stdin]` | step 2 (used by `/handoff`) |
 | `ecotokens handoff list [--all] [--json]` | the saved handoffs of this directory, newest first |
 | `ecotokens handoff load [<id>] [--json]` | prints a handoff (the newest pending one of this directory without an id) (used by `/handoff-load`) and marks it consumed |
-| `ecotokens handoff clean [--dry-run] [--json]` | removes handoffs and session records older than the retention |
+| `ecotokens handoff clean [--consumed] [--dry-run] [--json]` | removes handoffs and session records past the retention; `--consumed` also removes every consumed handoff, whatever its age |
 
 Every structured command has `--json`. Exit codes: `0` success, `1` operational error, `2` invalid argument.
 
 ## Which handoff a new session receives
 
 - Matching is by **working directory**, not by session id (a new session after `/clear` has a different id). The git branch is shown in the header but does not matter, so changing branches mid-task does not lose the handoff.
-- Exactly one pending handoff for the directory: it is injected, then marked `consumed`. A consumed handoff is never injected again automatically, but `/handoff-load <id>` still loads it.
+- Exactly one pending handoff for the directory: it is injected, then marked `consumed`. A consumed handoff is never injected again automatically, but `/handoff-load <id>` still loads it until it is deleted, `handoff_consumed_retention_hours` after it was consumed.
 - Several pending handoffs: only a short list is injected and nothing is loaded until you choose.
 - A handoff older than the stale threshold is still injected, with a line saying how old it is and asking to verify it.
 - `clear` and `compact` always inject. `startup`, `resume` and `fork` inject only if you set `handoff_inject_startup`.
@@ -98,6 +98,7 @@ In `~/.config/ecotokens/config.json`:
 | `handoff_max_chars` | `4000` | size limit of a handoff, capped at `9000` |
 | `handoff_stale_hours` | `24` | age after which an injected handoff is flagged as stale |
 | `handoff_retention_days` | `30` | handoffs and session records older than this are deleted, consumed or not |
+| `handoff_consumed_retention_hours` | `48` | consumed handoffs are deleted once they were consumed this long ago (`0`: at the next cleanup) |
 | `handoff_inject_startup` | `false` | also inject on `startup`, `resume` and `fork` |
 
 The cap of `9000` exists because Claude Code replaces injected hook output longer than 10,000 characters by a file path and a short preview. When a handoff is too long it is trimmed in this order: oldest failed attempts, lowest-ranked key files, the end of the Problem. The objective and the next steps are never cut.

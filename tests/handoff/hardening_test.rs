@@ -130,7 +130,7 @@ fn list_and_clean_only_touch_regular_files_inside_the_directory() {
     write_handoff(&dir, &old).unwrap();
 
     list(&dir, &settings(), CWD, true, true, fixed_now());
-    let out = clean(&dir, &settings(), false, true, fixed_now());
+    let out = clean(&dir, &settings(), false, false, true, fixed_now());
     assert_eq!(out.code, 0, "{}", out.err);
     assert!(
         outside.exists(),

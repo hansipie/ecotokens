@@ -200,6 +200,7 @@ fn handoff_defaults() {
     assert_eq!(s.handoff_max_chars, 4000);
     assert_eq!(s.handoff_stale_hours, 24);
     assert_eq!(s.handoff_retention_days, 30);
+    assert_eq!(s.handoff_consumed_retention_hours, 48);
     assert!(!s.handoff_inject_startup);
 }
 
@@ -211,6 +212,7 @@ fn old_config_without_handoff_keys_still_loads() {
     assert_eq!(s.handoff_max_chars, 4000);
     assert_eq!(s.handoff_stale_hours, 24);
     assert_eq!(s.handoff_retention_days, 30);
+    assert_eq!(s.handoff_consumed_retention_hours, 48);
 }
 
 #[test]
@@ -230,6 +232,7 @@ fn handoff_settings_round_trip() {
         handoff_max_chars: 2500,
         handoff_stale_hours: 6,
         handoff_retention_days: 10,
+        handoff_consumed_retention_hours: 12,
         handoff_inject_startup: true,
         ..Default::default()
     };
@@ -238,4 +241,5 @@ fn handoff_settings_round_trip() {
     assert_eq!(back.handoff_max_chars, 2500);
     assert_eq!(back.handoff_stale_hours, 6);
     assert_eq!(back.handoff_retention_days, 10);
+    assert_eq!(back.handoff_consumed_retention_hours, 12);
 }

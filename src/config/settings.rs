@@ -253,6 +253,10 @@ pub struct Settings {
     /// Handoff files older than this many days are deleted.
     #[serde(default = "default_handoff_retention_days")]
     pub handoff_retention_days: u64,
+    /// Consumed handoffs are deleted once they were consumed this many hours
+    /// ago (they stay loadable with `/handoff-load` until then).
+    #[serde(default = "default_handoff_consumed_retention_hours")]
+    pub handoff_consumed_retention_hours: u64,
     /// Also inject on `startup`, `resume` and `fork` (always on for `clear`
     /// and `compact`).
     #[serde(default)]
@@ -360,6 +364,9 @@ fn default_handoff_stale_hours() -> u64 {
 fn default_handoff_retention_days() -> u64 {
     30
 }
+fn default_handoff_consumed_retention_hours() -> u64 {
+    48
+}
 
 fn default_raw_recovery_retention_days() -> u32 {
     7
@@ -424,6 +431,7 @@ impl Default for Settings {
             handoff_max_chars: default_handoff_max_chars(),
             handoff_stale_hours: default_handoff_stale_hours(),
             handoff_retention_days: default_handoff_retention_days(),
+            handoff_consumed_retention_hours: default_handoff_consumed_retention_hours(),
             handoff_inject_startup: false,
             raw_recovery_enabled: true,
             raw_recovery_retention_days: default_raw_recovery_retention_days(),

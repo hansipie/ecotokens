@@ -453,6 +453,7 @@ pub fn status(
             "max_chars": settings.effective_handoff_max_chars(),
             "stale_hours": settings.handoff_stale_hours,
             "retention_days": settings.handoff_retention_days,
+            "consumed_retention_hours": settings.handoff_consumed_retention_hours,
             "inject_startup": settings.handoff_inject_startup,
             "pending": pending,
             "consumed": consumed,
@@ -462,7 +463,7 @@ pub fn status(
     let yes_no = |b: bool| if b { "yes" } else { "no" };
     let mut out = format!(
         "handoff    : {}\nsetup      : hook {} · skills {}\n\
-         thresholds : stale after {} h · at most {} characters · kept {} days · startup injection {}\n\
+         thresholds : stale after {} h · at most {} characters · kept {} days ({} h once consumed) · startup injection {}\n\
          here       : {pending} pending · {consumed} consumed\n",
         if settings.handoff_enabled { "ON" } else { "OFF" },
         yes_no(hook),
@@ -470,6 +471,7 @@ pub fn status(
         settings.handoff_stale_hours,
         settings.effective_handoff_max_chars(),
         settings.handoff_retention_days,
+        settings.handoff_consumed_retention_hours,
         if settings.handoff_inject_startup { "on" } else { "off" },
     );
     if injections.count > 0 {
@@ -672,15 +674,28 @@ pub fn load(dir: &Path, settings: &Settings, id: &str, json: bool, now: DateTime
     }
 }
 
-/// Deletes handoffs and session records past the retention.
+/// Deletes handoffs and session records past the retention; `all_consumed`
+/// also deletes every consumed handoff, whatever its age.
 pub fn clean(
     dir: &Path,
     settings: &Settings,
+    all_consumed: bool,
     dry_run: bool,
     json: bool,
     now: DateTime<Utc>,
 ) -> Outcome {
-    let cleaned = match store_clean(dir, settings.handoff_retention_days, now, dry_run) {
+    let consumed_hours = if all_consumed {
+        0
+    } else {
+        settings.handoff_consumed_retention_hours
+    };
+    let cleaned = match store_clean(
+        dir,
+        settings.handoff_retention_days,
+        consumed_hours,
+        now,
+        dry_run,
+    ) {
         Ok(c) => c,
         Err(e) => {
             return Outcome::fail(

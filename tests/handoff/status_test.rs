@@ -155,6 +155,7 @@ fn status_json_has_exactly_the_documented_keys() {
         keys,
         [
             "consumed",
+            "consumed_retention_hours",
             "enabled",
             "hook_installed",
             "inject_startup",

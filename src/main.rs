@@ -495,7 +495,7 @@ enum HandoffAction {
         #[arg(long)]
         json: bool,
     },
-    /// Delete handoffs older than handoff_retention_days
+    /// Delete handoffs past handoff_retention_days or handoff_consumed_retention_hours
     Clean {
         /// Show what would be removed without removing it
         #[arg(long)]
@@ -503,6 +503,9 @@ enum HandoffAction {
         /// Output as JSON
         #[arg(long)]
         json: bool,
+        /// Also delete every consumed handoff, whatever its age
+        #[arg(long)]
+        consumed: bool,
     },
 }
 
@@ -2007,8 +2010,12 @@ fn cmd_handoff(action: HandoffAction) {
             handoff::cli::load_or_latest(&dir, &settings, &cwd_now, id.as_deref(), json, now),
             false,
         ),
-        HandoffAction::Clean { dry_run, json } => (
-            handoff::cli::clean(&dir, &settings, dry_run, json, now),
+        HandoffAction::Clean {
+            consumed,
+            dry_run,
+            json,
+        } => (
+            handoff::cli::clean(&dir, &settings, consumed, dry_run, json, now),
             false,
         ),
     };

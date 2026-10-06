@@ -186,7 +186,13 @@ pub fn process(
             recorded: super::whole_seconds(now),
         },
     );
-    let _ = clean(dir, settings.handoff_retention_days, now, false);
+    let _ = clean(
+        dir,
+        settings.handoff_retention_days,
+        settings.handoff_consumed_retention_hours,
+        now,
+        false,
+    );
 
     if !injects_on(&input.source, settings) {
         return None;

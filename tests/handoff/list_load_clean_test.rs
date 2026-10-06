@@ -233,7 +233,7 @@ fn clean_removes_handoffs_and_records_past_the_retention_whether_consumed_or_not
     record(dir.path(), "old-record", 31);
     record(dir.path(), "new-record", 1);
 
-    let out = clean(dir.path(), &settings(), false, true, fixed_now());
+    let out = clean(dir.path(), &settings(), false, false, true, fixed_now());
     assert_eq!(out.code, 0, "{}", out.err);
     let v = json(&out.out);
     assert_eq!(v["removed"].as_array().unwrap().len(), 3, "{v}");
@@ -257,7 +257,7 @@ fn clean_removes_handoffs_and_records_past_the_retention_whether_consumed_or_not
 fn clean_dry_run_reports_without_removing() {
     let dir = TempDir::new().unwrap();
     put_days(dir.path(), "old", 45);
-    let out = clean(dir.path(), &settings(), true, true, fixed_now());
+    let out = clean(dir.path(), &settings(), false, true, true, fixed_now());
     assert_eq!(json(&out.out)["removed"].as_array().unwrap().len(), 1);
     assert!(dir.path().join("old.md").exists(), "dry run keeps the file");
 }
@@ -270,8 +270,54 @@ fn clean_follows_the_retention_setting() {
         handoff_retention_days: 7,
         ..settings()
     };
-    clean(dir.path(), &short, false, false, fixed_now());
+    clean(dir.path(), &short, false, false, false, fixed_now());
     assert!(!dir.path().join("week-old.md").exists());
+}
+
+fn put_consumed(dir: &std::path::Path, id: &str, consumed_hours_ago: i64) {
+    let mut h = sample_handoff(id, CWD);
+    h.created = hours_before(fixed_now(), consumed_hours_ago + 1);
+    h.status = Status::Consumed;
+    h.consumed = Some(hours_before(fixed_now(), consumed_hours_ago));
+    write_handoff(dir, &h).unwrap();
+}
+
+#[test]
+fn clean_removes_consumed_handoffs_past_their_own_retention() {
+    let dir = TempDir::new().unwrap();
+    put_consumed(dir.path(), "used-long-ago", 49);
+    put_consumed(dir.path(), "used-recently", 47);
+    put(dir.path(), "pending", CWD, 72);
+
+    let out = clean(dir.path(), &settings(), false, false, true, fixed_now());
+    assert_eq!(json(&out.out)["removed"].as_array().unwrap().len(), 1);
+    assert!(!dir.path().join("used-long-ago.md").exists());
+    assert!(dir.path().join("used-recently.md").exists());
+    assert!(
+        dir.path().join("pending.md").exists(),
+        "pending files keep the day retention"
+    );
+}
+
+#[test]
+fn clean_consumed_flag_removes_every_consumed_handoff_and_only_those() {
+    let dir = TempDir::new().unwrap();
+    put_consumed(dir.path(), "used-just-now", 0);
+    put_consumed(dir.path(), "used-recently", 5);
+    put(dir.path(), "pending", CWD, 1);
+    record(dir.path(), "new-record", 1);
+
+    let dry = clean(dir.path(), &settings(), true, true, true, fixed_now());
+    assert_eq!(json(&dry.out)["removed"].as_array().unwrap().len(), 2);
+    assert!(dir.path().join("used-just-now.md").exists(), "dry run");
+
+    let out = clean(dir.path(), &settings(), true, false, true, fixed_now());
+    let v = json(&out.out);
+    assert_eq!(v["removed"].as_array().unwrap().len(), 2, "{v}");
+    assert_eq!(v["kept"], 2);
+    assert!(!dir.path().join("used-just-now.md").exists());
+    assert!(!dir.path().join("used-recently.md").exists());
+    assert!(dir.path().join("pending.md").exists());
 }
 
 #[test]
@@ -280,6 +326,7 @@ fn clean_on_a_missing_directory_is_a_quiet_success() {
     let out = clean(
         &root.path().join("nope"),
         &settings(),
+        false,
         false,
         true,
         fixed_now(),
@@ -293,11 +340,16 @@ fn the_hook_runs_the_same_cleanup_silently() {
     let dir = TempDir::new().unwrap();
     put_days(dir.path(), "old", 45);
     put_days(dir.path(), "fresh", 1);
+    put_consumed(dir.path(), "used", 49);
     let input = hook_input("new1", CWD, "startup", "/t");
     assert_eq!(
         process(&input, &settings(), dir.path(), None, fixed_now()),
         None
     );
     assert!(!dir.path().join("old.md").exists(), "cleaned by the hook");
+    assert!(
+        !dir.path().join("used.md").exists(),
+        "consumed retention too"
+    );
     assert!(dir.path().join("fresh.md").exists());
 }

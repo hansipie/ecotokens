@@ -7,6 +7,10 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ## [Unreleased]
 
+### Added
+
+- **Handoff cleanup of consumed files**: new setting `handoff_consumed_retention_hours` (default `48`) deletes a consumed handoff that long after it was injected, instead of keeping it for the full `handoff_retention_days`; new flag `ecotokens handoff clean --consumed` removes every consumed handoff at once. `handoff status --json` gains the additive key `consumed_retention_hours`.
+
 ## [0.29.0] - 2026-10-04
 
 ### Added
