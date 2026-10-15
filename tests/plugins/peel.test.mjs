@@ -3,9 +3,13 @@
 // (also run by `cargo test` via tests/hook/handler_test.rs).
 import { test } from "node:test"
 import assert from "node:assert/strict"
-import { mkdtempSync, writeFileSync } from "node:fs"
+import { mkdtempSync, readFileSync, writeFileSync } from "node:fs"
 import { tmpdir } from "node:os"
 import { join } from "node:path"
+
+// Shared with the Rust hook: src/hook/handler.rs asserts the same file, so the
+// three copies of the wrapper grammar must agree on every case.
+const vectors = JSON.parse(readFileSync(new URL("./peel_vectors.json", import.meta.url), "utf8"))
 
 // Both plugins disable themselves unless `ecotokens --version` succeeds.
 const fakeBin = mkdtempSync(join(tmpdir(), "ecotokens-plugin-test-"))
@@ -81,5 +85,23 @@ for (const [name, intercept] of Object.entries(plugins)) {
   test(`${name}: own wrapper is stable when re-intercepted`, async () => {
     const first = await intercept(`echo 'hi' && ls`)
     assert.equal(await intercept(first), first)
+  })
+
+  test(`${name}: shared peel vectors — peelable wrappers heal to the inner command`, async () => {
+    for (const { cmd, inner } of vectors.peelable) {
+      // Intercepting a wrapper chain must be indistinguishable from
+      // intercepting the peeled inner command directly.
+      assert.equal(await intercept(cmd), await intercept(inner), cmd)
+    }
+  })
+
+  test(`${name}: shared peel vectors — unpeelable commands are kept whole`, async () => {
+    const q = (s) => `'${s.replaceAll("'", "'\\''")}'`
+    const wrap = (cmd) =>
+      `ecotokens filter --agent ${name} --cwd '/tmp' -- bash -c ${q(cmd)}`
+    for (const { cmd, expect } of vectors.unpeelable) {
+      const out = await intercept(cmd)
+      assert.equal(out, expect === "bare" ? cmd : wrap(cmd), cmd)
+    }
   })
 }

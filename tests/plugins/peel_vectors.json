@@ -1,0 +1,27 @@
+{
+  "comment": "Shared wrapper-peeling vectors for the three copies of the grammar: src/hook/handler.rs (Rust unit tests), src/opencode_plugin.ts and src/pi_extension.ts (tests/plugins/peel.test.mjs). All three must agree on every case. expect=bare means the hook must leave the command running bare (Passthrough in Rust, unchanged in the plugins); expect=whole means it must be wrapped whole so its output still goes through masking.",
+  "peelable": [
+    { "cmd": "ecotokens filter --agent claude -- bash -c 'git status'", "inner": "git status" },
+    { "cmd": "ecotokens filter --agent claude --cwd '/tmp' -- bash -c 'ls -la'", "inner": "ls -la" },
+    { "cmd": "ecotokens filter --agent claude -- bash -c 'echo '\\''hi'\\'''", "inner": "echo 'hi'" },
+    { "cmd": "ecotokens filter --agent claude -- bash -c 'echo '\"'\"'hi'\"'\"''", "inner": "echo 'hi'" },
+    { "cmd": "ecotokens filter --agent claude -- bash -c \"printf '%s' 'a\\b'\"", "inner": "printf '%s' 'a\\b'" },
+    { "cmd": "ecotokens filter --agent claude -- bash -c \"echo \\\"hi\\\"\"", "inner": "echo \"hi\"" },
+    { "cmd": "ecotokens filter --agent claude -- bash -c \"printf '%s' 'x\\ny'\"", "inner": "printf '%s' 'x\\ny'" },
+    { "cmd": "ecotokens filter --agent claude -- bash -c 'echo $(date)'", "inner": "echo $(date)" },
+    { "cmd": "ecotokens filter --agent claude -- bash -c 'ecotokens filter --agent opencode --cwd \"/tmp/x\" -- bash -c \"ls -la\"'", "inner": "ls -la" }
+  ],
+  "unpeelable": [
+    { "cmd": "ecotokens gain", "expect": "bare" },
+    { "cmd": "ecotokens search 'foo'", "expect": "bare" },
+    { "cmd": "ecotokens filter --debug -- cargo test", "expect": "bare" },
+    { "cmd": "ecotokens filter --agent claude -- bash -c 'unterminated", "expect": "bare" },
+    { "cmd": "ecotokens filter --agent claude -- bash -c \"unterminated", "expect": "bare" },
+    { "cmd": "ecotokens filter --agent claude -- bash -c", "expect": "bare" },
+    { "cmd": "ecotokens filter --agent claude --cwd", "expect": "bare" },
+    { "cmd": "ecotokens filter -- echo OK # -- bash -c 'echo SHOULD_NOT_RUN'", "expect": "bare" },
+    { "cmd": "ecotokens filter -- echo FIRST && echo SECOND -- bash -c 'echo ONLY_THIS'", "expect": "whole" },
+    { "cmd": "ecotokens filter --agent claude -- bash -c 'ls' && cat secrets", "expect": "whole" },
+    { "cmd": "ecotokens filter --agent claude -- bash -c \"echo $(date)\"", "expect": "whole" }
+  ]
+}

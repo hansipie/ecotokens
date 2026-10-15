@@ -21,7 +21,7 @@ function extractText(content: unknown[]): string {
   return (content as Array<{ type: string; text?: string }>)
     .filter((c) => c?.type === "text")
     .map((c) => c.text ?? "")
-    .join("");
+    .join("\n");
 }
 
 /**

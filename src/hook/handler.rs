@@ -411,3 +411,76 @@ pub fn handle_gemini() {
 pub fn handle_qwen() {
     handle_shell_tool_hook("PreToolUse", "qwen");
 }
+
+#[cfg(test)]
+mod tests {
+    use super::{handle_hook_input, parse_wrapper, peel_ecotokens_wrapper, HookInput, HookOutput};
+    use serde::Deserialize;
+
+    /// Shared with the TS plugins: tests/plugins/peel.test.mjs consumes the
+    /// same file, so the three copies of the grammar must agree on every case.
+    const VECTORS: &str = include_str!("../../tests/plugins/peel_vectors.json");
+
+    #[derive(Deserialize)]
+    struct Vectors {
+        peelable: Vec<Peelable>,
+        unpeelable: Vec<Unpeelable>,
+    }
+
+    #[derive(Deserialize)]
+    struct Peelable {
+        cmd: String,
+        inner: String,
+    }
+
+    #[derive(Deserialize)]
+    struct Unpeelable {
+        cmd: String,
+        /// `bare`: the hook must let the command run as is; `whole`: it must be
+        /// wrapped so its output still goes through masking.
+        expect: String,
+    }
+
+    #[test]
+    fn shared_peel_vectors() {
+        let v: Vectors = serde_json::from_str(VECTORS).expect("valid vectors JSON");
+        assert!(!v.peelable.is_empty() && !v.unpeelable.is_empty());
+
+        for Peelable { cmd, inner } in &v.peelable {
+            assert_eq!(
+                peel_ecotokens_wrapper(cmd),
+                *inner,
+                "peel must reach the inner command: {cmd}"
+            );
+        }
+
+        for Unpeelable { cmd, expect } in &v.unpeelable {
+            assert!(
+                parse_wrapper(cmd).is_none(),
+                "must not parse as a wrapper: {cmd}"
+            );
+            assert_eq!(
+                peel_ecotokens_wrapper(cmd),
+                cmd.as_str(),
+                "an unpeelable command must stay whole: {cmd}"
+            );
+            let bare = matches!(
+                handle_hook_input(
+                    &HookInput {
+                        command: cmd.clone(),
+                        cwd: None,
+                    },
+                    &[],
+                    false,
+                    "claude"
+                ),
+                HookOutput::Passthrough
+            );
+            assert_eq!(
+                bare,
+                expect == "bare",
+                "routing mismatch for {cmd}: expected {expect}"
+            );
+        }
+    }
+}

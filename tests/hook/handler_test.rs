@@ -197,13 +197,13 @@ fn single_quote_wrapper_is_normalized_to_one_wrap() {
 fn deeply_nested_wrapper_is_healed_to_a_single_wrap() {
     // Regression: models copy their already-wrapped tool calls from the
     // transcript and wrap them again, growing exponentially-escaped chains
-    // (observed up to 7 levels in the wild).
+    // (observed up to 9 levels in the wild, see #124).
     let exclusions: Vec<String> = vec![];
     let inner = "ls -la app/src/main.kt && head -15 app/src/main.kt";
-    let nested = nest_double_quoted(inner, 7);
+    let nested = nest_double_quoted(inner, 9);
     assert!(
-        nested.matches("ecotokens filter").count() == 7,
-        "fixture must contain 7 wrapper levels"
+        nested.matches("ecotokens filter").count() == 9,
+        "fixture must contain 9 wrapper levels"
     );
 
     let input = make_input(&nested);
