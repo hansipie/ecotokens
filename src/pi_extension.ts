@@ -25,60 +25,49 @@ function extractText(content: unknown[]): string {
 }
 
 /**
- * Échappement POSIX single-quote : `'foo'` → `'foo'\''bar'`.
- * Contrairement à JSON.stringify (guillemets doubles), le résultat est passé
- * tel quel au shell — pas d'expansion de $VAR, $(…), `…` ni `!`.
+ * POSIX single-quote escaping: `'foo'` → `'foo'\''bar'`.
+ * Unlike JSON.stringify (double quotes), the result is passed to the shell
+ * verbatim — no $VAR, $(…), backtick, or ! expansion by the outer shell.
  */
 function shQuote(s: string): string {
   return `'${s.replace(/'/g, `'\\''`)}'`;
 }
 
 /**
- * Décode un jeton shell entre guillemets : `'…'` avec `'\''`, ou `"…"` avec
- * échappements backslash (style JSON `\"`, `\\`, `\n`, `\uXXXX`).
- * Retourne null si `s` n'est pas exactement un tel jeton.
+ * Decode the shell-quoted token starting at `s[i]`; returns
+ * `[decoded, indexAfter]`. Accepted forms: `'…'` with `'\''` or `'"'"'`
+ * escapes (the latter is what the Rust hook emits), or `"…"` decoded with
+ * bash double-quote rules (`\` escapes only `$`, `` ` ``, `"`, `\` and
+ * newline, and stays literal before anything else).
+ * Returns null for anything else, including a double-quoted token with an
+ * unescaped `$` or `` ` ``: the outer shell expands those before `bash -c`
+ * runs, so moving them to an inner shell would change what runs.
  */
-function unquoteToken(s: string): string | null {
-  const t = s.trim();
-  if (t.startsWith("'")) {
-    let out = "";
-    let i = 1;
-    while (i < t.length) {
-      if (t[i] === "'") {
-        if (t.startsWith("'\\''", i)) {
-          out += "'";
-          i += 4;
-          continue;
-        }
-        i++;
-        return t.slice(i).trim() === "" ? out : null;
+function parseQuoted(s: string, i: number): [string, number] | null {
+  const quote = s[i++];
+  let out = "";
+  if (quote === "'") {
+    while (i < s.length) {
+      if (s[i] !== "'") {
+        out += s[i++];
+        continue;
       }
-      out += t[i];
-      i++;
+      const esc = [`'"'"'`, `'\\''`].find((e) => s.startsWith(e, i));
+      if (!esc) return [out, i + 1];
+      out += "'";
+      i += esc.length;
     }
     return null;
   }
-  if (t.startsWith('"')) {
-    let out = "";
-    let i = 1;
-    while (i < t.length) {
-      const c = t[i];
-      if (c === "\\") {
-        const n = t[i + 1];
-        if (n === "n") out += "\n";
-        else if (n === "t") out += "\t";
-        else if (n === "r") out += "\r";
-        else if (n === "u") {
-          out += String.fromCharCode(parseInt(t.slice(i + 2, i + 6), 16));
-          i += 6;
-          continue;
-        } else out += n ?? "";
+  if (quote === '"') {
+    while (i < s.length) {
+      const c = s[i];
+      if (c === '"') return [out, i + 1];
+      if (c === "$" || c === "`") return null;
+      if (c === "\\" && i + 1 < s.length && "$`\"\\\n".includes(s[i + 1])) {
+        if (s[i + 1] !== "\n") out += s[i + 1];
         i += 2;
         continue;
-      }
-      if (c === '"') {
-        i++;
-        return t.slice(i).trim() === "" ? out : null;
       }
       out += c;
       i++;
@@ -86,6 +75,44 @@ function unquoteToken(s: string): string | null {
     return null;
   }
   return null;
+}
+
+/** Skip whitespace in `s` from `i`. */
+function skipSpace(s: string, i: number): number {
+  while (i < s.length && /\s/.test(s[i])) i++;
+  return i;
+}
+
+/**
+ * Parse one `ecotokens filter [--agent A] [--cwd C] -- bash -c '<inner>'`
+ * layer — exactly the shape the hook and the plugins emit — and return
+ * `<inner>`. Anything else (other options, a marker inside a comment, commands
+ * before the marker, text after the quoted token) is not a wrapper: null.
+ */
+function parseWrapper(cmd: string): string | null {
+  const s = cmd.trim();
+  if (!s.startsWith("ecotokens filter ")) return null;
+  let i = "ecotokens filter ".length;
+  for (;;) {
+    i = skipSpace(s, i);
+    if (s.startsWith("-- bash -c ", i)) {
+      const tok = parseQuoted(s, skipSpace(s, i + "-- bash -c ".length));
+      return tok && s.slice(tok[1]).trim() === "" ? tok[0] : null;
+    }
+    const opt = ["--agent ", "--cwd "].find((o) => s.startsWith(o, i));
+    if (!opt) return null;
+    i = skipSpace(s, i + opt.length);
+    // Option value: a quoted token or a bare word free of shell metacharacters.
+    if (s[i] === "'" || s[i] === '"') {
+      const tok = parseQuoted(s, i);
+      if (!tok) return null;
+      i = tok[1];
+    } else {
+      const word = /^[^\s;&|<>`$()\\'"#]+/.exec(s.slice(i));
+      if (!word) return null;
+      i += word[0].length;
+    }
+  }
 }
 
 /** True when `s` is an `ecotokens` invocation (`ecotokens-foo` is not). */
@@ -99,30 +126,24 @@ function isSimpleCommand(s: string): boolean {
 }
 
 /**
- * Retire les couches `ecotokens filter … -- bash -c '<inner>'` jusqu'à une
- * commande qui n'est pas un wrapper dépliable : la commande shell d'origine, ou
- * une commande `ecotokens` qui n'en est pas un (`ecotokens gain`, un
- * `ecotokens filter …` direct). Retourne null si la chaîne est corrompue (un
- * argument `bash -c` qui n'est pas exactement un jeton entre guillemets).
+ * Peel `ecotokens filter … -- bash -c '<inner>'` layers (see parseWrapper)
+ * until a command that is not a strict wrapper is reached, and return it: the
+ * original shell command, an `ecotokens` command that is not a wrapper
+ * (`ecotokens gain`, `ecotokens filter --debug -- …`), or a wrapper-like
+ * command that cannot be peeled without changing what it runs (a trailing
+ * `&& …`, a `$(…)` in double quotes), which is then kept whole.
  */
-function peelEcotokensWrapper(cmd: string): string | null {
-  const marker = " -- bash -c ";
+function peelEcotokensWrapper(cmd: string): string {
   let s = cmd.trim();
-  while (s.startsWith("ecotokens filter ")) {
-    const idx = s.indexOf(marker);
-    if (idx === -1) break;
-    const inner = unquoteToken(s.slice(idx + marker.length));
-    if (inner === null) return null;
-    s = inner;
-  }
+  for (let inner = parseWrapper(s); inner !== null; inner = parseWrapper(s)) s = inner;
   return s;
 }
 
 /**
- * Appelle ecotokens hook-post avec le payload PostHookInput.
- * Retourne additionalContext (output filtré + outline) ou null si passthrough.
+ * Call ecotokens hook-post with the PostHookInput payload.
+ * Returns additionalContext (filtered output + outline) or null on passthrough.
  *
- * Format attendu par src/hook/post_handler.rs::PostHookInput :
+ * Format expected by src/hook/post_handler.rs::PostHookInput:
  *   { tool_name, tool_input, tool_response: { output }, cwd }
  */
 function callHookPost(
@@ -156,8 +177,8 @@ function callHookPost(
   }
 }
 
-// Mapping noms d'outils Pi (lowercase) → noms capitalisés pour handle_post_input()
-// src/hook/post_handler.rs:66 route sur "Read" | "Grep" | "Glob"
+// Mapping Pi tool names (lowercase) → capitalized names for handle_post_input()
+// src/hook/post_handler.rs:66 routes on "Read" | "Grep" | "Glob"
 const PI_TO_CLAUDE_TOOL: Record<string, string> = {
   read: "Read",
   grep: "Grep",
@@ -165,7 +186,7 @@ const PI_TO_CLAUDE_TOOL: Record<string, string> = {
   ls: "Glob",
 };
 
-// Taille minimale pour déclencher le filtrage (évite les spawns inutiles)
+// Minimum output length to trigger filtering (avoids unnecessary spawns)
 const MIN_OUTPUT_CHARS = 200;
 
 // ─── extension ──────────────────────────────────────────────────────────────
@@ -176,22 +197,24 @@ export default function (pi: ExtensionAPI) {
     return;
   }
 
-  // ── 1. Bash pre-execution : équivalent PreToolUse rewrite ────────────────
+  // ── 1. Bash pre-execution: PreToolUse rewrite equivalent ─────────────────
   //
-  // Mutation de event.input.command avant exécution (extensions.md:570).
-  // Le rendering natif Pi est conservé (pas de tool override).
-  // ecotokens filter exécute la commande, filtre stdout, enregistre les métriques.
+  // Mutate event.input.command before execution (extensions.md:570).
+  // Pi's native rendering is kept (no tool override).
+  // ecotokens filter runs the command, filters stdout, and records metrics.
   pi.on("tool_call", async (event, ctx) => {
     if (event.toolName !== "bash") return;
     const input = event.input as { command?: string };
     if (!input.command) return;
-    // Garde anti-récursion + auto-guérison : le modèle recopie ses tool-calls
-    // déjà wrappés depuis le transcript et les re-wrappe — on retire toutes les
-    // couches puis on re-wrappe une seule fois. Un appel simple `ecotokens …`
-    // (gain, search, filter direct) n'est pas wrappé ; ce qui lui est chaîné,
-    // ou une chaîne corrompue, est wrappé en entier pour rester masqué.
+    // Re-entrancy guard + self-healing: models copy their already-wrapped
+    // tool calls out of the transcript and wrap them again. Peel every
+    // `ecotokens filter … -- bash -c` layer back to the original command,
+    // then re-wrap exactly once. A simple `ecotokens …` CLI call (gain,
+    // search, a direct filter invocation) is not wrapped; anything chained to
+    // it, or a layer that cannot be peeled safely, is wrapped whole so its
+    // output still goes through masking.
     const raw = input.command.trim();
-    const inner = isEcotokensCmd(raw) ? (peelEcotokensWrapper(raw) ?? raw) : raw;
+    const inner = isEcotokensCmd(raw) ? peelEcotokensWrapper(raw) : raw;
     if (isEcotokensCmd(inner) && isSimpleCommand(inner)) {
       if (inner !== raw) input.command = inner;
       return;
@@ -199,10 +222,10 @@ export default function (pi: ExtensionAPI) {
     input.command = `ecotokens filter --agent pi --cwd ${shQuote(ctx.cwd)} -- bash -c ${shQuote(inner)}`;
   });
 
-  // ── 2. Outils natifs post-execution : équivalent PostToolUse ─────────────
+  // ── 2. Native tools post-execution: PostToolUse equivalent ───────────────
   //
-  // tool_result (extensions.md:625) : retour partiel remplace content.
-  // Cible : read, grep, find, ls — mêmes handlers que Claude PostToolUse.
+  // tool_result (extensions.md:625): a partial return replaces content.
+  // Targets: read, grep, find, ls — same handlers as Claude PostToolUse.
   pi.on("tool_result", async (event, ctx) => {
     const claudeName = PI_TO_CLAUDE_TOOL[event.toolName];
     if (!claudeName) return;
@@ -227,7 +250,7 @@ export default function (pi: ExtensionAPI) {
     spawnSync("ecotokens", ["session-end"], { stdio: "ignore", cwd: ctx.cwd });
   });
 
-  // ── 4. Commandes slash ────────────────────────────────────────────────────
+  // ── 4. Slash commands ─────────────────────────────────────────────────────
   pi.registerCommand("gain", {
     description: "Show ecotokens token savings report",
     handler: async (args, ctx) => {

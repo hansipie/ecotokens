@@ -359,6 +359,105 @@ fn wrapper_around_simple_ecotokens_call_is_unwrapped() {
     }
 }
 
+/// The command the shell will actually run after the hook: the rewrite, or the
+/// original command on passthrough.
+fn effective_command(cmd: &str) -> String {
+    match handle_hook_input(&make_input(cmd), &[], false, "claude") {
+        HookOutput::Rewrite(out) => out,
+        HookOutput::Passthrough => cmd.to_string(),
+    }
+}
+
+#[test]
+fn wrapper_marker_inside_a_comment_is_not_peeled() {
+    // Regression: the ` -- bash -c ` marker was searched anywhere in the
+    // command, so commented-out code became the command to run.
+    let cmd = "ecotokens filter -- echo OK # -- bash -c 'echo SHOULD_NOT_RUN'";
+    let out = effective_command(cmd);
+    assert!(
+        out.contains("echo OK #"),
+        "the commented-out part must stay a comment: {out}"
+    );
+}
+
+#[test]
+fn commands_before_a_wrapper_marker_are_not_dropped() {
+    let cmd = "ecotokens filter -- echo FIRST && echo SECOND -- bash -c 'echo ONLY_THIS'";
+    let out = effective_command(cmd);
+    assert!(
+        out.contains("echo FIRST && echo SECOND"),
+        "commands before the marker must still run: {out}"
+    );
+}
+
+#[test]
+fn double_quoted_backslash_is_kept_literal() {
+    // Inside bash double quotes `\b` is two characters, not an escape.
+    let cmd = r#"ecotokens filter --agent claude -- bash -c "printf '%s' 'a\b'""#;
+    let out = effective_command(cmd);
+    assert!(out.contains(r"a\b"), "backslash must be preserved: {out}");
+}
+
+#[test]
+fn double_quoted_backslash_n_is_not_turned_into_a_newline() {
+    let cmd = r#"ecotokens filter --agent claude -- bash -c "printf '%s' 'x\ny'""#;
+    let out = effective_command(cmd);
+    assert!(
+        out.contains(r"x\ny") && !out.contains('\n'),
+        "`\\n` must stay two characters: {out}"
+    );
+}
+
+#[test]
+fn double_quoted_substitution_is_not_moved_to_the_inner_shell() {
+    // The outer shell expands `$(…)` before `bash -c` runs; peeling would make
+    // the inner shell expand it instead (`echo a;b` vs `echo 'a;b'`).
+    let cmd = r#"ecotokens filter --agent claude -- bash -c "echo $(printf 'a;b')""#;
+    let out = effective_command(cmd);
+    assert!(
+        out.contains(r#""echo $(printf"#),
+        "an ambiguous double-quoted wrapper must be kept whole: {out}"
+    );
+}
+
+#[test]
+fn ts_plugins_peel_wrappers_safely() {
+    // Runs tests/plugins/peel.test.mjs against the OpenCode plugin and the Pi
+    // extension. Needs Node ≥ 22.6 (type stripping); skipped when absent.
+    let version = match std::process::Command::new("node").arg("--version").output() {
+        Ok(o) if o.status.success() => String::from_utf8_lossy(&o.stdout).trim().to_string(),
+        _ => {
+            eprintln!("node not found, skipping TS plugin tests");
+            return;
+        }
+    };
+    let mut parts = version
+        .trim_start_matches('v')
+        .split('.')
+        .map(|p| p.parse::<u32>().unwrap_or(0));
+    let (major, minor) = (parts.next().unwrap_or(0), parts.next().unwrap_or(0));
+    if (major, minor) < (22, 6) {
+        eprintln!("node {version} has no type stripping, skipping TS plugin tests");
+        return;
+    }
+    let out = std::process::Command::new("node")
+        .args([
+            "--experimental-strip-types",
+            "--no-warnings",
+            "--test",
+            "tests/plugins/peel.test.mjs",
+        ])
+        .current_dir(env!("CARGO_MANIFEST_DIR"))
+        .output()
+        .expect("run node --test");
+    assert!(
+        out.status.success(),
+        "TS plugin tests failed:\n{}\n{}",
+        String::from_utf8_lossy(&out.stdout),
+        String::from_utf8_lossy(&out.stderr)
+    );
+}
+
 // ── Gemini BeforeTool hook handler tests ──────────────────────────────────────
 
 mod gemini_handler {

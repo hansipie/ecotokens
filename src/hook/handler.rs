@@ -17,79 +17,87 @@ fn shell_single_quote(value: &str) -> String {
     format!("'{}'", value.replace('\'', "'\"'\"'"))
 }
 
-/// Decode a single shell-quoted token: `'…'` with `'\''` or `'"'"'` escapes
-/// (the latter is what [`shell_single_quote`] emits), or `"…"` with backslash
-/// escapes (JSON-style: `\"`, `\\`, `\n`, `\uXXXX`, …).
-/// Returns `None` when `s` is not exactly one such quoted token.
-fn unquote_token(s: &str) -> Option<String> {
-    let s = s.trim();
-    let chars: Vec<char> = s.chars().collect();
-    let quote = *chars.first()?;
-    if quote != '\'' && quote != '"' {
-        return None;
-    }
+/// Decode the shell-quoted token at the start of `s` and return it with the
+/// rest of `s`. Accepted forms:
+/// - `'…'` with `'\''` or `'"'"'` escapes (the latter is what
+///   [`shell_single_quote`] emits);
+/// - `"…"` decoded with bash double-quote rules: `\` escapes only `$`, `` ` ``,
+///   `"`, `\` and newline, and stays literal before anything else.
+///
+/// Returns `None` for anything else, including a double-quoted token with an
+/// unescaped `$` or `` ` ``: the outer shell expands those before `bash -c`
+/// runs, so moving them to an inner shell would change what runs.
+fn parse_quoted(s: &str) -> Option<(String, &str)> {
+    let mut it = s.char_indices().peekable();
+    let (_, quote) = it.next()?;
     let mut out = String::new();
-    let mut i = 1usize;
-    loop {
-        let c = *chars.get(i)?;
-        if quote == '\'' {
-            if c == '\'' {
-                if chars.get(i + 1) == Some(&'"')
-                    && chars.get(i + 2) == Some(&'\'')
-                    && chars.get(i + 3) == Some(&'"')
-                    && chars.get(i + 4) == Some(&'\'')
-                {
-                    out.push('\'');
-                    i += 5;
-                    continue;
-                }
-                if chars.get(i + 1) == Some(&'\\')
-                    && chars.get(i + 2) == Some(&'\'')
-                    && chars.get(i + 3) == Some(&'\'')
-                {
-                    out.push('\'');
-                    i += 4;
-                    continue;
-                }
-                i += 1;
-                break;
+    match quote {
+        '\'' => loop {
+            let (i, c) = it.next()?;
+            if c != '\'' {
+                out.push(c);
+                continue;
             }
-            out.push(c);
-            i += 1;
-        } else {
+            let rest = &s[i..];
+            if let Some(esc) = ["'\"'\"'", "'\\''"].iter().find(|e| rest.starts_with(**e)) {
+                out.push('\'');
+                for _ in 1..esc.len() {
+                    it.next();
+                }
+                continue;
+            }
+            return Some((out, &s[i + 1..]));
+        },
+        '"' => loop {
+            let (i, c) = it.next()?;
             match c {
-                '\\' => {
-                    let n = *chars.get(i + 1)?;
-                    match n {
-                        'n' => out.push('\n'),
-                        't' => out.push('\t'),
-                        'r' => out.push('\r'),
-                        'u' => {
-                            let hex: String = chars.iter().skip(i + 2).take(4).collect();
-                            out.push(char::from_u32(u32::from_str_radix(&hex, 16).ok()?)?);
-                            i += 6;
-                            continue;
-                        }
-                        other => out.push(other),
+                '"' => return Some((out, &s[i + 1..])),
+                '$' | '`' => return None,
+                '\\' => match it.peek()?.1 {
+                    n @ ('$' | '`' | '"' | '\\') => {
+                        out.push(n);
+                        it.next();
                     }
-                    i += 2;
-                }
-                '"' => {
-                    i += 1;
-                    break;
-                }
-                other => {
-                    out.push(other);
-                    i += 1;
-                }
+                    '\n' => {
+                        it.next();
+                    }
+                    _ => out.push('\\'),
+                },
+                other => out.push(other),
             }
-        }
+        },
+        _ => None,
     }
+}
 
-    if chars[i..].iter().all(|c| c.is_whitespace()) {
-        Some(out)
-    } else {
-        None
+/// Parse an option value at the start of `s`: a quoted token or a bare word
+/// free of shell metacharacters. Returns the rest of `s`.
+fn skip_option_value(s: &str) -> Option<&str> {
+    if s.starts_with(['\'', '"']) {
+        return parse_quoted(s).map(|(_, rest)| rest);
+    }
+    let end = s.find(char::is_whitespace).unwrap_or(s.len());
+    let word = &s[..end];
+    let safe = !word.is_empty() && is_simple_command(word) && !word.contains(['\'', '"', '#']);
+    safe.then(|| &s[end..])
+}
+
+/// Parse one `ecotokens filter [--agent A] [--cwd C] -- bash -c '<inner>'`
+/// layer — exactly the shape the hook and the plugins emit — and return
+/// `<inner>`. Anything else (other options, a marker inside a comment,
+/// commands before the marker, text after the quoted token) is not a wrapper.
+fn parse_wrapper(s: &str) -> Option<String> {
+    let mut rest = s.trim().strip_prefix("ecotokens filter ")?;
+    loop {
+        rest = rest.trim_start();
+        if let Some(r) = rest.strip_prefix("-- bash -c ") {
+            let (inner, after) = parse_quoted(r.trim_start())?;
+            return after.trim().is_empty().then_some(inner);
+        }
+        let r = rest
+            .strip_prefix("--agent ")
+            .or_else(|| rest.strip_prefix("--cwd "))?;
+        rest = skip_option_value(r.trim_start())?;
     }
 }
 
@@ -112,22 +120,18 @@ fn is_simple_command(s: &str) -> bool {
     })
 }
 
-/// Peel `ecotokens filter … -- bash -c '<inner>'` layers until a command that
-/// is not a peelable wrapper is reached.
-///
-/// Returns `Some(inner)`: the original shell command, or an `ecotokens`
-/// command that is not a wrapper (`ecotokens gain`, a direct
-/// `ecotokens filter …` without `bash -c`). Returns `None` for a corrupt chain
-/// (a wrapper whose `bash -c` argument is not exactly one quoted token, e.g. a
-/// trailing `&& …`), which callers must not trust.
-fn peel_ecotokens_wrapper(cmd: &str) -> Option<String> {
-    const MARKER: &str = " -- bash -c ";
+/// Peel `ecotokens filter … -- bash -c '<inner>'` layers (see
+/// [`parse_wrapper`]) until a command that is not a strict wrapper is reached,
+/// and return it: the original shell command, an `ecotokens` command that is
+/// not a wrapper (`ecotokens gain`, `ecotokens filter --debug -- …`), or a
+/// wrapper-like command that cannot be peeled without changing what it runs
+/// (a trailing `&& …`, a `$(…)` in double quotes), which is then kept whole.
+fn peel_ecotokens_wrapper(cmd: &str) -> String {
     let mut s = cmd.trim().to_string();
-    while s.starts_with("ecotokens filter ") {
-        let Some(idx) = s.find(MARKER) else { break };
-        s = unquote_token(&s[idx + MARKER.len()..])?;
+    while let Some(inner) = parse_wrapper(&s) {
+        s = inner;
     }
-    Some(s)
+    s
 }
 
 /// Shared payload structure for Gemini BeforeTool and Qwen PreToolUse hooks.
@@ -174,8 +178,9 @@ struct ShellHookSpecificOutput {
 /// A *simple* `ecotokens` CLI call (`ecotokens gain`, a direct
 /// `ecotokens filter …`: no operator, substitution or newline) is not wrapped
 /// into another `ecotokens filter`. Anything chained to it
-/// (`ecotokens gain; cat secrets`) or a corrupt wrapper chain is still wrapped
-/// whole, so its output keeps going through `masking::mask`.
+/// (`ecotokens gain; cat secrets`) or a wrapper layer that cannot be peeled
+/// safely is still wrapped whole, so its output keeps going through
+/// `masking::mask`.
 pub fn handle_hook_input(
     input: &HookInput,
     exclusions: &[String],
@@ -195,10 +200,10 @@ pub fn handle_hook_input(
         return HookOutput::Passthrough;
     }
 
-    // A corrupt wrapper chain is wrapped as is rather than trusted: it may carry
-    // a trailing `&& …` that must still go through masking.
+    // A layer that cannot be peeled safely is kept whole: it may carry a
+    // trailing `&& …` that must still go through masking.
     let cmd = if is_ecotokens_cmd(raw) {
-        peel_ecotokens_wrapper(raw).unwrap_or_else(|| raw.to_string())
+        peel_ecotokens_wrapper(raw)
     } else {
         raw.to_string()
     };
