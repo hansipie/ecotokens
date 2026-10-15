@@ -90,20 +90,29 @@ function unquoteToken(s: string): string | null {
   return null
 }
 
+/** True when `s` is an `ecotokens` invocation (`ecotokens-foo` is not). */
+function isEcotokensCmd(s: string): boolean {
+  return s === "ecotokens" || /^ecotokens\s/.test(s)
+}
+
+/** True when `s` has no shell operator, substitution or newline. */
+function isSimpleCommand(s: string): boolean {
+  return !/[;&|<>`$()\n\\]/.test(s)
+}
+
 /**
- * Peel `ecotokens filter … -- bash -c '<inner>'` layers until a non-ecotokens
- * shell command is reached. Returns null when `cmd` starts with `ecotokens`
- * but is not a peelable filter wrapper (`ecotokens gain`, a direct
- * `ecotokens filter …` invocation, or a corrupt chain) — such commands must be
- * left untouched instead of wrapped again.
+ * Peel `ecotokens filter … -- bash -c '<inner>'` layers until a command that is
+ * not a peelable wrapper is reached: the original shell command, or an
+ * `ecotokens` command that is not a wrapper (`ecotokens gain`, a direct
+ * `ecotokens filter …`). Returns null for a corrupt chain (a wrapper whose
+ * `bash -c` argument is not exactly one quoted token, e.g. a trailing `&& …`).
  */
 function peelEcotokensWrapper(cmd: string): string | null {
+  const marker = " -- bash -c "
   let s = cmd.trim()
-  while (s.startsWith("ecotokens")) {
-    if (!s.startsWith("ecotokens filter")) return null
-    const marker = " -- bash -c "
+  while (s.startsWith("ecotokens filter ")) {
     const idx = s.indexOf(marker)
-    if (idx === -1) return null
+    if (idx === -1) break
     const inner = unquoteToken(s.slice(idx + marker.length))
     if (inner === null) return null
     s = inner
@@ -181,16 +190,14 @@ export const EcotokensPlugin: Plugin = async ({ directory }) => {
       // tool calls out of the transcript and wrap them again, growing an
       // exponentially-escaped chain. Peel every `ecotokens filter … -- bash -c`
       // layer back to the original command, then re-wrap exactly once.
-      // Non-peeleable `ecotokens …` commands (gain, search, a direct filter
-      // invocation) are left untouched.
+      // A simple `ecotokens …` CLI call (gain, search, a direct filter
+      // invocation) is not wrapped; anything chained to it, or a corrupt
+      // chain, is wrapped whole so its output still goes through masking.
       const raw = args.command.trim()
-      let inner: string
-      if (raw.startsWith("ecotokens")) {
-        const peeled = peelEcotokensWrapper(raw)
-        if (peeled === null) return
-        inner = peeled
-      } else {
-        inner = raw
+      const inner = isEcotokensCmd(raw) ? (peelEcotokensWrapper(raw) ?? raw) : raw
+      if (isEcotokensCmd(inner) && isSimpleCommand(inner)) {
+        if (inner !== raw) args.command = inner
+        return
       }
       args.command = `ecotokens filter --agent opencode --cwd ${shQuote(directory)} -- bash -c ${shQuote(inner)}`
     },

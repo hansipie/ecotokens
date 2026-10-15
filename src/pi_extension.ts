@@ -88,19 +88,29 @@ function unquoteToken(s: string): string | null {
   return null;
 }
 
+/** True when `s` is an `ecotokens` invocation (`ecotokens-foo` is not). */
+function isEcotokensCmd(s: string): boolean {
+  return s === "ecotokens" || /^ecotokens\s/.test(s);
+}
+
+/** True when `s` has no shell operator, substitution or newline. */
+function isSimpleCommand(s: string): boolean {
+  return !/[;&|<>`$()\n\\]/.test(s);
+}
+
 /**
- * Retire les couches `ecotokens filter … -- bash -c '<inner>'` jusqu'à la
- * commande shell d'origine. Retourne null quand `cmd` commence par `ecotokens`
- * mais n'est pas un wrapper filtrable (`ecotokens gain`, un `ecotokens filter …`
- * direct…) — il ne faut alors ni le toucher ni l'empiler à nouveau.
+ * Retire les couches `ecotokens filter … -- bash -c '<inner>'` jusqu'à une
+ * commande qui n'est pas un wrapper dépliable : la commande shell d'origine, ou
+ * une commande `ecotokens` qui n'en est pas un (`ecotokens gain`, un
+ * `ecotokens filter …` direct). Retourne null si la chaîne est corrompue (un
+ * argument `bash -c` qui n'est pas exactement un jeton entre guillemets).
  */
 function peelEcotokensWrapper(cmd: string): string | null {
+  const marker = " -- bash -c ";
   let s = cmd.trim();
-  while (s.startsWith("ecotokens")) {
-    if (!s.startsWith("ecotokens filter")) return null;
-    const marker = " -- bash -c ";
+  while (s.startsWith("ecotokens filter ")) {
     const idx = s.indexOf(marker);
-    if (idx === -1) return null;
+    if (idx === -1) break;
     const inner = unquoteToken(s.slice(idx + marker.length));
     if (inner === null) return null;
     s = inner;
@@ -177,16 +187,14 @@ export default function (pi: ExtensionAPI) {
     if (!input.command) return;
     // Garde anti-récursion + auto-guérison : le modèle recopie ses tool-calls
     // déjà wrappés depuis le transcript et les re-wrappe — on retire toutes les
-    // couches puis on re-wrpe une seule fois. Les commandes `ecotokens …` non
-    // dépliables (gain, search, filter direct) restent intactes.
+    // couches puis on re-wrappe une seule fois. Un appel simple `ecotokens …`
+    // (gain, search, filter direct) n'est pas wrappé ; ce qui lui est chaîné,
+    // ou une chaîne corrompue, est wrappé en entier pour rester masqué.
     const raw = input.command.trim();
-    let inner: string;
-    if (raw.startsWith("ecotokens")) {
-      const peeled = peelEcotokensWrapper(raw);
-      if (peeled === null) return;
-      inner = peeled;
-    } else {
-      inner = raw;
+    const inner = isEcotokensCmd(raw) ? (peelEcotokensWrapper(raw) ?? raw) : raw;
+    if (isEcotokensCmd(inner) && isSimpleCommand(inner)) {
+      if (inner !== raw) input.command = inner;
+      return;
     }
     input.command = `ecotokens filter --agent pi --cwd ${shQuote(ctx.cwd)} -- bash -c ${shQuote(inner)}`;
   });

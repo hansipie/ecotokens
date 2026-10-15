@@ -274,6 +274,91 @@ fn excluded_inner_command_stays_excluded_when_resubmitted_wrapped() {
     );
 }
 
+#[test]
+fn wrapper_emitted_by_the_hook_with_apostrophes_is_peeled() {
+    // The hook quotes with `'"'"'`; resubmitting its own output must heal, not
+    // pass through.
+    let exclusions: Vec<String> = vec![];
+    let first = match handle_hook_input(
+        &make_input("echo 'hi' && echo \"it's\""),
+        &exclusions,
+        false,
+        "claude",
+    ) {
+        HookOutput::Rewrite(cmd) => cmd,
+        _ => panic!("expected Rewrite"),
+    };
+    assert!(
+        first.contains("'\"'\"'"),
+        "fixture must use the '\"'\"' escape: {first}"
+    );
+
+    let nested = format!(
+        "ecotokens filter --agent claude -- bash -c '{}'",
+        first.replace('\'', "'\\''")
+    );
+    for cmd in [first.as_str(), nested.as_str()] {
+        match handle_hook_input(&make_input(cmd), &exclusions, false, "claude") {
+            HookOutput::Rewrite(out) => assert_eq!(out, first),
+            _ => panic!("expected Rewrite for {cmd}"),
+        }
+    }
+}
+
+#[test]
+fn ecotokens_prefix_requires_a_word_boundary() {
+    let exclusions: Vec<String> = vec![];
+    for cmd in ["ecotokens-build.sh", "ecotokensx status"] {
+        let out = handle_hook_input(&make_input(cmd), &exclusions, false, "claude");
+        assert!(
+            matches!(out, HookOutput::Rewrite(_)),
+            "{cmd} is not an ecotokens CLI call and must be wrapped"
+        );
+    }
+}
+
+#[test]
+fn chained_ecotokens_command_is_still_wrapped() {
+    let exclusions: Vec<String> = vec![];
+    for cmd in [
+        "ecotokens gain; cat ~/.ssh/id_rsa",
+        "ecotokens gain && env",
+        "ecotokens gain | tee out",
+        "ecotokens search $(cat secret)",
+    ] {
+        match handle_hook_input(&make_input(cmd), &exclusions, false, "claude") {
+            HookOutput::Rewrite(out) => assert!(
+                out.starts_with("ecotokens filter --agent claude -- bash -c "),
+                "{cmd} must be wrapped whole: {out}"
+            ),
+            _ => panic!("chained ecotokens command must not pass through: {cmd}"),
+        }
+    }
+}
+
+#[test]
+fn corrupt_wrapper_chain_with_trailing_command_is_wrapped_whole() {
+    let exclusions: Vec<String> = vec![];
+    let cmd = "ecotokens filter --agent claude -- bash -c 'ls' && cat secrets";
+    match handle_hook_input(&make_input(cmd), &exclusions, false, "claude") {
+        HookOutput::Rewrite(out) => {
+            assert!(out.contains("cat secrets"));
+            assert!(out.starts_with("ecotokens filter --agent claude -- bash -c '"));
+        }
+        _ => panic!("corrupt chain must be wrapped, not passed through"),
+    }
+}
+
+#[test]
+fn wrapper_around_simple_ecotokens_call_is_unwrapped() {
+    let exclusions: Vec<String> = vec![];
+    let nested = nest_double_quoted("ecotokens gain", 3);
+    match handle_hook_input(&make_input(&nested), &exclusions, false, "claude") {
+        HookOutput::Rewrite(out) => assert_eq!(out, "ecotokens gain"),
+        _ => panic!("expected Rewrite to the bare ecotokens call"),
+    }
+}
+
 // ── Gemini BeforeTool hook handler tests ──────────────────────────────────────
 
 mod gemini_handler {

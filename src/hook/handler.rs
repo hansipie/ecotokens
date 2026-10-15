@@ -17,8 +17,9 @@ fn shell_single_quote(value: &str) -> String {
     format!("'{}'", value.replace('\'', "'\"'\"'"))
 }
 
-/// Decode a single shell-quoted token: `'…'` with `'\''` escapes, or `"…"`
-/// with backslash escapes (JSON-style: `\"`, `\\`, `\n`, `\uXXXX`, …).
+/// Decode a single shell-quoted token: `'…'` with `'\''` or `'"'"'` escapes
+/// (the latter is what [`shell_single_quote`] emits), or `"…"` with backslash
+/// escapes (JSON-style: `\"`, `\\`, `\n`, `\uXXXX`, …).
 /// Returns `None` when `s` is not exactly one such quoted token.
 fn unquote_token(s: &str) -> Option<String> {
     let s = s.trim();
@@ -33,6 +34,15 @@ fn unquote_token(s: &str) -> Option<String> {
         let c = *chars.get(i)?;
         if quote == '\'' {
             if c == '\'' {
+                if chars.get(i + 1) == Some(&'"')
+                    && chars.get(i + 2) == Some(&'\'')
+                    && chars.get(i + 3) == Some(&'"')
+                    && chars.get(i + 4) == Some(&'\'')
+                {
+                    out.push('\'');
+                    i += 5;
+                    continue;
+                }
                 if chars.get(i + 1) == Some(&'\\')
                     && chars.get(i + 2) == Some(&'\'')
                     && chars.get(i + 3) == Some(&'\'')
@@ -83,23 +93,39 @@ fn unquote_token(s: &str) -> Option<String> {
     }
 }
 
-/// Peel `ecotokens filter … -- bash -c '<inner>'` layers until a non-ecotokens
-/// shell command is reached.
+/// True when `s` is an `ecotokens` invocation (word boundary: `ecotokens-foo`
+/// and `ecotokensx` are ordinary commands).
+fn is_ecotokens_cmd(s: &str) -> bool {
+    s == "ecotokens"
+        || s.strip_prefix("ecotokens")
+            .is_some_and(|rest| rest.starts_with(char::is_whitespace))
+}
+
+/// True when `s` has no shell operator, substitution or newline, i.e. it is a
+/// single command that cannot chain anything else after (or inside) it.
+fn is_simple_command(s: &str) -> bool {
+    !s.chars().any(|c| {
+        matches!(
+            c,
+            ';' | '&' | '|' | '<' | '>' | '`' | '$' | '(' | ')' | '\n' | '\\'
+        )
+    })
+}
+
+/// Peel `ecotokens filter … -- bash -c '<inner>'` layers until a command that
+/// is not a peelable wrapper is reached.
 ///
-/// Returns `Some(inner)` for a fully peelable wrapper chain, `None` when `cmd`
-/// starts with `ecotokens` but is not a peelable filter wrapper (`ecotokens
-/// gain`, a direct `ecotokens filter …` invocation without `bash -c`, or a
-/// corrupt chain) — callers must leave such commands untouched instead of
-/// wrapping them again.
+/// Returns `Some(inner)`: the original shell command, or an `ecotokens`
+/// command that is not a wrapper (`ecotokens gain`, a direct
+/// `ecotokens filter …` without `bash -c`). Returns `None` for a corrupt chain
+/// (a wrapper whose `bash -c` argument is not exactly one quoted token, e.g. a
+/// trailing `&& …`), which callers must not trust.
 fn peel_ecotokens_wrapper(cmd: &str) -> Option<String> {
+    const MARKER: &str = " -- bash -c ";
     let mut s = cmd.trim().to_string();
-    while s.starts_with("ecotokens") {
-        if !s.starts_with("ecotokens filter") {
-            return None;
-        }
-        let marker = " -- bash -c ";
-        let idx = s.find(marker)?;
-        s = unquote_token(&s[idx + marker.len()..])?;
+    while s.starts_with("ecotokens filter ") {
+        let Some(idx) = s.find(MARKER) else { break };
+        s = unquote_token(&s[idx + MARKER.len()..])?;
     }
     Some(s)
 }
@@ -145,10 +171,11 @@ struct ShellHookSpecificOutput {
 /// filtering *and* secret masking. Note also that matching is by prefix, so
 /// `git` excludes every command starting with those characters.
 ///
-/// The same `Passthrough` applies to commands starting with `ecotokens` that
-/// are not peelable wrappers (`ecotokens gain`, a direct `ecotokens filter`
-/// invocation…): they already are ecotokens CLI calls and must not be wrapped
-/// into another `ecotokens filter`.
+/// A *simple* `ecotokens` CLI call (`ecotokens gain`, a direct
+/// `ecotokens filter …`: no operator, substitution or newline) is not wrapped
+/// into another `ecotokens filter`. Anything chained to it
+/// (`ecotokens gain; cat secrets`) or a corrupt wrapper chain is still wrapped
+/// whole, so its output keeps going through `masking::mask`.
 pub fn handle_hook_input(
     input: &HookInput,
     exclusions: &[String],
@@ -168,11 +195,10 @@ pub fn handle_hook_input(
         return HookOutput::Passthrough;
     }
 
-    let cmd = if raw.starts_with("ecotokens") {
-        match peel_ecotokens_wrapper(raw) {
-            Some(inner) => inner,
-            None => return HookOutput::Passthrough,
-        }
+    // A corrupt wrapper chain is wrapped as is rather than trusted: it may carry
+    // a trailing `&& …` that must still go through masking.
+    let cmd = if is_ecotokens_cmd(raw) {
+        peel_ecotokens_wrapper(raw).unwrap_or_else(|| raw.to_string())
     } else {
         raw.to_string()
     };
@@ -181,6 +207,16 @@ pub fn handle_hook_input(
     // inside an `ecotokens filter` wrapper.
     if cmd != raw && excluded(&cmd) {
         return HookOutput::Passthrough;
+    }
+
+    // Already an `ecotokens` CLI call: no second filter layer. Unwrap any
+    // leftover wrapper chain around it so the call runs bare.
+    if is_ecotokens_cmd(&cmd) && is_simple_command(&cmd) {
+        return if cmd == raw {
+            HookOutput::Passthrough
+        } else {
+            HookOutput::Rewrite(cmd)
+        };
     }
 
     // Rewrite to ecotokens filter
