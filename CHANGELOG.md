@@ -5,7 +5,7 @@ All notable changes to this project will be documented in this file.
 The format is based on [Keep a Changelog](https://keepachangelog.com/en/1.0.0/),
 and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0.html).
 
-## [Unreleased]
+## [0.30.1] - 2026-10-16
 
 ### Fixed
 
@@ -20,6 +20,7 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 ### Changed
 
 - **Bare `ecotokens` calls**: a simple `ecotokens filter`, `filter-output`, `show` or `gain` call (no operator, substitution or newline) now runs bare instead of under another `ecotokens filter` (still under `bash -c '…'` when it was peeled out of wrappers, so the caller's shell options and aliases do not apply to it), in the Claude Code, Codex, Gemini and Qwen hooks as in the plugins. Every other subcommand — notably `search` and `symbol`, which print indexed source without masking it — is wrapped as before; the OpenCode plugin now wraps them too, where it used to run every command starting with `ecotokens` bare.
+- **Version**: bumped the crate to `0.30.1`.
 
 ## [0.30.0] - 2026-10-06
 
