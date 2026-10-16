@@ -1,5 +1,5 @@
 {
-  "comment": "Shared wrapper-peeling vectors for the three copies of the grammar: src/hook/handler.rs (Rust unit tests), src/opencode_plugin.ts and src/pi_extension.ts (tests/plugins/peel.test.mjs). All three must agree on every case. expect=bare means the hook must leave the command running bare (Passthrough in Rust, unchanged in the plugins); expect=whole means it must be wrapped whole so its output still goes through masking.",
+  "comment": "Shared wrapper-peeling vectors for the three copies of the grammar: src/hook/handler.rs (Rust unit tests), src/opencode_plugin.ts and src/pi_extension.ts (tests/plugins/peel.test.mjs). All three must agree on every case. expect=bare means the hook must leave the command running bare (Passthrough in Rust, unchanged in the plugins); expect=whole means it must be wrapped whole so its output still goes through masking. rebash lists commands whose peeled inner command runs bare: the hook must return exactly `bash -c '<inner>'` (inner has no apostrophe, so every quoting style agrees) and keep that result unchanged when it is resubmitted.",
   "peelable": [
     { "cmd": "ecotokens filter --agent claude -- bash -c 'git status'", "inner": "git status" },
     { "cmd": "ecotokens filter --agent claude --cwd '/tmp' -- bash -c 'ls -la'", "inner": "ls -la" },
@@ -9,11 +9,30 @@
     { "cmd": "ecotokens filter --agent claude -- bash -c \"echo \\\"hi\\\"\"", "inner": "echo \"hi\"" },
     { "cmd": "ecotokens filter --agent claude -- bash -c \"printf '%s' 'x\\ny'\"", "inner": "printf '%s' 'x\\ny'" },
     { "cmd": "ecotokens filter --agent claude -- bash -c 'echo $(date)'", "inner": "echo $(date)" },
-    { "cmd": "ecotokens filter --agent claude -- bash -c 'ecotokens filter --agent opencode --cwd \"/tmp/x\" -- bash -c \"ls -la\"'", "inner": "ls -la" }
+    { "cmd": "ecotokens filter --agent claude -- bash -c 'ecotokens filter --agent opencode --cwd \"/tmp/x\" -- bash -c \"ls -la\"'", "inner": "ls -la" },
+    { "cmd": "ecotokens filter --agent claude\t-- bash -c 'ls'", "inner": "ls" },
+    { "cmd": "ecotokens filter --agent claude -- bash -c ' git status'", "inner": "git status" },
+    { "cmd": "ecotokens filter --agent claude -- bash -c 'ecotokens search foo'", "inner": "ecotokens search foo" },
+    { "cmd": "ecotokens filter --agent claude -- bash -c 'ls'\n", "inner": "ls" },
+    { "cmd": "bash -c 'git status'", "inner": "git status" },
+    { "cmd": "bash -c \"ls -la\"", "inner": "ls -la" },
+    { "cmd": "ecotokens filter --agent claude -- bash -c 'bash -c '\\''ls | head'\\'''", "inner": "ls | head" }
+  ],
+  "rebash": [
+    { "cmd": "ecotokens filter --agent x -- bash -c 'ecotokens filter -- echo __no_such_file_*'", "inner": "ecotokens filter -- echo __no_such_file_*" },
+    { "cmd": "ecotokens filter --agent claude -- bash -c \"ecotokens gain\"", "inner": "ecotokens gain" },
+    { "cmd": "bash -c 'ecotokens show 072486c1'", "inner": "ecotokens show 072486c1" }
   ],
   "unpeelable": [
     { "cmd": "ecotokens gain", "expect": "bare" },
-    { "cmd": "ecotokens search 'foo'", "expect": "bare" },
+    { "cmd": "ecotokens search 'foo'", "expect": "whole" },
+    { "cmd": "ecotokens symbol 'src/main.rs::main#fn'", "expect": "whole" },
+    { "cmd": "ecotokens show 072486c1", "expect": "bare" },
+    { "cmd": "ecotokens filter --agent x\n-- bash -c 'echo INNER'", "expect": "whole" },
+    { "cmd": "ecotokens filter --agent x -- bash -c \n'echo INNER'", "expect": "whole" },
+    { "cmd": "ecotokens filter --cwd '/tmp'-- bash -c 'echo INNER'", "expect": "bare" },
+    { "cmd": "ecotokens filter --agent x--  bash -c 'echo INNER'", "expect": "bare" },
+    { "cmd": "ecotokens filter --agent claude -- bash -c 'ls' # c", "expect": "bare" },
     { "cmd": "ecotokens filter --debug -- cargo test", "expect": "bare" },
     { "cmd": "ecotokens filter --agent claude -- bash -c 'unterminated", "expect": "bare" },
     { "cmd": "ecotokens filter --agent claude -- bash -c \"unterminated", "expect": "bare" },
@@ -22,6 +41,22 @@
     { "cmd": "ecotokens filter -- echo OK # -- bash -c 'echo SHOULD_NOT_RUN'", "expect": "bare" },
     { "cmd": "ecotokens filter -- echo FIRST && echo SECOND -- bash -c 'echo ONLY_THIS'", "expect": "whole" },
     { "cmd": "ecotokens filter --agent claude -- bash -c 'ls' && cat secrets", "expect": "whole" },
-    { "cmd": "ecotokens filter --agent claude -- bash -c \"echo $(date)\"", "expect": "whole" }
+    { "cmd": "ecotokens filter --agent claude -- bash -c \"echo $(date)\"", "expect": "whole" },
+    { "cmd": "ecotokens filter --agent --help -- bash -c 'echo NEVER'", "expect": "bare" },
+    { "cmd": "ecotokens filter --cwd --agent -- bash -c 'echo NEVER'", "expect": "bare" },
+    { "cmd": "ecotokens filter --agent -x -- bash -c 'echo NEVER'", "expect": "bare" },
+    { "cmd": "ecotokens filter --agent x --agent y -- bash -c 'echo NEVER'", "expect": "bare" },
+    { "cmd": "ecotokens filter --cwd /a --cwd /b -- bash -c 'echo NEVER'", "expect": "bare" },
+    { "cmd": "ecotokens filter --agent {x,y} -- bash -c 'echo NEVER'", "expect": "bare" },
+    { "cmd": "ecotokens filter --cwd f* -- bash -c 'echo NEVER'", "expect": "bare" },
+    { "cmd": "ecotokens filter --cwd '' -- bash -c 'echo NEVER'", "expect": "bare" },
+    { "cmd": "ecotokens filter --cwd \"-x\" -- bash -c 'echo NEVER'", "expect": "bare" },
+    { "cmd": "ecotokens filter --agent claude -- bash -c 'printf x'\u00a0", "expect": "bare" },
+    { "cmd": "ecotokens filter --agent claude -- bash -c 'printf x'\r", "expect": "bare" },
+    { "cmd": "bash -c 'ls' extra", "expect": "whole" },
+    { "cmd": "bash -lc 'ls'", "expect": "whole" },
+    { "cmd": "bash -c 'ls' && cat secrets", "expect": "whole" },
+    { "cmd": "ecotokens\u0085gain", "expect": "whole" },
+    { "cmd": "ecotokens﻿gain", "expect": "whole" }
   ]
 }

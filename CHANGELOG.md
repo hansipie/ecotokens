@@ -7,6 +7,19 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ## [Unreleased]
 
+### Fixed
+
+- **Nested filter wrappers** (#124): the PreToolUse hook, the OpenCode plugin and the Pi extension no longer wrap a command that is already an `ecotokens filter … -- bash -c '…'` wrapper into another one. Models copy their already-wrapped calls out of the transcript, which grew chains of up to 9 layers with exponentially escaped quotes. Every exact wrapper layer is now peeled back to the original command, which is wrapped exactly once. A layer that cannot be peeled without changing what runs (a trailing `&& …`, a `$(…)` in double quotes, tokens split by a newline, a quoted option value glued to the next word, a NBSP or CR glued to the quoted command) is wrapped whole, so its output still goes through masking. A layer `ecotokens filter` itself would reject (a repeated `--agent`/`--cwd`, a missing, empty or `-`-prefixed value, a value bash would expand such as `{x,y}` or `f*`) is not peeled either, so its inner command does not run where the original never would have. A bare `bash -c '…'` layer (as the hooks emit for an excluded or bare call) is peeled the same way, so resubmitting it is stable too.
+- **Exclusions inside wrappers**: in the Claude Code, Codex, Gemini and Qwen hooks, an excluded command resubmitted inside wrappers now runs unfiltered under `bash -c '…'`, as the exclusion asks, instead of running the wrapped original. Resubmitting that `bash -c '…'` rewrite keeps it excluded instead of wrapping and filtering it.
+- **Trailing bytes kept**: the hooks and the plugins no longer trim the command they wrap, so a trailing `\` + newline (a line continuation) or `\ ` runs as written.
+- **Empty working directory**: the hooks and the plugins no longer emit `--cwd ''` (or a `-`-prefixed value) when the agent reports an empty working directory. `ecotokens filter` rejected that wrapper and the peel could not undo it, so every resubmission grew a new layer and the command never ran.
+- **Unicode spaces**: the hooks and the plugins only treat a space or a tab as the separator after `ecotokens`, as bash does, so the Rust hook and the TypeScript plugins agree on commands containing U+0085 or U+FEFF.
+- **Pi extension quoting**: the wrapped command is quoted for the shell with single quotes instead of `JSON.stringify`, which let `$` and backticks expand.
+
+### Changed
+
+- **Bare `ecotokens` calls**: a simple `ecotokens filter`, `filter-output`, `show` or `gain` call (no operator, substitution or newline) now runs bare instead of under another `ecotokens filter` (still under `bash -c '…'` when it was peeled out of wrappers, so the caller's shell options and aliases do not apply to it), in the Claude Code, Codex, Gemini and Qwen hooks as in the plugins. Every other subcommand — notably `search` and `symbol`, which print indexed source without masking it — is wrapped as before; the OpenCode plugin now wraps them too, where it used to run every command starting with `ecotokens` bare.
+
 ## [0.30.0] - 2026-10-06
 
 ### Added

@@ -252,7 +252,7 @@ fn opaque_ecotokens_commands_pass_through() {
         "ecotokens gain",
         "ecotokens gain --json",
         "ecotokens filter --debug -- cargo test",
-        "ecotokens search 'foo'",
+        "ecotokens show 072486c1",
     ] {
         let input = make_input(cmd);
         let out = handle_hook_input(&input, &exclusions, false, "claude");
@@ -264,14 +264,117 @@ fn opaque_ecotokens_commands_pass_through() {
 }
 
 #[test]
+fn ecotokens_commands_printing_unmasked_source_are_wrapped() {
+    // `search` and `symbol` print indexed source without masking it: they must
+    // keep running under `ecotokens filter`, bare or resubmitted wrapped.
+    let exclusions: Vec<String> = vec![];
+    for cmd in [
+        "ecotokens search API_KEY",
+        "ecotokens symbol 'src/main.rs::main#fn'",
+        "ecotokens filter --agent claude -- bash -c 'ecotokens search API_KEY'",
+    ] {
+        match handle_hook_input(&make_input(cmd), &exclusions, false, "claude") {
+            HookOutput::Rewrite(out) => assert!(
+                out.starts_with("ecotokens filter --agent claude -- bash -c 'ecotokens "),
+                "{cmd} must run under one filter layer: {out}"
+            ),
+            HookOutput::Passthrough => panic!("{cmd} must not run bare"),
+        }
+    }
+}
+
+#[test]
 fn excluded_inner_command_stays_excluded_when_resubmitted_wrapped() {
+    // The exclusion applies to the peeled command, which then runs unfiltered
+    // under `bash -c`, as the wrapper ran it: a passthrough would run the
+    // wrapped original, still filtered.
     let exclusions = vec!["git".to_string()];
-    let input = make_input("ecotokens filter --agent claude -- bash -c 'git status'");
-    let out = handle_hook_input(&input, &exclusions, false, "claude");
-    assert!(
-        matches!(out, HookOutput::Passthrough),
-        "exclusion must apply to the peeled inner command"
+    let one = "ecotokens filter --agent claude -- bash -c 'git status'".to_string();
+    let two = format!(
+        "ecotokens filter --agent claude -- bash -c '{}'",
+        one.replace('\'', "'\\''")
     );
+    let padded = "ecotokens filter --agent claude -- bash -c ' git status'".to_string();
+    for cmd in [one, two, padded] {
+        match handle_hook_input(&make_input(&cmd), &exclusions, false, "claude") {
+            HookOutput::Rewrite(out) => assert_eq!(out, "bash -c 'git status'", "for {cmd}"),
+            HookOutput::Passthrough => panic!("{cmd} would still run wrapped"),
+        }
+    }
+}
+
+#[test]
+fn excluded_command_stays_excluded_when_its_rewrite_is_resubmitted() {
+    // The model may copy the `bash -c '<cmd>'` rewrite of an excluded command
+    // out of the transcript: it must not end up wrapped and filtered.
+    let exclusions = vec!["git".to_string()];
+    for cmd in ["bash -c 'git status'", "bash -c \"git status\""] {
+        match handle_hook_input(&make_input(cmd), &exclusions, false, "claude") {
+            HookOutput::Rewrite(out) => assert_eq!(out, "bash -c 'git status'", "for {cmd}"),
+            HookOutput::Passthrough => panic!("{cmd} would run in the caller's shell"),
+        }
+    }
+}
+
+#[test]
+fn peeled_bare_call_keeps_its_inner_shell() {
+    // Run bare in the caller's shell, the glob would expand under its options
+    // (nullglob, zsh nomatch); under `bash -c '…'` it stays a literal word.
+    let cmd = "ecotokens filter --agent x -- bash -c 'ecotokens filter -- echo __no_such_file_*'";
+    match handle_hook_input(&make_input(cmd), &[], false, "claude") {
+        HookOutput::Rewrite(out) => {
+            assert_eq!(out, "bash -c 'ecotokens filter -- echo __no_such_file_*'")
+        }
+        HookOutput::Passthrough => panic!("the wrapper must be peeled"),
+    }
+}
+
+#[test]
+fn own_wrapper_peels_back_for_any_cwd() {
+    // An empty cwd used to emit `--cwd ''`, which clap rejects and the peel
+    // skips: every resubmission grew a new layer and the command never ran.
+    for cwd in ["", "-x", "/tmp/it's", "/tmp/a\nb", "/tmp/dir with spaces"] {
+        let mut cmd = "ls | head".to_string();
+        for round in 1..=3 {
+            let input = HookInput {
+                command: cmd.clone(),
+                cwd: Some(cwd.to_string()),
+            };
+            cmd = match handle_hook_input(&input, &[], false, "claude") {
+                HookOutput::Rewrite(out) => out,
+                HookOutput::Passthrough => panic!("must be wrapped"),
+            };
+            assert_eq!(
+                cmd.matches("ecotokens filter").count(),
+                1,
+                "cwd {cwd:?}, round {round}: {cmd}"
+            );
+        }
+        assert!(
+            !cmd.contains("--cwd ''") && !cmd.contains("--cwd '-"),
+            "{cmd}"
+        );
+    }
+}
+
+#[test]
+fn trailing_line_continuation_is_kept() {
+    // `foo\` + newline is a line continuation; trimming the newline would make
+    // the inner shell print `foo\` instead of `foo`.
+    let exclusions: Vec<String> = vec![];
+    let cmd = "printf '%s' foo\\\n";
+    let wrapped = format!(
+        "ecotokens filter --agent claude -- bash -c '{}'",
+        cmd.replace('\'', "'\\''")
+    );
+    for input in [cmd, wrapped.as_str()] {
+        match handle_hook_input(&make_input(input), &exclusions, false, "claude") {
+            HookOutput::Rewrite(out) => {
+                assert!(out.ends_with("foo\\\n'"), "for {input:?}: {out:?}")
+            }
+            HookOutput::Passthrough => panic!("{input:?} must be wrapped"),
+        }
+    }
 }
 
 #[test]
@@ -354,8 +457,8 @@ fn wrapper_around_simple_ecotokens_call_is_unwrapped() {
     let exclusions: Vec<String> = vec![];
     let nested = nest_double_quoted("ecotokens gain", 3);
     match handle_hook_input(&make_input(&nested), &exclusions, false, "claude") {
-        HookOutput::Rewrite(out) => assert_eq!(out, "ecotokens gain"),
-        _ => panic!("expected Rewrite to the bare ecotokens call"),
+        HookOutput::Rewrite(out) => assert_eq!(out, "bash -c 'ecotokens gain'"),
+        _ => panic!("expected Rewrite to the ecotokens call under its inner shell"),
     }
 }
 

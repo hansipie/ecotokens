@@ -70,34 +70,75 @@ fn parse_quoted(s: &str) -> Option<(String, &str)> {
     }
 }
 
-/// Parse an option value at the start of `s`: a quoted token or a bare word
-/// free of shell metacharacters. Returns the rest of `s`.
+/// True for the characters bash splits words on inside a single command. A
+/// newline is not one of them: it ends the command.
+fn is_blank(c: char) -> bool {
+    c == ' ' || c == '\t'
+}
+
+/// Strip the blanks and newlines around `s`, the only characters bash ignores
+/// there. Unlike `str::trim`, a NBSP or CR is kept: bash glues it to the word
+/// next to it, so dropping it would change what runs.
+fn trim_separators(s: &str) -> &str {
+    s.trim_matches([' ', '\t', '\n'])
+}
+
+/// True for the characters of a bare option value that bash passes through
+/// as is: no glob, brace, tilde or other expansion can split or rewrite it.
+fn is_plain_word_char(c: char) -> bool {
+    c.is_ascii_alphanumeric() || "_./:@%+=-".contains(c)
+}
+
+/// Parse an option value at the start of `s` that `ecotokens filter` accepts:
+/// a quoted token or a bare word of plain characters, non-empty and not
+/// starting with `-` (clap would read `--agent --help` as a missing value).
+/// Returns the rest of `s`, which must start with a blank: `'/tmp'--` is a
+/// single word to bash, not a value then `--`.
 fn skip_option_value(s: &str) -> Option<&str> {
-    if s.starts_with(['\'', '"']) {
-        return parse_quoted(s).map(|(_, rest)| rest);
-    }
-    let end = s.find(char::is_whitespace).unwrap_or(s.len());
-    let word = &s[..end];
-    let safe = !word.is_empty() && is_simple_command(word) && !word.contains(['\'', '"', '#']);
-    safe.then(|| &s[end..])
+    let (value, rest) = if s.starts_with(['\'', '"']) {
+        parse_quoted(s)?
+    } else {
+        let end = s.find(|c| !is_plain_word_char(c)).unwrap_or(s.len());
+        (s[..end].to_string(), &s[end..])
+    };
+    let valid = !value.is_empty() && !value.starts_with('-') && rest.starts_with(is_blank);
+    valid.then_some(rest)
+}
+
+/// Parse an exact `bash -c '<inner>'` command at the start of `s` and return
+/// `<inner>`: nothing but blanks and newlines may follow the quoted token
+/// (`bash -c 'ls' extra` sets `$0`, `bash -c 'ls' && …` chains a command).
+fn parse_bash_c(s: &str) -> Option<String> {
+    let r = s.strip_prefix("bash -c ")?;
+    let (inner, after) = parse_quoted(r.trim_start_matches(is_blank))?;
+    trim_separators(after).is_empty().then_some(inner)
 }
 
 /// Parse one `ecotokens filter [--agent A] [--cwd C] -- bash -c '<inner>'`
 /// layer — exactly the shape the hook and the plugins emit — and return
 /// `<inner>`. Anything else (other options, a marker inside a comment,
-/// commands before the marker, text after the quoted token) is not a wrapper.
+/// commands before the marker, text after the quoted token) is not a wrapper,
+/// and neither is a layer clap would reject (a repeated option, an invalid
+/// value, see [`skip_option_value`]): its inner command never runs.
+/// Tokens are separated by blanks only: a newline between them would split the
+/// original into several commands, so peeling it would change what runs.
 fn parse_wrapper(s: &str) -> Option<String> {
-    let mut rest = s.trim().strip_prefix("ecotokens filter ")?;
+    let mut rest = trim_separators(s).strip_prefix("ecotokens filter ")?;
+    let (mut agent, mut cwd) = (false, false);
     loop {
-        rest = rest.trim_start();
-        if let Some(r) = rest.strip_prefix("-- bash -c ") {
-            let (inner, after) = parse_quoted(r.trim_start())?;
-            return after.trim().is_empty().then_some(inner);
+        rest = rest.trim_start_matches(is_blank);
+        if let Some(r) = rest.strip_prefix("-- ") {
+            return parse_bash_c(r);
         }
-        let r = rest
-            .strip_prefix("--agent ")
-            .or_else(|| rest.strip_prefix("--cwd "))?;
-        rest = skip_option_value(r.trim_start())?;
+        let (r, seen) = if let Some(r) = rest.strip_prefix("--agent ") {
+            (r, &mut agent)
+        } else {
+            (rest.strip_prefix("--cwd ")?, &mut cwd)
+        };
+        if std::mem::replace(seen, true) {
+            return None;
+        }
+        rest = skip_option_value(r.trim_start_matches(is_blank))?;
     }
 }
 
@@ -106,7 +147,7 @@ fn parse_wrapper(s: &str) -> Option<String> {
 fn is_ecotokens_cmd(s: &str) -> bool {
     s == "ecotokens"
         || s.strip_prefix("ecotokens")
-            .is_some_and(|rest| rest.starts_with(char::is_whitespace))
+            .is_some_and(|rest| rest.starts_with(is_blank))
 }
 
 /// True when `s` has no shell operator, substitution or newline, i.e. it is a
@@ -120,16 +161,41 @@ fn is_simple_command(s: &str) -> bool {
     })
 }
 
+/// `ecotokens` subcommands that may run bare instead of under another
+/// `ecotokens filter`: they mask what they print (`filter`, `filter-output`),
+/// print output that was masked before it was stored (`show`) or print only
+/// metrics (`gain`). Any other subcommand — `search` and `symbol` print indexed
+/// source unmasked — is still wrapped so its output goes through
+/// `masking::mask`.
+const BARE_SUBCOMMANDS: &[&str] = &["filter", "filter-output", "show", "gain"];
+
+/// True when `s` is a simple `ecotokens` call to one of [`BARE_SUBCOMMANDS`].
+fn runs_bare(s: &str) -> bool {
+    is_ecotokens_cmd(s)
+        && is_simple_command(s)
+        && s.split(is_blank)
+            .filter(|w| !w.is_empty())
+            .nth(1)
+            .is_some_and(|sub| BARE_SUBCOMMANDS.contains(&sub))
+}
+
 /// Peel `ecotokens filter … -- bash -c '<inner>'` layers (see
-/// [`parse_wrapper`]) until a command that is not a strict wrapper is reached,
-/// and return it: the original shell command, an `ecotokens` command that is
-/// not a wrapper (`ecotokens gain`, `ecotokens filter --debug -- …`), or a
-/// wrapper-like command that cannot be peeled without changing what it runs
-/// (a trailing `&& …`, a `$(…)` in double quotes), which is then kept whole.
+/// [`parse_wrapper`]) and bare `bash -c '<inner>'` layers (see
+/// [`parse_bash_c`], which the hook emits for an excluded or bare command)
+/// until a command that is neither is reached, and return it: the original
+/// shell command, an `ecotokens` command that is not a wrapper
+/// (`ecotokens gain`, `ecotokens filter --debug -- …`), or a wrapper-like
+/// command that cannot be peeled without changing what it runs (a trailing
+/// `&& …`, a `$(…)` in double quotes), which is then kept whole.
+/// A command that is not a wrapper comes back byte for byte. Leading blanks
+/// of each inner command are dropped, as bash ignores them, so
+/// `bash -c ' git status'` still meets the exclusion and `ecotokens` checks.
+/// The caller always runs the result under a new `bash -c`, so dropping the
+/// peeled shells does not move the command to the caller's shell.
 fn peel_ecotokens_wrapper(cmd: &str) -> String {
-    let mut s = cmd.trim().to_string();
-    while let Some(inner) = parse_wrapper(&s) {
-        s = inner;
+    let mut s = cmd.to_string();
+    while let Some(inner) = parse_wrapper(&s).or_else(|| parse_bash_c(trim_separators(&s))) {
+        s = inner.trim_start_matches(is_blank).to_string();
     }
     s
 }
@@ -162,22 +228,29 @@ struct ShellHookSpecificOutput {
 /// Determine hook action for a given command and exclusion list.
 ///
 /// Re-entrancy: a command that is already an `ecotokens filter … -- bash -c …`
-/// wrapper (written by an earlier rewrite *or* by the model itself — models
-/// copy their already-wrapped tool calls out of the transcript and wrap them
-/// again) is peeled back to the original shell command and re-wrapped exactly
-/// once. This heals nested chains instead of growing them.
+/// wrapper or a `bash -c …` rewrite (written by an earlier rewrite *or* by the
+/// model itself — models copy their already-wrapped tool calls out of the
+/// transcript and wrap them again) is peeled back to the original shell
+/// command and re-wrapped exactly once. This heals nested chains instead of
+/// growing them.
 ///
-/// Security note: an excluded command is returned as `Passthrough`, so it is
-/// never rewritten to run under `ecotokens filter` — the only place
-/// `masking::mask` is applied on the Bash path. Its output therefore reaches the
-/// model entirely unredacted, and ecotokens cannot do better here: it never sees
-/// that output at all. Excluding a command is a deliberate opt-out of both
-/// filtering *and* secret masking. Note also that matching is by prefix, so
-/// `git` excludes every command starting with those characters.
+/// Security note: an excluded command is never rewritten to run under
+/// `ecotokens filter` — the only place `masking::mask` is applied on the Bash
+/// path. It is returned as `Passthrough`, or as a rewrite to
+/// `bash -c '<peeled command>'` when the model resubmitted it inside wrappers
+/// (the inner shell is kept, so the command runs as the wrapper ran it: not in
+/// the caller's shell, which may be zsh or hold unexported variables). Its
+/// output therefore reaches the model entirely unredacted, and ecotokens
+/// cannot do better here: it never sees that output at all. Excluding a
+/// command is a deliberate opt-out of both filtering *and* secret masking. Note also that matching is by
+/// prefix, so `git` excludes every command starting with those characters.
 ///
-/// A *simple* `ecotokens` CLI call (`ecotokens gain`, a direct
-/// `ecotokens filter …`: no operator, substitution or newline) is not wrapped
-/// into another `ecotokens filter`. Anything chained to it
+/// A *simple* `ecotokens` call to a subcommand that is safe to run bare
+/// ([`BARE_SUBCOMMANDS`]: `ecotokens gain`, a direct `ecotokens filter …`; no
+/// operator, substitution or newline) is not wrapped into another
+/// `ecotokens filter`; when it was peeled out of wrappers, it is returned as
+/// `bash -c '<call>'` for the same reason as an excluded command. Any other
+/// subcommand, anything chained to it
 /// (`ecotokens gain; cat secrets`) or a wrapper layer that cannot be peeled
 /// safely is still wrapped whole, so its output keeps going through
 /// `masking::mask`.
@@ -187,7 +260,11 @@ pub fn handle_hook_input(
     _debug: bool,
     agent: &str,
 ) -> HookOutput {
-    let raw = input.command.trim();
+    // Checks look at the command without the blanks and newlines around it,
+    // but what runs keeps every byte: dropping the newline after a trailing
+    // `\` (or the space of a trailing `\ `) would change the command.
+    let original = input.command.as_str();
+    let raw = trim_separators(original);
 
     // Check exclusion list (prefix match) — see the security note above: this
     // bypasses masking, not just filtering.
@@ -202,30 +279,36 @@ pub fn handle_hook_input(
 
     // A layer that cannot be peeled safely is kept whole: it may carry a
     // trailing `&& …` that must still go through masking.
-    let cmd = if is_ecotokens_cmd(raw) {
-        peel_ecotokens_wrapper(raw)
-    } else {
-        raw.to_string()
-    };
+    let cmd = peel_ecotokens_wrapper(original);
+    let peeled = cmd != original;
+    let bash_c = || HookOutput::Rewrite(format!("bash -c {}", shell_single_quote(&cmd)));
 
     // An excluded command stays excluded even when the model resubmits it
-    // inside an `ecotokens filter` wrapper.
-    if cmd != raw && excluded(&cmd) {
-        return HookOutput::Passthrough;
+    // inside an `ecotokens filter` wrapper or our `bash -c` rewrite: run the
+    // peeled command unfiltered, still under `bash -c`. (`Passthrough` would
+    // run the wrapped original, still filtered.)
+    if peeled && excluded(trim_separators(&cmd)) {
+        return bash_c();
     }
 
-    // Already an `ecotokens` CLI call: no second filter layer. Unwrap any
-    // leftover wrapper chain around it so the call runs bare.
-    if is_ecotokens_cmd(&cmd) && is_simple_command(&cmd) {
-        return if cmd == raw {
-            HookOutput::Passthrough
+    // Already an `ecotokens` call that is safe bare: no second filter layer.
+    // A call peeled out of wrappers keeps its inner shell, as an excluded one.
+    if runs_bare(trim_separators(&cmd)) {
+        return if peeled {
+            bash_c()
         } else {
-            HookOutput::Rewrite(cmd)
+            HookOutput::Passthrough
         };
     }
 
-    // Rewrite to ecotokens filter
-    let rewritten = match &input.cwd {
+    // Rewrite to ecotokens filter. `--cwd` is only emitted with a value that
+    // clap and `parse_wrapper` accept: an empty one would make the wrapper
+    // fail to run and fail to peel, growing a new layer on every resubmission.
+    let cwd = input
+        .cwd
+        .as_deref()
+        .filter(|c| !c.is_empty() && !c.starts_with('-'));
+    let rewritten = match cwd {
         Some(cwd) => format!(
             "ecotokens filter --agent {} --cwd {} -- bash -c {}",
             agent,
@@ -424,6 +507,8 @@ mod tests {
     #[derive(Deserialize)]
     struct Vectors {
         peelable: Vec<Peelable>,
+        /// Peeled to a call that runs bare: must come back as `bash -c '<inner>'`.
+        rebash: Vec<Peelable>,
         unpeelable: Vec<Unpeelable>,
     }
 
@@ -441,10 +526,30 @@ mod tests {
         expect: String,
     }
 
+    fn hook(cmd: &str) -> HookOutput {
+        let input = HookInput {
+            command: cmd.to_string(),
+            cwd: None,
+        };
+        handle_hook_input(&input, &[], false, "claude")
+    }
+
     #[test]
     fn shared_peel_vectors() {
         let v: Vectors = serde_json::from_str(VECTORS).expect("valid vectors JSON");
-        assert!(!v.peelable.is_empty() && !v.unpeelable.is_empty());
+        assert!(!v.peelable.is_empty() && !v.rebash.is_empty() && !v.unpeelable.is_empty());
+
+        for Peelable { cmd, inner } in &v.rebash {
+            let expected = format!("bash -c '{inner}'");
+            match hook(cmd) {
+                HookOutput::Rewrite(out) => assert_eq!(out, expected, "for {cmd}"),
+                HookOutput::Passthrough => panic!("{cmd} must keep its inner shell"),
+            }
+            match hook(&expected) {
+                HookOutput::Rewrite(out) => assert_eq!(out, expected, "resubmitted"),
+                HookOutput::Passthrough => {}
+            }
+        }
 
         for Peelable { cmd, inner } in &v.peelable {
             assert_eq!(
@@ -464,18 +569,7 @@ mod tests {
                 cmd.as_str(),
                 "an unpeelable command must stay whole: {cmd}"
             );
-            let bare = matches!(
-                handle_hook_input(
-                    &HookInput {
-                        command: cmd.clone(),
-                        cwd: None,
-                    },
-                    &[],
-                    false,
-                    "claude"
-                ),
-                HookOutput::Passthrough
-            );
+            let bare = matches!(hook(cmd), HookOutput::Passthrough);
             assert_eq!(
                 bare,
                 expect == "bare",

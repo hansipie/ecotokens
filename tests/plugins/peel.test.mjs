@@ -1,9 +1,9 @@
 // Wrapper peeling in the OpenCode plugin and the Pi extension, driven through
-// their real entry points. Run: node --experimental-strip-types --test tests/plugins/
+// their real entry points. Run: node --experimental-strip-types --test tests/plugins/peel.test.mjs
 // (also run by `cargo test` via tests/hook/handler_test.rs).
-import { test } from "node:test"
+import { after, test } from "node:test"
 import assert from "node:assert/strict"
-import { mkdtempSync, readFileSync, writeFileSync } from "node:fs"
+import { mkdtempSync, readFileSync, rmSync, writeFileSync } from "node:fs"
 import { tmpdir } from "node:os"
 import { join } from "node:path"
 
@@ -15,6 +15,7 @@ const vectors = JSON.parse(readFileSync(new URL("./peel_vectors.json", import.me
 const fakeBin = mkdtempSync(join(tmpdir(), "ecotokens-plugin-test-"))
 writeFileSync(join(fakeBin, "ecotokens"), "#!/bin/sh\nexit 0\n", { mode: 0o755 })
 process.env.PATH = `${fakeBin}:${process.env.PATH}`
+after(() => rmSync(fakeBin, { recursive: true, force: true }))
 
 const { EcotokensPlugin } = await import("../../src/opencode_plugin.ts")
 const { default: piExtension } = await import("../../src/pi_extension.ts")
@@ -82,6 +83,13 @@ for (const [name, intercept] of Object.entries(plugins)) {
     assert.equal(cmd, `ecotokens filter --agent ${name} --cwd '/tmp' -- bash -c 'echo '\\''hi'\\'' && ls'`)
   })
 
+  test(`${name}: trailing line continuation is kept`, async () => {
+    // `foo\` + newline is a continuation: trimming the newline would make the
+    // inner shell print `foo\` instead of `foo`.
+    const out = await intercept("printf '%s' foo\\\n")
+    assert.ok(out.endsWith("foo\\\n'"), JSON.stringify(out))
+  })
+
   test(`${name}: own wrapper is stable when re-intercepted`, async () => {
     const first = await intercept(`echo 'hi' && ls`)
     assert.equal(await intercept(first), first)
@@ -95,6 +103,14 @@ for (const [name, intercept] of Object.entries(plugins)) {
     }
   })
 
+  test(`${name}: shared peel vectors — a peeled bare call keeps its inner shell`, async () => {
+    for (const { cmd, inner } of vectors.rebash) {
+      const out = await intercept(cmd)
+      assert.equal(out, `bash -c '${inner}'`, cmd)
+      assert.equal(await intercept(out), out, `resubmitted: ${out}`)
+    }
+  })
+
   test(`${name}: shared peel vectors — unpeelable commands are kept whole`, async () => {
     const q = (s) => `'${s.replaceAll("'", "'\\''")}'`
     const wrap = (cmd) =>
@@ -102,6 +118,39 @@ for (const [name, intercept] of Object.entries(plugins)) {
     for (const { cmd, expect } of vectors.unpeelable) {
       const out = await intercept(cmd)
       assert.equal(out, expect === "bare" ? cmd : wrap(cmd), cmd)
+    }
+  })
+}
+
+/** Each plugin's bash pre-execution hook, with the working directory `cwd`. */
+const withCwd = {
+  opencode: async (cwd) => {
+    const hooks = await EcotokensPlugin({ directory: cwd })
+    return async (command) => {
+      const output = { args: { command } }
+      await hooks["tool.execute.before"]({ tool: "bash" }, output)
+      return output.args.command
+    }
+  },
+  pi: async (cwd) => async (command) => {
+    const event = { toolName: "bash", input: { command } }
+    await piHandlers.tool_call(event, { cwd })
+    return event.input.command
+  },
+}
+
+for (const [name, make] of Object.entries(withCwd)) {
+  test(`${name}: own wrapper peels back for any cwd`, async () => {
+    // An empty cwd used to emit `--cwd ''`, which clap rejects and the peel
+    // skips: every resubmission grew a new layer and the command never ran.
+    for (const cwd of ["", "-x", "/tmp/it's", "/tmp/a\nb", "/tmp/dir with spaces"]) {
+      const intercept = await make(cwd)
+      let cmd = `ls | head`
+      for (let round = 1; round <= 3; round++) {
+        cmd = await intercept(cmd)
+        assert.equal(layers(cmd), 1, `cwd ${JSON.stringify(cwd)}, round ${round}: ${cmd}`)
+      }
+      assert.ok(!cmd.includes("--cwd ''") && !cmd.includes("--cwd '-"), cmd)
     }
   })
 }
