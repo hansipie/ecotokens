@@ -46,6 +46,7 @@ Full methodology and per-family breakdown: [`docs/BENCHMARKS.md`](docs/BENCHMARK
 | **Word abbreviations** *(optional)* | Replace common words with shorter forms (`function`→`fn`, `configuration`→`config`, …) in narrative text, and nudge the model to do the same via a SessionStart instruction |
 | **Model router** *(optional)* | Claude Code only: a `UserPromptSubmit` hook has Jev size each message (tiny / everyday / large / hardest) and delegates it to a helper agent on a matching model (Haiku / Sonnet / Opus / Fable), so small jobs stop running on the biggest model. Fail-open, see [Model router](docs/model-router.md) |
 | **Session handoff** *(optional)* | Claude Code only: `/handoff` saves the objective, key files, failed attempts and next steps of a long session; after `/clear` (or a compaction) a `SessionStart` hook loads them back. Local, secrets masked, fail-open, see [Session handoff](docs/handoff.md) |
+| **Companion panel** *(optional)* | Claude Code only: the [ecotokens-panel](https://github.com/hansipie/ecotokens-panel) plugin adds a tabbed side panel (context, quota, handoff, savings, Jev, index watcher), see [Companion panel](#companion-panel-for-claude-code) |
 | **Zero config** | One `ecotokens install` command - works automatically from there |
 
 > Full compatibility matrix: [harness feature matrix](docs/harness-feature-matrix.md)
@@ -116,6 +117,18 @@ ecotokens gain      # interactive savings dashboard
 To remove ecotokens, run `ecotokens uninstall` (same `--target` values). Per-agent details, the Hermes plugin
 activation, and other install options are in [`docs/installation.md`](docs/installation.md); ready-to-copy
 configuration snippets are in [`docs/example-configs.md`](docs/example-configs.md).
+
+### Companion panel for Claude Code
+
+[ecotokens-panel](https://github.com/hansipie/ecotokens-panel) is a Claude Code plugin that adds a tabbed side
+panel around ecotokens: session context and quota, handoff, token savings, Jev usage, and the index watcher.
+Install it from a Claude Code session:
+
+```
+/plugin install ecotokens-panel --marketplace hansipie/ecotokens-panel
+```
+
+It works only in Claude Code (terminal, or the Code tab of the desktop app), not in the other supported agents.
 
 ## Everyday commands
 
