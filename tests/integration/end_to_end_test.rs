@@ -265,3 +265,32 @@ fn abbreviations_enable_migrates_custom_pairs_out_of_config_json() {
     .unwrap();
     assert_eq!(abbreviations["function"], "func");
 }
+
+#[test]
+fn filter_masks_secrets_on_stderr() {
+    // The command's stderr is forwarded to the caller (and so to the model) as
+    // well as its stdout: a secret printed there must be masked too (#127).
+    // Built at runtime so no key sits in the source: AWS's documented example.
+    let key = format!("AKIA{}", "IOSFODNN7EXAMPLE");
+    let home = temp_home_with_empty_metrics();
+    let out = Command::new(ecotokens())
+        .args([
+            "filter",
+            "--",
+            "sh",
+            "-c",
+            &format!("echo out; echo key={key} >&2"),
+        ])
+        .env("HOME", home.path())
+        .env("XDG_CONFIG_HOME", home.path().join(".config"))
+        .output()
+        .expect("failed to run filter");
+    assert!(out.status.success());
+    let stderr = String::from_utf8_lossy(&out.stderr);
+    assert!(!stderr.contains(&key), "secret leaked on stderr: {stderr}");
+    assert!(
+        stderr.contains("key="),
+        "stderr should still be forwarded: {stderr}"
+    );
+    assert!(String::from_utf8_lossy(&out.stdout).contains("out"));
+}
