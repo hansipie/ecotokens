@@ -274,7 +274,7 @@ export default function (pi: ExtensionAPI) {
     // runs keeps every byte (a trailing `\` + newline is a continuation).
     const original = input.command;
     const inner = peelEcotokensWrapper(original);
-    // A call peeled out of wrappers keeps its inner shell: run bare in the
+    // A call peeled out of wrappers keeps its inner shell: if run bare in the
     // caller's shell, its globs and aliases could expand differently.
     if (runsBare(trimSeparators(inner))) {
       if (inner !== original) input.command = `bash -c ${shQuote(inner)}`;
