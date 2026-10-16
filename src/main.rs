@@ -619,9 +619,12 @@ fn cmd_filter(args: Vec<String>, debug: bool, cwd: Option<PathBuf>, agent: Strin
     let (raw, exit_code) = match output {
         Ok(o) => {
             let stdout = String::from_utf8_lossy(&o.stdout).into_owned();
-            let stderr = String::from_utf8_lossy(&o.stderr).into_owned();
+            // stderr is forwarded unfiltered, but it reaches the model as
+            // stdout does: mask it so a secret printed there is not leaked.
+            let stderr = String::from_utf8_lossy(&o.stderr);
             if !stderr.is_empty() {
-                eprint!("{stderr}");
+                let (masked, _) = masking::mask(&stderr);
+                eprint!("{masked}");
             }
             let code = o.status.code().unwrap_or(1);
             (stdout, code)

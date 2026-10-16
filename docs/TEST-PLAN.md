@@ -267,6 +267,7 @@ Test inputs:
 
 Verify:
 - Secrets are always redacted
+- Secrets the wrapped command prints on stderr are redacted too: `ecotokens filter -- sh -c 'echo <secret> >&2'` forwards the line with the secret masked
 - Failures never cause panic
 - Original or safe fallback content is returned when filtering fails
 - Large outputs are handled within threshold and timeout expectations
