@@ -44,6 +44,11 @@ jobs:
       - uses: actions/checkout@v6
       - uses: dtolnay/rust-toolchain@stable
       - uses: Swatinem/rust-cache@v2.9.0
+      # Node ≥ 22.6 runs the OpenCode/Pi plugin tests (tests/plugins/) through
+      # tests/hook/handler_test.rs; they are skipped without it.
+      - uses: actions/setup-node@v6
+        with:
+          node-version: 24
       - name: cargo test
         run: cargo test --features exact-tokens
 

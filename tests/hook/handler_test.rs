@@ -163,6 +163,404 @@ fn hot_reload_exclusion_respected() {
     );
 }
 
+// ── Re-entrancy: peeling of already-wrapped commands ──────────────────────────
+
+/// Simulate the model/plugin double-quote wrap style (`JSON.stringify`-like):
+/// quote the payload for a `bash -c "…"` layer, escaping backslashes and
+/// double quotes.
+fn nest_double_quoted(cmd: &str, levels: usize) -> String {
+    let mut s = cmd.to_string();
+    for _ in 0..levels {
+        s = format!(
+            "ecotokens filter --agent opencode --cwd \"/tmp/x\" -- bash -c \"{}\"",
+            s.replace('\\', "\\\\").replace('"', "\\\"")
+        );
+    }
+    s
+}
+
+#[test]
+fn single_quote_wrapper_is_normalized_to_one_wrap() {
+    let exclusions: Vec<String> = vec![];
+    let input = make_input("ecotokens filter --agent claude -- bash -c 'git status'");
+    let out = handle_hook_input(&input, &exclusions, false, "claude");
+    match out {
+        HookOutput::Rewrite(cmd) => assert_eq!(
+            cmd,
+            "ecotokens filter --agent claude -- bash -c 'git status'"
+        ),
+        _ => panic!("expected Rewrite"),
+    }
+}
+
+#[test]
+fn deeply_nested_wrapper_is_healed_to_a_single_wrap() {
+    // Regression: models copy their already-wrapped tool calls from the
+    // transcript and wrap them again, growing exponentially-escaped chains
+    // (observed up to 9 levels in the wild, see #124).
+    let exclusions: Vec<String> = vec![];
+    let inner = "ls -la app/src/main.kt && head -15 app/src/main.kt";
+    let nested = nest_double_quoted(inner, 9);
+    assert!(
+        nested.matches("ecotokens filter").count() == 9,
+        "fixture must contain 9 wrapper levels"
+    );
+
+    let input = make_input(&nested);
+    let out = handle_hook_input(&input, &exclusions, false, "claude");
+    match out {
+        HookOutput::Rewrite(cmd) => {
+            assert_eq!(
+                cmd,
+                format!("ecotokens filter --agent claude -- bash -c '{inner}'")
+            );
+            assert_eq!(
+                cmd.matches("ecotokens filter").count(),
+                1,
+                "healed command must contain exactly one wrapper"
+            );
+        }
+        _ => panic!("expected Rewrite"),
+    }
+}
+
+#[test]
+fn mixed_quote_styles_are_peeled() {
+    // Single-quote layer (shQuote) wrapping a double-quote layer (old plugin
+    // JSON.stringify) wrapping the real command.
+    let exclusions: Vec<String> = vec![];
+    let double = nest_double_quoted("echo hello", 1);
+    let mixed = format!("ecotokens filter --agent opencode -- bash -c '{double}'");
+    let input = make_input(&mixed);
+    let out = handle_hook_input(&input, &exclusions, false, "claude");
+    match out {
+        HookOutput::Rewrite(cmd) => {
+            assert_eq!(
+                cmd,
+                "ecotokens filter --agent claude -- bash -c 'echo hello'"
+            )
+        }
+        _ => panic!("expected Rewrite"),
+    }
+}
+
+#[test]
+fn opaque_ecotokens_commands_pass_through() {
+    let exclusions: Vec<String> = vec![];
+    // Non-wrapper ecotokens subcommand: must not be wrapped into another filter.
+    for cmd in [
+        "ecotokens gain",
+        "ecotokens gain --json",
+        "ecotokens filter --debug -- cargo test",
+        "ecotokens show 072486c1",
+    ] {
+        let input = make_input(cmd);
+        let out = handle_hook_input(&input, &exclusions, false, "claude");
+        assert!(
+            matches!(out, HookOutput::Passthrough),
+            "opaque ecotokens command should pass through: {cmd}"
+        );
+    }
+}
+
+#[test]
+fn ecotokens_commands_printing_unmasked_source_are_wrapped() {
+    // `search` and `symbol` print indexed source without masking it: they must
+    // keep running under `ecotokens filter`, bare or resubmitted wrapped.
+    let exclusions: Vec<String> = vec![];
+    for cmd in [
+        "ecotokens search API_KEY",
+        "ecotokens symbol 'src/main.rs::main#fn'",
+        "ecotokens filter --agent claude -- bash -c 'ecotokens search API_KEY'",
+    ] {
+        match handle_hook_input(&make_input(cmd), &exclusions, false, "claude") {
+            HookOutput::Rewrite(out) => assert!(
+                out.starts_with("ecotokens filter --agent claude -- bash -c 'ecotokens "),
+                "{cmd} must run under one filter layer: {out}"
+            ),
+            HookOutput::Passthrough => panic!("{cmd} must not run bare"),
+        }
+    }
+}
+
+#[test]
+fn excluded_inner_command_stays_excluded_when_resubmitted_wrapped() {
+    // The exclusion applies to the peeled command, which then runs unfiltered
+    // under `bash -c`, as the wrapper ran it: a passthrough would run the
+    // wrapped original, still filtered.
+    let exclusions = vec!["git".to_string()];
+    let one = "ecotokens filter --agent claude -- bash -c 'git status'".to_string();
+    let two = format!(
+        "ecotokens filter --agent claude -- bash -c '{}'",
+        one.replace('\'', "'\\''")
+    );
+    let padded = "ecotokens filter --agent claude -- bash -c ' git status'".to_string();
+    for cmd in [one, two, padded] {
+        match handle_hook_input(&make_input(&cmd), &exclusions, false, "claude") {
+            HookOutput::Rewrite(out) => assert_eq!(out, "bash -c 'git status'", "for {cmd}"),
+            HookOutput::Passthrough => panic!("{cmd} would still run wrapped"),
+        }
+    }
+}
+
+#[test]
+fn excluded_command_stays_excluded_when_its_rewrite_is_resubmitted() {
+    // The model may copy the `bash -c '<cmd>'` rewrite of an excluded command
+    // out of the transcript: it must not end up wrapped and filtered.
+    let exclusions = vec!["git".to_string()];
+    for cmd in ["bash -c 'git status'", "bash -c \"git status\""] {
+        match handle_hook_input(&make_input(cmd), &exclusions, false, "claude") {
+            HookOutput::Rewrite(out) => assert_eq!(out, "bash -c 'git status'", "for {cmd}"),
+            HookOutput::Passthrough => panic!("{cmd} would run in the caller's shell"),
+        }
+    }
+}
+
+#[test]
+fn peeled_bare_call_keeps_its_inner_shell() {
+    // Run bare in the caller's shell, the glob would expand under its options
+    // (nullglob, zsh nomatch); under `bash -c '…'` it stays a literal word.
+    let cmd = "ecotokens filter --agent x -- bash -c 'ecotokens filter -- echo __no_such_file_*'";
+    match handle_hook_input(&make_input(cmd), &[], false, "claude") {
+        HookOutput::Rewrite(out) => {
+            assert_eq!(out, "bash -c 'ecotokens filter -- echo __no_such_file_*'")
+        }
+        HookOutput::Passthrough => panic!("the wrapper must be peeled"),
+    }
+}
+
+#[test]
+fn own_wrapper_peels_back_for_any_cwd() {
+    // An empty cwd used to emit `--cwd ''`, which clap rejects and the peel
+    // skips: every resubmission grew a new layer and the command never ran.
+    for cwd in ["", "-x", "/tmp/it's", "/tmp/a\nb", "/tmp/dir with spaces"] {
+        let mut cmd = "ls | head".to_string();
+        for round in 1..=3 {
+            let input = HookInput {
+                command: cmd.clone(),
+                cwd: Some(cwd.to_string()),
+            };
+            cmd = match handle_hook_input(&input, &[], false, "claude") {
+                HookOutput::Rewrite(out) => out,
+                HookOutput::Passthrough => panic!("must be wrapped"),
+            };
+            assert_eq!(
+                cmd.matches("ecotokens filter").count(),
+                1,
+                "cwd {cwd:?}, round {round}: {cmd}"
+            );
+        }
+        assert!(
+            !cmd.contains("--cwd ''") && !cmd.contains("--cwd '-"),
+            "{cmd}"
+        );
+    }
+}
+
+#[test]
+fn trailing_line_continuation_is_kept() {
+    // `foo\` + newline is a line continuation; trimming the newline would make
+    // the inner shell print `foo\` instead of `foo`.
+    let exclusions: Vec<String> = vec![];
+    let cmd = "printf '%s' foo\\\n";
+    let wrapped = format!(
+        "ecotokens filter --agent claude -- bash -c '{}'",
+        cmd.replace('\'', "'\\''")
+    );
+    for input in [cmd, wrapped.as_str()] {
+        match handle_hook_input(&make_input(input), &exclusions, false, "claude") {
+            HookOutput::Rewrite(out) => {
+                assert!(out.ends_with("foo\\\n'"), "for {input:?}: {out:?}")
+            }
+            HookOutput::Passthrough => panic!("{input:?} must be wrapped"),
+        }
+    }
+}
+
+#[test]
+fn wrapper_emitted_by_the_hook_with_apostrophes_is_peeled() {
+    // The hook quotes with `'"'"'`; resubmitting its own output must heal, not
+    // pass through.
+    let exclusions: Vec<String> = vec![];
+    let first = match handle_hook_input(
+        &make_input("echo 'hi' && echo \"it's\""),
+        &exclusions,
+        false,
+        "claude",
+    ) {
+        HookOutput::Rewrite(cmd) => cmd,
+        _ => panic!("expected Rewrite"),
+    };
+    assert!(
+        first.contains("'\"'\"'"),
+        "fixture must use the '\"'\"' escape: {first}"
+    );
+
+    let nested = format!(
+        "ecotokens filter --agent claude -- bash -c '{}'",
+        first.replace('\'', "'\\''")
+    );
+    for cmd in [first.as_str(), nested.as_str()] {
+        match handle_hook_input(&make_input(cmd), &exclusions, false, "claude") {
+            HookOutput::Rewrite(out) => assert_eq!(out, first),
+            _ => panic!("expected Rewrite for {cmd}"),
+        }
+    }
+}
+
+#[test]
+fn ecotokens_prefix_requires_a_word_boundary() {
+    let exclusions: Vec<String> = vec![];
+    for cmd in ["ecotokens-build.sh", "ecotokensx status"] {
+        let out = handle_hook_input(&make_input(cmd), &exclusions, false, "claude");
+        assert!(
+            matches!(out, HookOutput::Rewrite(_)),
+            "{cmd} is not an ecotokens CLI call and must be wrapped"
+        );
+    }
+}
+
+#[test]
+fn chained_ecotokens_command_is_still_wrapped() {
+    let exclusions: Vec<String> = vec![];
+    for cmd in [
+        "ecotokens gain; cat ~/.ssh/id_rsa",
+        "ecotokens gain && env",
+        "ecotokens gain | tee out",
+        "ecotokens search $(cat secret)",
+    ] {
+        match handle_hook_input(&make_input(cmd), &exclusions, false, "claude") {
+            HookOutput::Rewrite(out) => assert!(
+                out.starts_with("ecotokens filter --agent claude -- bash -c "),
+                "{cmd} must be wrapped whole: {out}"
+            ),
+            _ => panic!("chained ecotokens command must not pass through: {cmd}"),
+        }
+    }
+}
+
+#[test]
+fn corrupt_wrapper_chain_with_trailing_command_is_wrapped_whole() {
+    let exclusions: Vec<String> = vec![];
+    let cmd = "ecotokens filter --agent claude -- bash -c 'ls' && cat secrets";
+    match handle_hook_input(&make_input(cmd), &exclusions, false, "claude") {
+        HookOutput::Rewrite(out) => {
+            assert!(out.contains("cat secrets"));
+            assert!(out.starts_with("ecotokens filter --agent claude -- bash -c '"));
+        }
+        _ => panic!("corrupt chain must be wrapped, not passed through"),
+    }
+}
+
+#[test]
+fn wrapper_around_simple_ecotokens_call_is_unwrapped() {
+    let exclusions: Vec<String> = vec![];
+    let nested = nest_double_quoted("ecotokens gain", 3);
+    match handle_hook_input(&make_input(&nested), &exclusions, false, "claude") {
+        HookOutput::Rewrite(out) => assert_eq!(out, "bash -c 'ecotokens gain'"),
+        _ => panic!("expected Rewrite to the ecotokens call under its inner shell"),
+    }
+}
+
+/// The command the shell will actually run after the hook: the rewrite, or the
+/// original command on passthrough.
+fn effective_command(cmd: &str) -> String {
+    match handle_hook_input(&make_input(cmd), &[], false, "claude") {
+        HookOutput::Rewrite(out) => out,
+        HookOutput::Passthrough => cmd.to_string(),
+    }
+}
+
+#[test]
+fn wrapper_marker_inside_a_comment_is_not_peeled() {
+    // Regression: the ` -- bash -c ` marker was searched anywhere in the
+    // command, so commented-out code became the command to run.
+    let cmd = "ecotokens filter -- echo OK # -- bash -c 'echo SHOULD_NOT_RUN'";
+    let out = effective_command(cmd);
+    assert!(
+        out.contains("echo OK #"),
+        "the commented-out part must stay a comment: {out}"
+    );
+}
+
+#[test]
+fn commands_before_a_wrapper_marker_are_not_dropped() {
+    let cmd = "ecotokens filter -- echo FIRST && echo SECOND -- bash -c 'echo ONLY_THIS'";
+    let out = effective_command(cmd);
+    assert!(
+        out.contains("echo FIRST && echo SECOND"),
+        "commands before the marker must still run: {out}"
+    );
+}
+
+#[test]
+fn double_quoted_backslash_is_kept_literal() {
+    // Inside bash double quotes `\b` is two characters, not an escape.
+    let cmd = r#"ecotokens filter --agent claude -- bash -c "printf '%s' 'a\b'""#;
+    let out = effective_command(cmd);
+    assert!(out.contains(r"a\b"), "backslash must be preserved: {out}");
+}
+
+#[test]
+fn double_quoted_backslash_n_is_not_turned_into_a_newline() {
+    let cmd = r#"ecotokens filter --agent claude -- bash -c "printf '%s' 'x\ny'""#;
+    let out = effective_command(cmd);
+    assert!(
+        out.contains(r"x\ny") && !out.contains('\n'),
+        "`\\n` must stay two characters: {out}"
+    );
+}
+
+#[test]
+fn double_quoted_substitution_is_not_moved_to_the_inner_shell() {
+    // The outer shell expands `$(…)` before `bash -c` runs; peeling would make
+    // the inner shell expand it instead (`echo a;b` vs `echo 'a;b'`).
+    let cmd = r#"ecotokens filter --agent claude -- bash -c "echo $(printf 'a;b')""#;
+    let out = effective_command(cmd);
+    assert!(
+        out.contains(r#""echo $(printf"#),
+        "an ambiguous double-quoted wrapper must be kept whole: {out}"
+    );
+}
+
+#[test]
+fn ts_plugins_peel_wrappers_safely() {
+    // Runs tests/plugins/peel.test.mjs against the OpenCode plugin and the Pi
+    // extension. Needs Node ≥ 22.6 (type stripping); skipped when absent.
+    let version = match std::process::Command::new("node").arg("--version").output() {
+        Ok(o) if o.status.success() => String::from_utf8_lossy(&o.stdout).trim().to_string(),
+        _ => {
+            eprintln!("node not found, skipping TS plugin tests");
+            return;
+        }
+    };
+    let mut parts = version
+        .trim_start_matches('v')
+        .split('.')
+        .map(|p| p.parse::<u32>().unwrap_or(0));
+    let (major, minor) = (parts.next().unwrap_or(0), parts.next().unwrap_or(0));
+    if (major, minor) < (22, 6) {
+        eprintln!("node {version} has no type stripping, skipping TS plugin tests");
+        return;
+    }
+    let out = std::process::Command::new("node")
+        .args([
+            "--experimental-strip-types",
+            "--no-warnings",
+            "--test",
+            "tests/plugins/peel.test.mjs",
+        ])
+        .current_dir(env!("CARGO_MANIFEST_DIR"))
+        .output()
+        .expect("run node --test");
+    assert!(
+        out.status.success(),
+        "TS plugin tests failed:\n{}\n{}",
+        String::from_utf8_lossy(&out.stdout),
+        String::from_utf8_lossy(&out.stderr)
+    );
+}
+
 // ── Gemini BeforeTool hook handler tests ──────────────────────────────────────
 
 mod gemini_handler {
