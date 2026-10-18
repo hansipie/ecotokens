@@ -1,0 +1,64 @@
+# Default routing policy, version 2026.1 (see contracts/policy-file.md).
+#
+# Rules are evaluated top to bottom; the first match wins. `route = "size"`
+# means the tier Jev named for the size question. `bound = "at-least"` lets a
+# rule raise a job to its route but never lower it.
+
+[[rule]]
+name = "sensitive-work"
+route = "large"
+bound = "at-least"
+review = "required"
+approval = "irreversible"
+[rule.when]
+risk = ["sensitive", "destructive"]
+
+[[rule]]
+name = "design-options"
+route = "analyst"
+hints = ["Deliver constraints, options with trade-offs and acceptance criteria."]
+[rule.when]
+nature = ["design"]
+ambiguity = "high"
+
+[[rule]]
+name = "research-sources"
+route = "analyst"
+hints = ["Use primary sources, note dates and tie each claim to its source."]
+[rule.when]
+nature = ["research"]
+
+[[rule]]
+name = "mechanical"
+route = "tiny"
+hints = ["Prefer a deterministic tool or script; use the small model only to interpret."]
+[rule.when]
+nature = ["mechanical"]
+verifiable = "yes"
+size = ["tiny", "everyday"]
+
+[[rule]]
+name = "ui-browser"
+route = "size"
+hints = ["Verify rendering and console output in a browser when one is available."]
+[rule.when]
+nature = ["ui"]
+
+[[rule]]
+name = "bounded-bug"
+route = "everyday"
+bound = "at-least"
+hints = ["Reproduce the bug first.", "Add a regression test."]
+[rule.when]
+nature = ["bug"]
+
+[[rule]]
+name = "spec-feature"
+route = "size"
+[rule.when]
+nature = ["implementation"]
+ambiguity = "low"
+
+[[rule]]
+name = "size-only"
+route = "size"

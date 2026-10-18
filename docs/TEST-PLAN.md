@@ -96,7 +96,7 @@ Primary areas:
 - Claude Code installation
 - Hook execution from real agent sessions
 - Native tool result interception in actual workflows
-- Multi-target compatibility for Gemini CLI, Qwen Code, and Pi when changed by the release
+- Multi-target compatibility for Gemini CLI, Qwen Code, Pi, and OpenCode when changed by the release
 
 ## Test environment matrix
 
@@ -118,6 +118,7 @@ Test according to release impact:
 - Gemini CLI: when install, hook, MCP, or native tool behavior changes
 - Qwen Code: when install, hook, MCP, or native tool behavior changes
 - Pi: when extension or post-tool behavior changes
+- OpenCode: when install, hook, MCP, native tool, or plugin behavior changes
 
 ### Build variants
 
@@ -192,6 +193,11 @@ Verify:
 - Metrics are recorded under the expected family
 - Unknown tool payloads do not panic
 
+Model router, hook side (`hook-prompt`, `hook-router-session`):
+- Hostile stdin (empty, not JSON, wrong types, over the 10 MiB limit) prints nothing and exits 0
+- A route whose helper agent is missing or shadowed by a user-owned file is recorded as `no_route` and prints nothing
+- A private or not-allowed folder prints nothing and sends nothing; the `UserPromptSubmit` guidance never contains the message text
+
 ### D. Install and uninstall safety
 
 Objective: ensure target settings are edited safely and idempotently.
@@ -209,6 +215,12 @@ Verify:
 - MCP server registration is added and removed correctly
 - Session hooks or post hooks are not duplicated
 
+Model router:
+- `ecotokens router on` writes the `UserPromptSubmit`, `SessionStart` and `SessionEnd` entries and six agent files; a second run leaves `settings.json` and the agents directory byte-identical
+- Third-party entries on the same three events survive `router on` and `router off`; a user-owned agent of a managed name is kept by both
+- `ecotokens uninstall` removes the router's session hooks as well
+- Also run the install and uninstall idempotence checks for Gemini CLI, Qwen Code, Pi and OpenCode, since `src/install.rs` is shared by every harness
+
 ### E. Metrics and gain reporting
 
 Objective: ensure savings data is trustworthy and readable.
@@ -225,6 +237,12 @@ Verify:
 - By-family and by-project grouping looks correct
 - JSON output is valid and stable enough for automation
 - Cost avoided is non-negative when savings exist
+
+Model router (`ecotokens router status`, `outcome`):
+- `router status --json` keeps every pre-existing key and only adds keys; rows written before the policy router are reported as `legacy-size`
+- An empty store renders `No messages routed yet.` and empty `by_route` / `by_category` maps
+- Judge a job with `router outcome ID --success yes|no`; success rates leave out unknown outcomes and are `null` when nothing is judged
+- Cost, tokens and helper time come from the transcript at `SessionEnd`; an unreadable transcript leaves them unknown, never zero
 
 ### F. Search and code-intelligence features
 
@@ -282,6 +300,12 @@ Raw output recovery (`ecotokens show`):
 - `ecotokens clear --all` also removes saved outputs; other `clear` filters leave them alone
 - An unwritable config directory does not change the filtered output
 
+Model router:
+- A secret placed in any field of `ecotokens router dossier` input, or in the working-tree diff, is masked on stdout and on disk
+- No secret, path, project name or message text reaches `router.db`, `router status`, `router outcome --pending` or `doctor` (byte search of the database and its WAL after private messages)
+- `router.db` migration: an old database gains the columns without losing rows, and concurrent first opens never fail
+- A private folder: nothing in the project directory is created or modified by any `router private|allow|strict` command
+
 ### H. TUI checks
 
 Objective: ensure user-visible terminal screens stay usable.
@@ -298,6 +322,10 @@ Verify:
 - Headers and key labels appear
 - Scrolling behaves correctly
 - Narrow terminal widths remain readable enough to diagnose state
+
+Model router:
+- `router status` and `router status --json` render on an empty store and on a populated one
+- `router rules` and `router outcome --pending` render an actionable empty state
 
 ### I. Performance checks
 
@@ -430,7 +458,7 @@ skill and whether the session id changes across `/clear` (the design does not de
 
 ### P1: test when related code changes
 
-- Gemini CLI, Qwen Code, Pi integrations
+- Gemini CLI, Qwen Code, Pi, OpenCode integrations
 - Duplicates detection
 - Abbreviations feature
 - MCP server behavior
@@ -480,6 +508,8 @@ Run this before a tagged release or after hook-related changes:
 6. Inspect `ecotokens gain --history`.
 7. Uninstall and verify settings are clean.
 8. Repeat on any additional target touched by the release.
+9. Model router (when `src/router/*` changed): in a real Claude Code session run `ecotokens router on`, send a delegable message and check the guidance and the helper's final model line; mark a project private (`router private add`) and confirm nothing reaches Jev from it, also from a second worktree and a subfolder; try strict mode; then check that `router off` leaves third-party hooks and user-owned agents alone.
+10. Manual check, **SessionEnd `systemMessage` display**: end a session that delegated a job and note whether Claude Code shows a `systemMessage` printed by a `SessionEnd` hook. The router does not depend on it (the reminder is printed at the next `SessionStart`), but if it is shown the same line could also be printed at session end (research R4 of spec 012).
 
 ## Exit criteria for release
 

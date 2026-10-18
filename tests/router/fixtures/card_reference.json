@@ -1,0 +1,217 @@
+[
+  {
+    "message": "Rename the function parse_cfg to parse_config everywhere in src/",
+    "nature": "mechanical",
+    "risk": "reversible"
+  },
+  {
+    "message": "Reformat all the Markdown tables in docs/ to use aligned pipes",
+    "nature": "mechanical",
+    "risk": "reversible"
+  },
+  {
+    "message": "Move every file from utils/ into lib/ and fix the import paths",
+    "nature": "mechanical",
+    "risk": "reversible"
+  },
+  {
+    "message": "Replace all double quotes with single quotes in the JSON fixtures",
+    "nature": "mechanical",
+    "risk": "reversible"
+  },
+  {
+    "message": "Sort the imports in each Python file of the package",
+    "nature": "mechanical",
+    "risk": "reversible"
+  },
+  {
+    "message": "Add a --json flag to the status command that prints the same data as JSON",
+    "nature": "implementation",
+    "risk": "reversible"
+  },
+  {
+    "message": "Implement pagination for the /orders endpoint with page and per_page query params",
+    "nature": "implementation",
+    "risk": "reversible"
+  },
+  {
+    "message": "Add a dark mode toggle stored in localStorage, spec attached in the ticket",
+    "nature": "implementation",
+    "risk": "reversible"
+  },
+  {
+    "message": "Write a function that merges two sorted lists without extra allocation",
+    "nature": "implementation",
+    "risk": "reversible"
+  },
+  {
+    "message": "Create a CSV export for the monthly report following the column list below",
+    "nature": "implementation",
+    "risk": "reversible"
+  },
+  {
+    "message": "The login form throws 'undefined is not a function' when the email field is empty, fix it",
+    "nature": "bug",
+    "risk": "reversible"
+  },
+  {
+    "message": "Why does this test fail only on CI? Here is the stack trace",
+    "nature": "bug",
+    "risk": "reversible"
+  },
+  {
+    "message": "Our cache returns stale entries after an update, find the cause and fix it",
+    "nature": "bug",
+    "risk": "reversible"
+  },
+  {
+    "message": "The CLI crashes with a segfault when the input file is empty",
+    "nature": "bug",
+    "risk": "reversible"
+  },
+  {
+    "message": "Users report duplicate emails being sent, reproduce and fix",
+    "nature": "bug",
+    "risk": "reversible"
+  },
+  {
+    "message": "How should we structure the billing module so we can add new payment providers later?",
+    "nature": "design",
+    "risk": "reversible"
+  },
+  {
+    "message": "We need offline support in the mobile app, what are the options and trade-offs?",
+    "nature": "design",
+    "risk": "reversible"
+  },
+  {
+    "message": "Should we split the monolith into services or keep it modular? Constraints: team of four",
+    "nature": "design",
+    "risk": "reversible"
+  },
+  {
+    "message": "Propose a data model for multi-tenant permissions",
+    "nature": "design",
+    "risk": "reversible"
+  },
+  {
+    "message": "Which approach would you take to migrate from REST to GraphQL gradually?",
+    "nature": "design",
+    "risk": "reversible"
+  },
+  {
+    "message": "Make the settings page responsive and align the buttons with the design mockup",
+    "nature": "ui",
+    "risk": "reversible"
+  },
+  {
+    "message": "The modal is cut off on small screens, adjust the layout",
+    "nature": "ui",
+    "risk": "reversible"
+  },
+  {
+    "message": "Change the primary colour of the navbar to match the new brand and check contrast",
+    "nature": "ui",
+    "risk": "reversible"
+  },
+  {
+    "message": "Add a loading skeleton to the dashboard cards",
+    "nature": "ui",
+    "risk": "reversible"
+  },
+  {
+    "message": "The tooltip overlaps the chart legend in Safari, fix the positioning",
+    "nature": "ui",
+    "risk": "reversible"
+  },
+  {
+    "message": "Compare the three most used open source vector databases and cite sources",
+    "nature": "research",
+    "risk": "reversible"
+  },
+  {
+    "message": "What changed in the latest EU rules on cookie banners? Give me primary sources",
+    "nature": "research",
+    "risk": "reversible"
+  },
+  {
+    "message": "Find benchmarks comparing SQLite and DuckDB for analytical queries",
+    "nature": "research",
+    "risk": "reversible"
+  },
+  {
+    "message": "Summarise recent papers on speculative decoding with links",
+    "nature": "research",
+    "risk": "reversible"
+  },
+  {
+    "message": "Which Rust crates handle TOML with comments preserved? Compare maintenance status",
+    "nature": "research",
+    "risk": "reversible"
+  },
+  {
+    "message": "Rotate the production database password and update the deployment secrets",
+    "nature": "sensitive",
+    "risk": "sensitive"
+  },
+  {
+    "message": "Change how we store user passwords to use argon2 and migrate existing hashes",
+    "nature": "sensitive",
+    "risk": "sensitive"
+  },
+  {
+    "message": "Add a Stripe webhook handler that marks invoices as paid",
+    "nature": "sensitive",
+    "risk": "sensitive"
+  },
+  {
+    "message": "Export all customer emails and phone numbers to a CSV for the marketing team",
+    "nature": "sensitive",
+    "risk": "sensitive"
+  },
+  {
+    "message": "Update the IAM policy so the service account can write to the billing bucket",
+    "nature": "sensitive",
+    "risk": "sensitive"
+  },
+  {
+    "message": "Review this contract clause on liability and rewrite it for the client",
+    "nature": "sensitive",
+    "risk": "sensitive"
+  },
+  {
+    "message": "Delete all rows older than 90 days from the production events table",
+    "nature": "sensitive",
+    "risk": "destructive"
+  },
+  {
+    "message": "Force-push the cleaned history to main and remove the old tags",
+    "nature": "sensitive",
+    "risk": "destructive"
+  },
+  {
+    "message": "Drop the legacy_users table and its backups",
+    "nature": "sensitive",
+    "risk": "destructive"
+  },
+  {
+    "message": "Deploy the hotfix to production now and restart the workers",
+    "nature": "sensitive",
+    "risk": "destructive"
+  },
+  {
+    "message": "Send the newsletter to the full subscriber list",
+    "nature": "sensitive",
+    "risk": "destructive"
+  },
+  {
+    "message": "Refactor the auth middleware to remove the global session singleton",
+    "nature": "implementation",
+    "risk": "sensitive"
+  },
+  {
+    "message": "Write a script that bulk-updates prices from the supplier file",
+    "nature": "implementation",
+    "risk": "sensitive"
+  }
+]

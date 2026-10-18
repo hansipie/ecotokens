@@ -41,6 +41,10 @@ struct DoctorPaths {
     claude_settings_path: Option<PathBuf>,
     gemini_settings_path: Option<PathBuf>,
     qwen_settings_path: Option<PathBuf>,
+    /// Where the router's helper agents live.
+    agents_dir: Option<PathBuf>,
+    /// The router's optional custom rules file.
+    router_rules_path: Option<PathBuf>,
 }
 
 impl DoctorReport {
@@ -58,6 +62,8 @@ pub fn run() -> DoctorReport {
         claude_settings_path: install::default_claude_settings_path(),
         gemini_settings_path: install::default_gemini_settings_path(),
         qwen_settings_path: install::default_qwen_settings_path(),
+        agents_dir: crate::router::agents::default_agents_dir(),
+        router_rules_path: crate::router::policy::Policy::user_rules_path(),
     })
 }
 
@@ -94,6 +100,8 @@ fn run_with_paths(paths: DoctorPaths) -> DoctorReport {
             &settings,
             env::var(crate::jev::API_KEY_ENV).ok().as_deref(),
             paths.claude_settings_path.as_deref(),
+            paths.agents_dir.as_deref(),
+            paths.router_rules_path.as_deref(),
         ),
         check_handoff(
             &settings,
@@ -180,14 +188,30 @@ pub fn check_jev(settings: &config::Settings, api_key: Option<&str>) -> DoctorCh
     }
 }
 
-/// Reports the model router state (no network call, key never printed).
+/// Reports the model router state (no network call, key never printed): the
+/// hooks and helper agents, the routing policy and its custom rules, and the
+/// private and allowed locations. Only counts are shown, never a path.
 pub fn check_router(
     settings: &config::Settings,
     api_key: Option<&str>,
     claude_settings: Option<&Path>,
+    agents_dir: Option<&Path>,
+    rules_path: Option<&Path>,
 ) -> DoctorCheck {
     let has_key = api_key.is_some_and(|k| !k.trim().is_empty());
     let hook = claude_settings.is_some_and(install::is_prompt_hook_installed);
+    let session_hooks = claude_settings.is_some_and(install::are_router_session_hooks_installed);
+    let agents = agents_dir.is_some_and(crate::router::agents::are_agents_installed);
+    let policy = match rules_path {
+        Some(path) => crate::router::policy::Policy::load_from(path),
+        None => crate::router::policy::Policy::default_policy(),
+    };
+    let custom = policy
+        .rules()
+        .iter()
+        .filter(|r| r.source == crate::router::policy::Source::User)
+        .count();
+    let invalid = policy.invalid().len() + policy.warnings().len();
     let (status, message) = if !settings.router_enabled {
         (DoctorStatus::Ok, "model router off".to_string())
     } else if !cfg!(feature = "jev") || !has_key {
@@ -204,10 +228,47 @@ pub fn check_router(
             "model router on but the UserPromptSubmit hook is missing; run `ecotokens router on`"
                 .to_string(),
         )
+    } else if !agents {
+        (
+            DoctorStatus::Warning,
+            "model router on but the helper agents are missing or incomplete; run \
+             `ecotokens router on`"
+                .to_string(),
+        )
+    } else if !session_hooks {
+        (
+            DoctorStatus::Warning,
+            "model router on but the SessionStart / SessionEnd hooks are missing, so outcomes \
+             are not measured; run `ecotokens router on`"
+                .to_string(),
+        )
+    } else if invalid > 0 {
+        (
+            DoctorStatus::Warning,
+            format!(
+                "model router on; {invalid} problem(s) in the custom rules file are ignored; \
+                 run `ecotokens router rules`"
+            ),
+        )
+    } else if settings.router_strict && settings.router_allowed.is_empty() {
+        (
+            DoctorStatus::Warning,
+            "model router on in strict mode but the allow list is empty, so no message is \
+             routed; run `ecotokens router allow add`"
+                .to_string(),
+        )
     } else {
         (
             DoctorStatus::Ok,
-            "model router on; every message is sent (masked) to TypeSafe to be sized".to_string(),
+            format!(
+                "model router on; every message outside a private location is sent (masked) to \
+                 TypeSafe to be sized; policy {} ({custom} custom rule(s)); {} private and {} \
+                 allowed location(s), strict {}",
+                policy.version(),
+                settings.router_private.len(),
+                settings.router_allowed.len(),
+                if settings.router_strict { "on" } else { "off" }
+            ),
         )
     };
     DoctorCheck {
@@ -431,6 +492,8 @@ mod tests {
             claude_settings_path: Some(dir.path().join(".claude").join("settings.json")),
             gemini_settings_path: Some(dir.path().join(".gemini").join("settings.json")),
             qwen_settings_path: Some(dir.path().join(".qwen").join("settings.json")),
+            agents_dir: Some(dir.path().join(".claude").join("agents")),
+            router_rules_path: Some(dir.path().join("router_rules.toml")),
         });
 
         assert!(!report.has_errors());

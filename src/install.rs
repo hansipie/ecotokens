@@ -220,6 +220,7 @@ pub fn uninstall_hook(settings_path: &Path, claude_json_path: &Path) -> InstallR
         remove_hook_generic(&mut v, "SessionStart", SESSION_START_COMMAND);
         remove_hook_generic(&mut v, "SessionEnd", SESSION_END_COMMAND);
         remove_prompt_hook_entry(&mut v);
+        remove_router_session_entries(&mut v);
         remove_hook_entry_dropping_empty(&mut v, "SessionStart", HANDOFF_HOOK_COMMAND);
         remove_ecotokens_mcp_server(&mut v);
         write_settings(settings_path, &v)?;
@@ -382,6 +383,70 @@ pub fn uninstall_handoff_hook(settings_path: &Path) -> InstallResult {
     }
     let mut v = read_settings_checked(settings_path)?;
     if remove_hook_entry_dropping_empty(&mut v, "SessionStart", HANDOFF_HOOK_COMMAND) {
+        write_settings(settings_path, &v)?;
+    }
+    Ok(())
+}
+
+// ============================================================================
+// Claude Code SessionStart / SessionEnd hooks of the model router
+// ============================================================================
+
+const ROUTER_SESSION_START_COMMAND: &str = "ecotokens hook-router-session start";
+const ROUTER_SESSION_END_COMMAND: &str = "ecotokens hook-router-session end";
+/// Claude Code's hard stop. Both hooks are local; the SessionEnd one reads a
+/// transcript, so it gets a little more room.
+const ROUTER_SESSION_TIMEOUT_SECS: u64 = 5;
+
+fn router_session_entry(command: &str) -> serde_json::Value {
+    serde_json::json!({
+        "hooks": [{
+            "type": "command",
+            "command": command,
+            "timeout": ROUTER_SESSION_TIMEOUT_SECS
+        }]
+    })
+}
+
+/// Install the router's SessionStart (reminder) and SessionEnd (outcome
+/// capture) hooks. Idempotent: an entry that is already there is left exactly
+/// as it is, so a second install never reorders third-party entries.
+pub fn install_router_session_hooks(settings_path: &Path) -> InstallResult {
+    let mut v = read_settings_checked(settings_path)?;
+    for (event, command) in [
+        ("SessionStart", ROUTER_SESSION_START_COMMAND),
+        ("SessionEnd", ROUTER_SESSION_END_COMMAND),
+    ] {
+        if has_hook_command(&v, event, command) {
+            continue;
+        }
+        let mut hooks = v["hooks"][event].as_array().cloned().unwrap_or_default();
+        hooks.push(router_session_entry(command));
+        v["hooks"][event] = serde_json::Value::Array(hooks);
+    }
+    write_settings(settings_path, &v)
+}
+
+/// Whether both router session hooks are present.
+pub fn are_router_session_hooks_installed(settings_path: &Path) -> bool {
+    let v = read_settings(settings_path);
+    has_hook_command(&v, "SessionStart", ROUTER_SESSION_START_COMMAND)
+        && has_hook_command(&v, "SessionEnd", ROUTER_SESSION_END_COMMAND)
+}
+
+fn remove_router_session_entries(v: &mut serde_json::Value) -> bool {
+    let start = remove_hook_entry_dropping_empty(v, "SessionStart", ROUTER_SESSION_START_COMMAND);
+    let end = remove_hook_entry_dropping_empty(v, "SessionEnd", ROUTER_SESSION_END_COMMAND);
+    start || end
+}
+
+/// Remove the router's session hooks (idempotent, keeps third-party entries).
+pub fn uninstall_router_session_hooks(settings_path: &Path) -> InstallResult {
+    if !settings_path.exists() {
+        return Ok(());
+    }
+    let mut v = read_settings_checked(settings_path)?;
+    if remove_router_session_entries(&mut v) {
         write_settings(settings_path, &v)?;
     }
     Ok(())
