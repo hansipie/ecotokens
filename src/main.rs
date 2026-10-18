@@ -2314,16 +2314,23 @@ fn cmd_config(
             "candle" => EmbedProvider::Candle {
                 model: embed_model
                     .clone()
-                    .unwrap_or_else(|| "sentence-transformers/all-MiniLM-L6-v2".to_string()),
+                    .unwrap_or_else(|| config::settings::DEFAULT_CANDLE_EMBED_MODEL.to_string()),
             },
             "none" => EmbedProvider::None,
-            "ollama" => EmbedProvider::Ollama {
-                url: embed_url
-                    .clone()
-                    .unwrap_or_else(|| "http://localhost:11434".to_string()),
-                model: embed_model
-                    .clone()
-                    .unwrap_or_else(|| "qwen3-embedding:latest".to_string()),
+            "ollama" => match embed_model.as_deref().filter(|m| !m.trim().is_empty()) {
+                Some(model) => EmbedProvider::Ollama {
+                    url: embed_url
+                        .clone()
+                        .unwrap_or_else(|| "http://localhost:11434".to_string()),
+                    model: model.to_string(),
+                },
+                None => {
+                    eprintln!(
+                        "warning: no --embed-model given for ollama; falling back to candle ({})",
+                        config::settings::DEFAULT_CANDLE_EMBED_MODEL
+                    );
+                    EmbedProvider::default()
+                }
             },
             other => {
                 eprintln!(
