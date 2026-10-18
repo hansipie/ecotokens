@@ -450,6 +450,46 @@ name = "router_install_test"
 path = "tests/router/install_prompt_test.rs"
 
 [[test]]
+name = "router_card_test"
+path = "tests/router/card_test.rs"
+
+[[test]]
+name = "router_policy_test"
+path = "tests/router/policy_test.rs"
+
+[[test]]
+name = "router_location_test"
+path = "tests/router/location_test.rs"
+
+[[test]]
+name = "router_settings_test"
+path = "tests/router/settings_test.rs"
+
+[[test]]
+name = "router_outcome_test"
+path = "tests/router/outcome_test.rs"
+
+[[test]]
+name = "router_dossier_test"
+path = "tests/router/dossier_test.rs"
+
+[[test]]
+name = "router_session_test"
+path = "tests/router/session_test.rs"
+
+[[test]]
+name = "router_cli_test"
+path = "tests/router/cli_test.rs"
+
+[[test]]
+name = "router_privacy_test"
+path = "tests/router/privacy_test.rs"
+
+[[test]]
+name = "router_live_card_test"
+path = "tests/router/live_card_test.rs"
+
+[[test]]
 name = "jev_stats_test"
 path = "tests/jev/stats_test.rs"
 

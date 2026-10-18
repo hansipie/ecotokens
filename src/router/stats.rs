@@ -16,11 +16,68 @@ pub fn router_db_path() -> Option<PathBuf> {
     dirs::config_dir().map(|d| d.join("ecotokens").join("router.db"))
 }
 
-fn open(path: &Path) -> io::Result<Connection> {
-    if let Some(parent) = path.parent() {
-        std::fs::create_dir_all(parent)?;
+/// Columns added to `router_decisions` after the first release, in order.
+/// Added one by one, so a database of any older release is brought up to date.
+const ADDED_COLUMNS: [(&str, &str); 10] = [
+    ("session_id", "TEXT"),
+    ("nature", "TEXT"),
+    ("risk", "TEXT"),
+    ("ambiguity", "REAL"),
+    ("verifiability", "REAL"),
+    ("rule", "TEXT"),
+    ("route", "TEXT"),
+    ("raised", "INTEGER"),
+    ("policy_version", "TEXT"),
+    ("models", "TEXT"),
+];
+
+/// Policy attributed to rows written before the policy router existed.
+pub const LEGACY_POLICY: &str = "legacy-size";
+
+/// Tier → model alias in force, stored with every routed decision.
+fn models_json() -> String {
+    let map: BTreeMap<&str, &str> = Size::ALL
+        .into_iter()
+        .map(|s| (s.as_str(), s.model_alias()))
+        .collect();
+    serde_json::to_string(&map).unwrap_or_default()
+}
+
+fn is_busy(e: &rusqlite::Error) -> bool {
+    matches!(
+        e,
+        rusqlite::Error::SqliteFailure(f, _)
+            if matches!(
+                f.code,
+                rusqlite::ErrorCode::DatabaseBusy | rusqlite::ErrorCode::DatabaseLocked
+            )
+    )
+}
+
+fn migrate(conn: &Connection) -> rusqlite::Result<()> {
+    let mut stmt = conn.prepare("PRAGMA table_info(router_decisions)")?;
+    let existing: Vec<String> = stmt
+        .query_map([], |r| r.get::<_, String>(1))?
+        .filter_map(Result::ok)
+        .collect();
+    for (column, ty) in ADDED_COLUMNS {
+        if existing.iter().any(|c| c == column) {
+            continue;
+        }
+        match conn.execute(
+            &format!("ALTER TABLE router_decisions ADD COLUMN {column} {ty}"),
+            [],
+        ) {
+            Ok(_) => {}
+            // Another process migrated between our check and our ALTER.
+            Err(e) if e.to_string().contains("duplicate column name") => {}
+            Err(e) => return Err(e),
+        }
     }
-    let conn = Connection::open(path).map_err(io::Error::other)?;
+    Ok(())
+}
+
+fn init(conn: &Connection) -> rusqlite::Result<()> {
     conn.execute_batch(
         "PRAGMA busy_timeout = 2000;
          PRAGMA journal_mode = WAL;
@@ -35,21 +92,86 @@ fn open(path: &Path) -> io::Result<Connection> {
              output_tokens  INTEGER NOT NULL DEFAULT 0,
              latency_ms     INTEGER NOT NULL DEFAULT 0
          );",
+    )?;
+    migrate(conn)?;
+    conn.execute_batch(
+        "CREATE TABLE IF NOT EXISTS router_outcomes (
+             decision_id  INTEGER PRIMARY KEY,
+             cost_usd     REAL,
+             tokens_in    INTEGER,
+             tokens_out   INTEGER,
+             duration_ms  INTEGER,
+             runs         INTEGER,
+             success      INTEGER,
+             correction   TEXT,
+             regressions  INTEGER,
+             judged_at    TEXT,
+             reminded     INTEGER NOT NULL DEFAULT 0
+         );",
     )
-    .map_err(io::Error::other)?;
-    Ok(conn)
 }
 
-pub fn record(path: &Path, routing: &Routing) -> io::Result<()> {
+/// Opens the database, creating and migrating it. Concurrent first opens by
+/// several hook processes can collide on the journal-mode switch or the
+/// migration; the setup is idempotent, so a busy result is retried briefly.
+pub(crate) fn open(path: &Path) -> io::Result<Connection> {
+    if let Some(parent) = path.parent() {
+        std::fs::create_dir_all(parent)?;
+    }
+    let mut attempt = 0;
+    loop {
+        let conn = Connection::open(path).map_err(io::Error::other)?;
+        match init(&conn) {
+            Ok(()) => return Ok(conn),
+            Err(e) if is_busy(&e) && attempt < 40 => {
+                attempt += 1;
+                drop(conn);
+                std::thread::sleep(std::time::Duration::from_millis(15));
+            }
+            Err(e) => return Err(io::Error::other(e)),
+        }
+    }
+}
+
+/// Whether a decision leaves anything but its timestamp and kind behind.
+fn is_gate_decision(decision: Decision) -> bool {
+    matches!(decision, Decision::Private | Decision::NotAllowed)
+}
+
+/// Writes one decision and returns its row id. Private and not-allowed
+/// decisions keep only the timestamp and the kind: no card, no session id,
+/// nothing that could say what was asked or where.
+pub fn record_returning_id(path: &Path, routing: &Routing) -> io::Result<i64> {
+    record_at(path, routing, chrono::Utc::now())
+}
+
+/// [`record_returning_id`] with an explicit timestamp (tests, replays).
+pub fn record_at(
+    path: &Path,
+    routing: &Routing,
+    at: chrono::DateTime<chrono::Utc>,
+) -> io::Result<i64> {
     let conn = open(path)?;
+    let now = at.to_rfc3339();
+    if is_gate_decision(routing.decision) {
+        conn.execute(
+            "INSERT INTO router_decisions (timestamp, decision) VALUES (?1, ?2)",
+            params![now, routing.decision.as_str()],
+        )
+        .map_err(io::Error::other)?;
+        return Ok(conn.last_insert_rowid());
+    }
     let usage = routing.usage.unwrap_or_default();
+    let card = routing.card.as_ref();
     conn.execute(
         "INSERT INTO router_decisions
              (timestamp, decision, size, confidence, followup_prob,
-              input_tokens, output_tokens, latency_ms)
-         VALUES (?1, ?2, ?3, ?4, ?5, ?6, ?7, ?8)",
+              input_tokens, output_tokens, latency_ms,
+              session_id, nature, risk, ambiguity, verifiability,
+              rule, route, raised, policy_version, models)
+         VALUES (?1, ?2, ?3, ?4, ?5, ?6, ?7, ?8, ?9, ?10, ?11, ?12, ?13, ?14, ?15, ?16, ?17, ?18)",
         params![
-            chrono::Utc::now().to_rfc3339(),
+            now,
             routing.decision.as_str(),
             routing.size.map(Size::as_str),
             routing.confidence,
@@ -57,10 +179,24 @@ pub fn record(path: &Path, routing: &Routing) -> io::Result<()> {
             usage.input_tokens as i64,
             usage.output_tokens as i64,
             routing.latency_ms as i64,
+            routing.session_id,
+            card.and_then(|c| c.nature).map(|n| n.value.as_str()),
+            card.and_then(|c| c.risk).map(|r| r.value.as_str()),
+            card.and_then(|c| c.ambiguity),
+            card.and_then(|c| c.verifiability),
+            routing.rule,
+            routing.route,
+            routing.route.as_ref().map(|_| routing.raised as i64),
+            routing.policy_version,
+            routing.route.as_ref().map(|_| models_json()),
         ],
     )
     .map_err(io::Error::other)?;
-    Ok(())
+    Ok(conn.last_insert_rowid())
+}
+
+pub fn record(path: &Path, routing: &Routing) -> io::Result<()> {
+    record_returning_id(path, routing).map(|_| ())
 }
 
 #[derive(Debug, Clone, Default, PartialEq, Serialize)]
@@ -72,11 +208,20 @@ pub struct SizeCount {
 }
 
 #[derive(Debug, Clone, Default, PartialEq, Serialize)]
+pub struct PolicyCount {
+    pub messages: u64,
+}
+
+#[derive(Debug, Clone, Default, PartialEq, Serialize)]
 pub struct Summary {
     pub messages: u64,
     pub by_decision: BTreeMap<String, u64>,
     pub by_size: BTreeMap<String, SizeCount>,
-    /// Requests that reached Jev (every decision except skipped / jev_down).
+    /// Messages per policy version; rows written before the policy router
+    /// count as `legacy-size`. Private and not-allowed rows carry no policy.
+    pub by_policy: BTreeMap<String, PolicyCount>,
+    /// Requests that reached Jev (every decision except skipped / jev_down
+    /// and the two gate decisions).
     pub jev_requests: u64,
     pub input_tokens: u64,
     pub output_tokens: u64,
@@ -98,7 +243,8 @@ pub fn summarize(path: &Path, settings: &Settings) -> io::Result<Summary> {
     let conn = open(path)?;
     let mut stmt = conn
         .prepare(
-            "SELECT timestamp, decision, size, input_tokens, output_tokens, latency_ms
+            "SELECT timestamp, decision, size, input_tokens, output_tokens, latency_ms,
+                    policy_version
              FROM router_decisions ORDER BY id",
         )
         .map_err(io::Error::other)?;
@@ -111,19 +257,27 @@ pub fn summarize(path: &Path, settings: &Settings) -> io::Result<Summary> {
                 r.get::<_, i64>(3)?,
                 r.get::<_, i64>(4)?,
                 r.get::<_, i64>(5)?,
+                r.get::<_, Option<String>>(6)?,
             ))
         })
         .map_err(io::Error::other)?;
     let mut latency_total = 0u64;
     for row in rows {
-        let (ts, decision, size, input, output, latency) = row.map_err(io::Error::other)?;
+        let (ts, decision, size, input, output, latency, policy) = row.map_err(io::Error::other)?;
         s.messages += 1;
         if s.first.is_none() {
             s.first = Some(ts);
         }
         *s.by_decision.entry(decision.clone()).or_default() += 1;
         let decision = Decision::parse(&decision);
-        if !matches!(decision, Some(Decision::Skipped | Decision::JevDown)) {
+        if !decision.is_some_and(is_gate_decision) {
+            let version = policy.unwrap_or_else(|| LEGACY_POLICY.to_string());
+            s.by_policy.entry(version).or_default().messages += 1;
+        }
+        if !matches!(
+            decision,
+            Some(Decision::Skipped | Decision::JevDown | Decision::Private | Decision::NotAllowed)
+        ) {
             s.jev_requests += 1;
             latency_total += latency.max(0) as u64;
         }

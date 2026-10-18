@@ -79,3 +79,44 @@ Process wall time of the `SessionStart` hooks, release build, Linux, 40 runs eac
 Claude Code runs matching `SessionStart` hooks in parallel, so a session start waits for the slowest of them, not their sum. When nothing is injected the new hook costs about the same as the existing one.
 
 Injecting used to cost about 98 ms (p90 103 ms). Per-pattern compile timings showed that 4 of the 39 secret-masking patterns, all written with `\w`, took 98% of it: the regex crate reads `\w` as Unicode, which makes bounded repetitions such as `\w{82}` expensive to compile (`pypi-…` 42.7 ms, `github_pat_` 15.3 ms, `AIza` 6.5 ms, `glpat-` 3.9 ms; every other pattern is under 0.25 ms). Writing those four patterns ASCII-only (`(?-u)`) brought the cold pass over all patterns from about 73-100 ms to 1.7 ms, which every ecotokens process that masks pays once. Real credentials of these services are ASCII, so no real token stops being masked. A guard test (`tests/masking/word_class_test.rs`) fails if a pattern using `\w` loses its `(?-u)`.
+
+## Router
+
+Measured on 2026-10-17, Linux, release builds, against the live `api.typesafe.ai` service (see [model-router.md](model-router.md) and `docs/TEST-PLAN.md` sections I and the router rows). The **baseline** is the installed release `0.30.1`, which is the code before the task card; it was measured after the new code was written, but from the unchanged release binary, so it is the pre-change figure. **After** is the policy router. Each pair was run interleaved (old, new, new, old, …) to share the network's mood. The hook was run with `router on --timeout-ms 8000` in a throwaway `HOME`; every run delegated.
+
+### Per message
+
+| Scenario | Baseline p50 | Baseline p90 | After p50 | After p90 | Change (p50 / p90) |
+|----------|--------------|--------------|-----------|-----------|--------------------|
+| `hook-prompt` end to end, Jev included, 30 runs each | 465 ms | 526 ms | 461 ms | 546 ms | −1% / +4% |
+| `hook-prompt`, private folder (gate only, no network), 200 runs | n/a | n/a | 4 ms | 5 ms | new path |
+| `hook-prompt`, no API key (earliest exit), 200 runs | 5 ms | 5 ms | 4 ms | 4 ms | unchanged |
+
+The added delay stays inside the budget of the specification (p90 within +10%, median within +15%): asking six questions instead of two in the same request does not make the answer slower, and the local gate costs about 4 ms, which is the process start. With 30 runs the network noise is larger than the difference, so read it as "no measurable change", not as a gain.
+
+### Jev tokens per request
+
+| | Input | Output |
+|--|-------|--------|
+| Baseline (2 questions) | 552–561 | 66–67 |
+| After (6 questions) | 1067–1076 | 212–214 |
+
+The request now costs about **twice the input and three times the output tokens** of the size-only request. Jev has no published price (`router price` stays blank until you set one), so this is shown in tokens: at the 800 ms default timeout the router still mostly stays out of the way, and the figures above were measured with a longer timeout.
+
+### Other scenarios of TEST-PLAN section I
+
+The hook path and `src/main.rs` changed, the filters did not. Same binaries, 15 runs each (3 for the index), p50 / p90 wall time:
+
+| Scenario | Baseline | After |
+|----------|----------|-------|
+| `filter -- git log -p -n 40` (8.5k chars out) | 89 / 94 ms | 91 / 94 ms |
+| `filter -- grep -rn fn src` (39.8k chars out) | 15 / 16 ms | 15 / 16 ms |
+| `gain --json` on a copy of a 150 MB metrics store | 296 / 304 ms | 297 / 302 ms |
+| initial index of `src/` (embeddings off, 3 runs) | 148 / 148 ms | 147 / 151 ms |
+| incremental reindex after one changed file (3 runs) | 24 / 25 ms | 10 / 11 ms |
+
+The incremental figure comes from only three runs on a tiny index and is not a speed-up to rely on; the point is that nothing got slower. Output sizes are identical.
+
+### Hook-free classification quality
+
+The reference set of 43 labelled messages (`tests/router/fixtures/card_reference.json`, run with `cargo test --test router_live_card_test -- --ignored`) gave: nature 37/43 (86%), risk 40/43 (93%). Of the 13 messages labelled sensitive, destructive or security, 7 went to an advanced helper (`router-large`, `router-hardest`, `router-analyst`), 6 were **kept by the main session** because Jev's size answer was below the 0.6 confidence threshold (the first fallback of the task card), and none went to a tiny or everyday helper. The 100% target of the specification is therefore met in the sense that no sensitive job reaches a cheaper model, not in the sense that every one is delegated.

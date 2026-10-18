@@ -71,6 +71,12 @@ enum Commands {
     HookPostCodex,
     /// Model router: size a Claude Code message with Jev via UserPromptSubmit hook (reads JSON from stdin)
     HookPrompt,
+    /// Model router: SessionStart / SessionEnd hook that measures delegated jobs and reminds of
+    /// unjudged ones (reads JSON from stdin; argument: start | end)
+    HookRouterSession {
+        /// Which event triggered the hook: start or end
+        event: String,
+    },
     /// Model router: Jev sizes each message and small jobs go to cheaper helper agents
     Router {
         #[command(subcommand)]
@@ -429,6 +435,131 @@ enum RouterAction {
         input: Option<f64>,
         #[arg(long)]
         output: Option<f64>,
+    },
+    /// Record how a delegated job went, or list the jobs that await a judgment
+    Outcome {
+        /// Job id (from `--pending`)
+        id: Option<i64>,
+        /// List the delegated jobs that have no judgment yet
+        #[arg(long)]
+        pending: bool,
+        /// Did the job succeed on the first attempt, verified?
+        #[arg(long, value_parser = ["yes", "no"])]
+        success: Option<String>,
+        /// How much you had to correct the result
+        #[arg(long, value_parser = ["none", "minor", "major"])]
+        correction: Option<String>,
+        /// Number of regressions the job introduced
+        #[arg(long)]
+        regressions: Option<i64>,
+        /// Output as JSON
+        #[arg(long)]
+        json: bool,
+    },
+    /// Write the dossier of a helper that stops (JSON on stdin: goal, constraints,
+    /// commands, errors, discarded)
+    Dossier {
+        /// Print {"path", "chars"} instead of the Markdown
+        #[arg(long)]
+        json: bool,
+    },
+    /// List the routing rules in evaluation order (user rules first)
+    Rules {
+        /// Output as JSON
+        #[arg(long)]
+        json: bool,
+    },
+    /// Private locations: messages from these folders are never sent to Jev
+    Private {
+        #[command(subcommand)]
+        action: PrivateAction,
+    },
+    /// Strict-mode allow list: with strict mode on, only these folders are routed
+    Allow {
+        #[command(subcommand)]
+        action: AllowAction,
+    },
+    /// Strict mode: route only the allowed locations
+    Strict {
+        #[command(subcommand)]
+        action: StrictAction,
+    },
+}
+
+#[derive(Subcommand)]
+enum PrivateAction {
+    /// Add a folder or glob pattern (default: the current folder)
+    Add {
+        path: Option<String>,
+        /// Output as JSON
+        #[arg(long)]
+        json: bool,
+    },
+    /// Remove a folder or pattern (default: the current folder)
+    Remove {
+        path: Option<String>,
+        /// Output as JSON
+        #[arg(long)]
+        json: bool,
+    },
+    /// List the private locations
+    List {
+        /// Output as JSON
+        #[arg(long)]
+        json: bool,
+    },
+    /// Say whether a folder is private, and why (default: the current folder)
+    Check {
+        path: Option<String>,
+        /// Output as JSON
+        #[arg(long)]
+        json: bool,
+    },
+}
+
+#[derive(Subcommand)]
+enum AllowAction {
+    /// Add a folder or glob pattern (default: the current folder)
+    Add {
+        path: Option<String>,
+        /// Output as JSON
+        #[arg(long)]
+        json: bool,
+    },
+    /// Remove a folder or pattern (default: the current folder)
+    Remove {
+        path: Option<String>,
+        /// Output as JSON
+        #[arg(long)]
+        json: bool,
+    },
+    /// List the allowed locations
+    List {
+        /// Output as JSON
+        #[arg(long)]
+        json: bool,
+    },
+}
+
+#[derive(Subcommand)]
+enum StrictAction {
+    /// Route only the allowed locations
+    On {
+        /// Output as JSON
+        #[arg(long)]
+        json: bool,
+    },
+    /// Route every location that is not private
+    Off {
+        /// Output as JSON
+        #[arg(long)]
+        json: bool,
+    },
+    /// Show whether strict mode is on
+    Status {
+        /// Output as JSON
+        #[arg(long)]
+        json: bool,
     },
 }
 
@@ -2068,6 +2199,48 @@ fn cmd_router(action: RouterAction) {
             timeout_ms,
         } => std::process::exit(router::cli::try_messages(&messages, json, timeout_ms)),
         RouterAction::Price { input, output } => router::cli::price(input, output),
+        RouterAction::Rules { json } => router::cli::rules(json),
+        RouterAction::Dossier { json } => router::cli::dossier(json),
+        RouterAction::Outcome {
+            id,
+            pending,
+            success,
+            correction,
+            regressions,
+            json,
+        } => router::cli::outcome(id, pending, success, correction, regressions, json),
+        RouterAction::Private { action } => {
+            use router::cli::ListKind::Private;
+            match action {
+                PrivateAction::Add { path, json } => {
+                    router::cli::location_add(Private, path.as_deref(), json)
+                }
+                PrivateAction::Remove { path, json } => {
+                    router::cli::location_remove(Private, path.as_deref(), json)
+                }
+                PrivateAction::List { json } => router::cli::location_list(Private, json),
+                PrivateAction::Check { path, json } => {
+                    router::cli::private_check(path.as_deref(), json)
+                }
+            }
+        }
+        RouterAction::Allow { action } => {
+            use router::cli::ListKind::Allowed;
+            match action {
+                AllowAction::Add { path, json } => {
+                    router::cli::location_add(Allowed, path.as_deref(), json)
+                }
+                AllowAction::Remove { path, json } => {
+                    router::cli::location_remove(Allowed, path.as_deref(), json)
+                }
+                AllowAction::List { json } => router::cli::location_list(Allowed, json),
+            }
+        }
+        RouterAction::Strict { action } => match action {
+            StrictAction::On { json } => router::cli::strict_set(true, json),
+            StrictAction::Off { json } => router::cli::strict_set(false, json),
+            StrictAction::Status { json } => router::cli::strict_status(json),
+        },
     };
     if let Err(e) = result {
         eprintln!("router error: {e}");
@@ -3933,6 +4106,7 @@ fn main() {
         Commands::HookCodex => hook::handle_codex(),
         Commands::HookPostCodex => hook::handle_post_codex(),
         Commands::HookPrompt => router::hook::handle_prompt(),
+        Commands::HookRouterSession { event } => router::session::handle(&event),
         Commands::Router { action } => cmd_router(action),
         Commands::HookHandoff => handoff::hook::handle(),
         Commands::Handoff { action } => cmd_handoff(action),

@@ -238,6 +238,31 @@ pub struct Settings {
     /// the conversation, the main session handles it.
     #[serde(default = "default_router_followup_min_prob")]
     pub router_followup_min_prob: f64,
+    /// Private locations: folders or glob patterns whose messages are never
+    /// sent to Jev. Machine-local, never stored in a project.
+    #[serde(default)]
+    pub router_private: Vec<String>,
+    /// Strict mode allow list: with `router_strict` on, only these locations
+    /// are routed.
+    #[serde(default)]
+    pub router_allowed: Vec<String>,
+    /// Strict mode: route only the locations on `router_allowed`.
+    #[serde(default)]
+    pub router_strict: bool,
+    /// Attempts a helper makes without a new testable hypothesis before it
+    /// stops and writes a dossier. Written into the agent files.
+    #[serde(default = "default_router_max_attempts")]
+    pub router_max_attempts: u32,
+    /// Reliability threshold of the task-card answers (nature, risk).
+    /// Falls back to `router_min_confidence` when unset.
+    #[serde(default)]
+    pub router_card_min_confidence: Option<f64>,
+    /// Probability from which a job counts as ambiguous.
+    #[serde(default = "default_router_ambiguity_min_prob")]
+    pub router_ambiguity_min_prob: f64,
+    /// Probability from which a result counts as verifiable.
+    #[serde(default = "default_router_verifiable_min_prob")]
+    pub router_verifiable_min_prob: f64,
 
     // ── Session handoff (`/handoff` skill + SessionStart hook) ──
     /// Feature switch, toggled by `ecotokens handoff on|off`. Off by default.
@@ -354,6 +379,15 @@ fn default_router_min_confidence() -> f64 {
 fn default_router_followup_min_prob() -> f64 {
     0.5
 }
+fn default_router_max_attempts() -> u32 {
+    2
+}
+fn default_router_ambiguity_min_prob() -> f64 {
+    0.5
+}
+fn default_router_verifiable_min_prob() -> f64 {
+    0.5
+}
 
 fn default_handoff_max_chars() -> usize {
     4000
@@ -427,6 +461,13 @@ impl Default for Settings {
             router_timeout_ms: default_router_timeout_ms(),
             router_min_confidence: default_router_min_confidence(),
             router_followup_min_prob: default_router_followup_min_prob(),
+            router_private: Vec::new(),
+            router_allowed: Vec::new(),
+            router_strict: false,
+            router_max_attempts: default_router_max_attempts(),
+            router_card_min_confidence: None,
+            router_ambiguity_min_prob: default_router_ambiguity_min_prob(),
+            router_verifiable_min_prob: default_router_verifiable_min_prob(),
             handoff_enabled: false,
             handoff_max_chars: default_handoff_max_chars(),
             handoff_stale_hours: default_handoff_stale_hours(),
@@ -446,6 +487,52 @@ impl Settings {
     pub fn effective_handoff_max_chars(&self) -> usize {
         self.handoff_max_chars
             .min(crate::handoff::MAX_CHARS_CEILING)
+    }
+
+    /// Reliability threshold of the task-card answers.
+    pub fn card_min_confidence(&self) -> f64 {
+        self.router_card_min_confidence
+            .unwrap_or(self.router_min_confidence)
+    }
+
+    /// Whether the settings file can be trusted: missing counts as defaults,
+    /// an unreadable or unparsable file does not. The router's privacy gate
+    /// treats an untrusted file as "private".
+    pub fn config_file_trusted(path: &Path) -> bool {
+        match std::fs::read_to_string(path) {
+            Ok(data) => serde_json::from_str::<serde_json::Value>(&data)
+                .map(|v| v.is_object())
+                .unwrap_or(false),
+            Err(e) => e.kind() == std::io::ErrorKind::NotFound,
+        }
+    }
+
+    /// Like [`Settings::save`], but keeps every key of the existing file
+    /// that this version does not know about.
+    pub fn save_preserving_unknown(&self) -> std::io::Result<()> {
+        let config_path = Self::config_path().ok_or_else(|| {
+            std::io::Error::new(std::io::ErrorKind::NotFound, "cannot resolve config dir")
+        })?;
+        self.save_preserving_unknown_to(&config_path)
+    }
+
+    pub fn save_preserving_unknown_to(&self, config_path: &Path) -> std::io::Result<()> {
+        let mut merged = std::fs::read_to_string(config_path)
+            .ok()
+            .and_then(|d| serde_json::from_str::<serde_json::Value>(&d).ok())
+            .and_then(|v| match v {
+                serde_json::Value::Object(m) => Some(m),
+                _ => None,
+            })
+            .unwrap_or_default();
+        let ours = serde_json::to_value(self)
+            .map_err(|e| std::io::Error::new(std::io::ErrorKind::InvalidData, e))?;
+        if let serde_json::Value::Object(ours) = ours {
+            merged.extend(ours);
+        }
+        let json = serde_json::to_string_pretty(&serde_json::Value::Object(merged))
+            .map_err(|e| std::io::Error::new(std::io::ErrorKind::InvalidData, e))?;
+        super::atomic_write(config_path, json)
     }
 
     pub fn config_path() -> Option<PathBuf> {

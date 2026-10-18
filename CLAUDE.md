@@ -1,6 +1,6 @@
 # ecotokens Development Guidelines
 
-Auto-generated from all feature plans. Last updated: 2026-10-04
+Auto-generated from all feature plans. Last updated: 2026-10-17
 
 ## Active Technologies
 - Rust stable ≥ 1.75 + tantivy 0.22 (index read), similar 2.x (diff/similarity ratio), clap 4 (CLI), rmcp (MCP server), serde/serde_json (serialisation) (002-duplicate-detection)
@@ -14,6 +14,8 @@ Auto-generated from all feature plans. Last updated: 2026-10-04
 - Optional TypeSafe Jev judgments via `src/jev/` (HTTPS, reqwest blocking; `jev` feature) — no new crates; every use falls back to the existing heuristic
 - Rust stable ≥ 1.75 (no nightly), edition 2021 + no new crates — reuses clap 4 (subcommands), serde/serde_json (hook I/O, transcript lines), chrono, dirs, rusqlite and `masking::patterns::mask` (011-session-handoff)
 - Plain Markdown files under `~/.config/ecotokens/handoff/` plus per-session JSON records; small SQLite table for injection statistics (011-session-handoff)
+- Rust stable ≥ 1.75 (no nightly), edition 2021 + existing only: `clap` 4 (subcommands), `serde`/`serde_json`, `toml` 1 (policy files), `globset` 0.4 (path patterns), `rusqlite` 0.31 (`router.db`), `chrono`, `dirs`, `regex`; internal: `jev` (Question/Answers), `handoff` (store, format, transcript), `masking::patterns::mask`. **No new crates.** (012-policy-based-router)
+- `~/.config/ecotokens/router.db` (additive columns on `router_decisions`, new `router_outcomes` table); user settings JSON gains list/flag fields; new optional `~/.config/ecotokens/router_rules.toml`; dossiers as Markdown under the existing handoff directory. No project file is ever written. (012-policy-based-router)
 
 - Rust stable (≥ 1.75, no nightly) (001-token-companion)
 
@@ -47,9 +49,9 @@ cargo test [ONLY COMMANDS FOR ACTIVE TECHNOLOGIES][ONLY COMMANDS FOR ACTIVE TECH
 Rust stable (≥ 1.75, no nightly): Follow standard conventions
 
 ## Recent Changes
+- 012-policy-based-router: Added Rust stable ≥ 1.75 (no nightly), edition 2021 + existing only: `clap` 4 (subcommands), `serde`/`serde_json`, `toml` 1 (policy files), `globset` 0.4 (path patterns), `rusqlite` 0.31 (`router.db`), `chrono`, `dirs`, `regex`; internal: `jev` (Question/Answers), `handoff` (store, format, transcript), `masking::patterns::mask`. **No new crates.**
 - 011-session-handoff: Added `src/handoff/` — manual `/handoff` skill + SessionStart hook that saves and re-injects a structured session state around `/clear` and compaction, no new crates
 - 010-local-text-rewrite: Added `src/rewrite/` — local-LLM text transformation (CLI + MCP + opt-in pipeline stage), no new crates
-- 009-semantic-search-embeddings: Added Rust stable ≥ 1.75 (no nightly) + tantivy 0.22 (BM25), hnsw_rs 0.3.x (ANN index), candle (embedding), tree-sitter 0.24 (chunking), rmcp (MCP server)
 
 
 <!-- MANUAL ADDITIONS START -->

@@ -5,6 +5,26 @@ All notable changes to this project will be documented in this file.
 The format is based on [Keep a Changelog](https://keepachangelog.com/en/1.0.0/),
 and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0.html).
 
+## [Unreleased]
+
+### Added
+
+- **Policy-based model router**: the router now answers six questions in the same single Jev request (`size`, `needs_conversation`, plus the new `nature`, `risk`, `ambiguity` and `verifiability`) and applies an ordered list of rules to the resulting task card. Eight default rules ship in the binary (policy `2026.1`); with no custom rules and no sensitive, design or research trait the route is exactly the size-only route of the previous release. An unreliable `risk` raises the size-only route by one tier; an unreliable `nature` only disables the rules that need it.
+- **`ecotokens router rules [--json]`** lists the rules in evaluation order with their source (`user` or `default`) and the reason an invalid rule was dropped. Custom rules go in `~/.config/ecotokens/router_rules.toml` and are evaluated first; each rule is validated on its own and the policy version becomes `2026.1+u<hash>`.
+- **Private locations and strict mode**: `ecotokens router private add|remove|list|check`, `ecotokens router allow add|remove|list` and `ecotokens router strict on|off|status` (all with `--json`). A private folder, a subfolder, a symlink into it, another worktree of the repository, an unresolvable working directory or an unreadable settings file never reaches Jev, the statistics or the network; the database keeps only a timestamp and the kind. Nothing is written inside a project.
+- **Two read-only helpers**: `router-analyst` (options, trade-offs, sourced research) and `router-reviewer` (verdict from the diff and test output). Their read-only status comes from an explicit `tools` allowlist in the agent file. `ecotokens router on` now writes six agents.
+- **Stopping a loop**: every helper file carries the standing rules (stop after `router_max_attempts` attempts, environment failures are not reasoning failures, ask on contradictory criteria, never raise permissions). `ecotokens router dossier [--json]` writes a masked six-item handoff dossier (goal, constraints, the real `git diff HEAD`, commands, exact errors, discarded hypotheses).
+- **Review and approval** lines in the injected guidance, driven by the matched rule (`review = required|suggested`, `approval = irreversible`).
+- **Outcomes**: `ecotokens router outcome [ID] [--pending] [--success yes|no] [--correction none|minor|major] [--regressions N]`. Cost, tokens, helper time and the number of helper runs are measured at `SessionEnd` from the session transcript; the judgment is manual. A `SessionStart` line reminds of unjudged jobs once. New hook entry point `ecotokens hook-router-session start|end`, installed by `router on`.
+- **New settings**: `router_private`, `router_allowed`, `router_strict`, `router_max_attempts`, `router_card_min_confidence`, `router_ambiguity_min_prob`, `router_verifiable_min_prob`.
+
+### Changed
+
+- **`router status --json`** gains the additive keys `private_skipped`, `not_allowed_skipped`, `private_locations`, `allowed_locations`, `strict`, `session_hooks_installed`, `policy_version`, `by_route`, `by_category`, `by_policy` and `outcomes`; `summary` gains `by_policy`. Existing keys keep their meaning. `router status` counts `private`, `not_allowed` and `no_route` decisions separately, and rows written before this release show as the `legacy-size` policy.
+- **`router try --json`** gains `message_index`, `card` (with the reliability of each answer), `rule`, `rule_source`, `route`, `raised` and `policy_version`; `agent` now names the routed helper. In a private or not-allowed folder it reports the gate and asks nobody.
+- **`router.db`** gains ten nullable columns on `router_decisions` and a `router_outcomes` table, migrated additively on first use (tolerant of concurrent first opens). Older binaries keep working.
+- **`ecotokens doctor`** reports the helper agents, the session hooks, the custom rules file and the location counts of the router.
+
 ## [0.30.1] - 2026-10-16
 
 ### Fixed
