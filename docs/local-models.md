@@ -86,8 +86,9 @@ and `ecotokens gain --json` - never hidden inside the normal savings figures.
 
 ### Configuration
 
-Update `~/.config/ecotokens/config.json` directly, or pass `--model`/`--save-diff`/`--no-save-diff`
-per invocation:
+Set the model with `ecotokens config --rewrite-model <MODEL>` (an empty string resets it), update
+`~/.config/ecotokens/config.json` directly, or pass `--model`/`--save-diff`/`--no-save-diff` per
+invocation:
 
 ```json
 {
@@ -107,6 +108,6 @@ per invocation:
 }
 ```
 
-`rewrite_model` falls back to `ai_summary_model`, then to `llama3.2:3b`, and `rewrite_url` must
+`rewrite_model` falls back to `ai_summary_model`, then to `llama3.2:latest`, and `rewrite_url` must
 resolve to localhost - the endpoint is validated before any request is issued, and text is never
 transmitted anywhere else unless you opt in to [Jev judgments](jev-integration.md).

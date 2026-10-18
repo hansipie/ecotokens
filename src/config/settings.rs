@@ -2,6 +2,9 @@ use serde::{Deserialize, Serialize};
 use std::collections::HashMap;
 use std::path::{Path, PathBuf};
 
+/// Ollama model used by AI summaries and `rewrite` when no model is configured.
+pub const DEFAULT_LOCAL_MODEL: &str = "llama3.2:latest";
+
 #[derive(Debug, Clone, Serialize, PartialEq)]
 #[serde(rename_all = "snake_case", tag = "type")]
 pub enum EmbedProvider {

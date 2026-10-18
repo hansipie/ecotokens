@@ -290,3 +290,31 @@ fn test_gain_json_cost_is_null_without_price() {
     let v: Value = serde_json::from_slice(&out.stdout).expect("gain --json output");
     assert!(v["cost_avoided_usd"].is_null());
 }
+
+#[test]
+fn test_config_rewrite_model_set_and_reset() {
+    let dir = tempdir().unwrap();
+    let run = |args: &[&str]| {
+        Command::new(ecotokens())
+            .arg("config")
+            .args(args)
+            .env("XDG_CONFIG_HOME", dir.path())
+            .output()
+            .expect("failed to run ecotokens config")
+    };
+    let rewrite_model = |out: &std::process::Output| -> Value {
+        let v: Value = serde_json::from_slice(&out.stdout).expect("config --json output");
+        v["rewrite_model"].clone()
+    };
+
+    assert_eq!(rewrite_model(&run(&["--json"])), Value::Null);
+
+    let out = run(&["--rewrite-model", "llama3.2:latest"]);
+    assert!(out.status.success());
+    assert!(String::from_utf8_lossy(&out.stderr).contains("settings updated"));
+    assert_eq!(rewrite_model(&run(&["--json"])), "llama3.2:latest");
+
+    let out = run(&["--rewrite-model", ""]);
+    assert!(out.status.success());
+    assert_eq!(rewrite_model(&run(&["--json"])), Value::Null);
+}
