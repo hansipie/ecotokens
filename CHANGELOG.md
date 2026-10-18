@@ -18,8 +18,11 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 - **Outcomes**: `ecotokens router outcome [ID] [--pending] [--success yes|no] [--correction none|minor|major] [--regressions N]`. Cost, tokens, helper time and the number of helper runs are measured at `SessionEnd` from the session transcript; the judgment is manual. A `SessionStart` line reminds of unjudged jobs once. New hook entry point `ecotokens hook-router-session start|end`, installed by `router on`.
 - **New settings**: `router_private`, `router_allowed`, `router_strict`, `router_max_attempts`, `router_card_min_confidence`, `router_ambiguity_min_prob`, `router_verifiable_min_prob`.
 
+- **`ecotokens config --rewrite-model <MODEL>`** sets the model used by `ecotokens rewrite`, the `ecotokens_rewrite` MCP tool and the rewrite pipeline stage, without editing `config.json` by hand. An empty value resets it. `ecotokens config` now prints the `rewrite_model` line.
+
 ### Changed
 
+- **Default local model**: when neither `ai_summary_model` nor `rewrite_model` is set, AI summaries and `rewrite` now fall back to `llama3.2:latest` instead of `llama3.2:3b`, so the default matches the tag `ollama pull llama3.2` installs. A model set explicitly keeps being used as is. The fallback lives in one constant, `DEFAULT_LOCAL_MODEL`.
 - **`router status --json`** gains the additive keys `private_skipped`, `not_allowed_skipped`, `private_locations`, `allowed_locations`, `strict`, `session_hooks_installed`, `policy_version`, `by_route`, `by_category`, `by_policy` and `outcomes`; `summary` gains `by_policy`. Existing keys keep their meaning. `router status` counts `private`, `not_allowed` and `no_route` decisions separately, and rows written before this release show as the `legacy-size` policy.
 - **`router try --json`** gains `message_index`, `card` (with the reliability of each answer), `rule`, `rule_source`, `route`, `raised` and `policy_version`; `agent` now names the routed helper. In a private or not-allowed folder it reports the gate and asks nobody.
 - **`router.db`** gains ten nullable columns on `router_decisions` and a `router_outcomes` table, migrated additively on first use (tolerant of concurrent first opens). Older binaries keep working.

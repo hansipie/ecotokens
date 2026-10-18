@@ -5,7 +5,7 @@
 //!
 //! ```bash
 //! ollama serve
-//! ollama pull llama3.2:3b   # or set ECOTOKENS_TEST_MODEL to a pulled tag
+//! ollama pull llama3.2:latest   # or set ECOTOKENS_TEST_MODEL to a pulled tag
 //! cargo test --test rewrite_live_test -- --ignored
 //! ```
 
@@ -22,7 +22,7 @@ use std::process::{Command, Stdio};
 use tempfile::tempdir;
 
 fn live_model() -> String {
-    std::env::var("ECOTOKENS_TEST_MODEL").unwrap_or_else(|_| "llama3.2:3b".to_string())
+    std::env::var("ECOTOKENS_TEST_MODEL").unwrap_or_else(|_| "llama3.2:latest".to_string())
 }
 
 /// T094: the CLI, driven by the real `OllamaProvider`, round-trips a

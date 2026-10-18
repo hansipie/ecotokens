@@ -20,7 +20,7 @@ price_output_usd_per_mtok : unset
 exclusions            : []
 embed_provider        : candle model=sentence-transformers/all-MiniLM-L6-v2
 ai_summary_enabled    : false
-ai_summary_model      : llama3.2:3b (default)
+ai_summary_model      : llama3.2:latest (default)
 ai_summary_url        : http://localhost:11434 (default)
 abbreviations_enabled : false
 ```

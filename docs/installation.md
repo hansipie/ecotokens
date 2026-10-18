@@ -159,7 +159,7 @@ ecotokens install --target all
 Enable AI-powered output compression via Ollama at install time:
 
 ```bash
-ecotokens install --ai-summary                          # use default model (llama3.2:3b)
+ecotokens install --ai-summary                          # use default model (llama3.2:latest)
 ecotokens install --ai-summary-model qwen2.5:3b         # specify model (implies --ai-summary)
 ```
 

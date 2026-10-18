@@ -209,7 +209,7 @@ fn rewrite_tool_impl(params: RewriteParams) -> String {
         .clone()
         .or_else(|| settings.rewrite_model.clone())
         .or_else(|| settings.ai_summary_model.clone())
-        .unwrap_or_else(|| "llama3.2:3b".to_string());
+        .unwrap_or_else(|| crate::config::settings::DEFAULT_LOCAL_MODEL.to_string());
 
     let provider = match crate::rewrite::provider::OllamaProvider::new(
         settings.rewrite_url.as_deref(),

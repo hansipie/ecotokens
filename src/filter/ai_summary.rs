@@ -70,7 +70,7 @@ pub fn try_ai_summary(output: &str, settings: &Settings) -> Result<String, Strin
         .map_err(|e| format!("Failed to build HTTP client: {}", e))?;
 
     let payload = serde_json::json!({
-        "model": settings.ai_summary_model.as_deref().unwrap_or("llama3.2:3b"),
+        "model": settings.ai_summary_model.as_deref().unwrap_or(crate::config::settings::DEFAULT_LOCAL_MODEL),
         "prompt": prompt,
         "stream": false,
         "options": {

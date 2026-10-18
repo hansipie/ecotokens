@@ -204,6 +204,9 @@ enum Commands {
         /// Base URL for the Ollama embedding API (e.g. http://localhost:11434)
         #[arg(long)]
         embed_url: Option<String>,
+        /// Model used by `ecotokens rewrite` and the rewrite pipeline stage (empty string resets it)
+        #[arg(long, value_name = "MODEL")]
+        rewrite_model: Option<String>,
     },
     /// Diagnose common ecotokens setup issues without changing files
     Doctor {
@@ -2258,6 +2261,7 @@ fn cmd_config(
     embed_provider: Option<String>,
     embed_model: Option<String>,
     embed_url: Option<String>,
+    rewrite_model: Option<String>,
 ) {
     use config::settings::EmbedProvider;
 
@@ -2291,6 +2295,12 @@ fn cmd_config(
 
     if let Some(v) = jev_line_select {
         settings.jev_line_select_enabled = v;
+        dirty = true;
+    }
+
+    if let Some(m) = rewrite_model {
+        let m = m.trim();
+        settings.rewrite_model = (!m.is_empty()).then(|| m.to_string());
         dirty = true;
     }
 
@@ -2382,7 +2392,7 @@ fn cmd_config(
             settings
                 .ai_summary_model
                 .as_deref()
-                .unwrap_or("llama3.2:3b (default)")
+                .unwrap_or("llama3.2:latest (default)")
         );
         println!(
             "ai_summary_url        : {}",
@@ -2390,6 +2400,13 @@ fn cmd_config(
                 .ai_summary_url
                 .as_deref()
                 .unwrap_or("http://localhost:11434 (default)")
+        );
+        println!(
+            "rewrite_model         : {}",
+            settings
+                .rewrite_model
+                .as_deref()
+                .unwrap_or("ai_summary_model, then llama3.2:latest (default)")
         );
         println!("abbreviations_enabled : {}", settings.abbreviations_enabled);
         println!("jev_enabled           : {}", settings.jev_enabled);
@@ -3935,7 +3952,7 @@ fn cmd_rewrite(
     let model_name = model
         .or_else(|| settings.rewrite_model.clone())
         .or_else(|| settings.ai_summary_model.clone())
-        .unwrap_or_else(|| "llama3.2:3b".to_string());
+        .unwrap_or_else(|| config::settings::DEFAULT_LOCAL_MODEL.to_string());
 
     let provider = match rewrite::provider::OllamaProvider::new(
         settings.rewrite_url.as_deref(),
@@ -4156,6 +4173,7 @@ fn main() {
             embed_provider,
             embed_model,
             embed_url,
+            rewrite_model,
         } => cmd_config(
             json,
             debug,
@@ -4165,6 +4183,7 @@ fn main() {
             embed_provider,
             embed_model,
             embed_url,
+            rewrite_model,
         ),
         Commands::Doctor { json } => cmd_doctor(json),
         Commands::Index {
