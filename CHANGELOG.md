@@ -532,7 +532,7 @@ Broad code-review hardening pass across the codebase. All fixes ship with `cargo
 ### Docs
 
 - Secret redaction reference table moved from README to [`docs/secret-patterns.md`](docs/secret-patterns.md)
-- Added [`docs/self-interference-analysis.md`](docs/self-interference-analysis.md) — analysis of the race condition between ecotokens hooks and the pre-commit hook when developing ecotokens itself
+- Added `docs/self-interference-analysis.md` (since moved out of the repository) — analysis of the race condition between ecotokens hooks and the pre-commit hook when developing ecotokens itself
 
 ## [0.11.0] - 2026-04-01
 
