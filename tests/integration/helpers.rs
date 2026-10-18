@@ -1,3 +1,8 @@
+#[path = "../helpers.rs"]
+mod base;
+
+/// Path of the `ecotokens` binary under test, with the config dir isolated
+/// (see `tests/helpers.rs`).
 pub fn ecotokens() -> String {
-    env!("CARGO_BIN_EXE_ecotokens").to_string()
+    base::ecotokens_bin()
 }

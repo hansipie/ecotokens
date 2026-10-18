@@ -59,10 +59,25 @@ fn embed_text_ollama(text: &str, url: &str, model: &str) -> Option<Vec<f32>> {
         guard.clone()
     })?;
 
-    let payload = serde_json::json!({ "model": model, "prompt": text });
-    let endpoint = format!("{}/api/embeddings", url.trim_end_matches('/'));
-
-    let response = client.post(&endpoint).json(&payload).send().ok()?;
+    let base = url.trim_end_matches('/');
+    // `/api/embed` with `truncate` cuts an input that exceeds the model's context
+    // instead of failing; the legacy `/api/embeddings` answers HTTP 500 for it
+    // ("exceeds the available context size"), which left large chunks unindexed.
+    let payload = serde_json::json!({ "model": model, "input": text, "truncate": true });
+    let mut response = client
+        .post(format!("{base}/api/embed"))
+        .json(&payload)
+        .send()
+        .ok()?;
+    if response.status() == reqwest::StatusCode::NOT_FOUND {
+        // Ollama older than 0.1.26 has no `/api/embed`.
+        let legacy = serde_json::json!({ "model": model, "prompt": text });
+        response = client
+            .post(format!("{base}/api/embeddings"))
+            .json(&legacy)
+            .send()
+            .ok()?;
+    }
     if !response.status().is_success() {
         eprintln!(
             "ecotokens: ollama embedding failed: HTTP {}",
@@ -72,7 +87,20 @@ fn embed_text_ollama(text: &str, url: &str, model: &str) -> Option<Vec<f32>> {
     }
 
     let json: serde_json::Value = response.json().ok()?;
-    let raw: Vec<f32> = serde_json::from_value(json["embedding"].clone()).ok()?;
+    parse_ollama_embedding(&json)
+}
+
+/// Extracts the vector from an Ollama embedding response and L2-normalises it.
+///
+/// Reads `/api/embed` (`{"embeddings": [[...]]}`) as well as the legacy
+/// `/api/embeddings` (`{"embedding": [...]}`). Returns `None` for a missing,
+/// empty or all-zero vector.
+pub fn parse_ollama_embedding(json: &serde_json::Value) -> Option<Vec<f32>> {
+    let value = json["embeddings"]
+        .get(0)
+        .filter(|v| v.is_array())
+        .unwrap_or(&json["embedding"]);
+    let raw: Vec<f32> = serde_json::from_value(value.clone()).ok()?;
     if raw.is_empty() {
         return None;
     }
