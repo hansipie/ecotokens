@@ -2317,13 +2317,20 @@ fn cmd_config(
                     .unwrap_or_else(|| config::settings::DEFAULT_CANDLE_EMBED_MODEL.to_string()),
             },
             "none" => EmbedProvider::None,
-            "ollama" => EmbedProvider::Ollama {
-                url: embed_url
-                    .clone()
-                    .unwrap_or_else(|| "http://localhost:11434".to_string()),
-                model: embed_model
-                    .clone()
-                    .unwrap_or_else(|| config::settings::DEFAULT_OLLAMA_EMBED_MODEL.to_string()),
+            "ollama" => match embed_model.as_deref().filter(|m| !m.trim().is_empty()) {
+                Some(model) => EmbedProvider::Ollama {
+                    url: embed_url
+                        .clone()
+                        .unwrap_or_else(|| "http://localhost:11434".to_string()),
+                    model: model.to_string(),
+                },
+                None => {
+                    eprintln!(
+                        "warning: no --embed-model given for ollama; falling back to candle ({})",
+                        config::settings::DEFAULT_CANDLE_EMBED_MODEL
+                    );
+                    EmbedProvider::default()
+                }
             },
             other => {
                 eprintln!(

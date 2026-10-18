@@ -245,7 +245,7 @@ fn handoff_settings_round_trip() {
 }
 
 #[test]
-fn embed_models_without_explicit_model_default_to_all_minilm() {
+fn embed_provider_without_model_falls_back_to_candle_all_minilm() {
     let candle: Settings =
         serde_json::from_str(r#"{"embed_provider": {"type": "candle"}}"#).unwrap();
     assert_eq!(
@@ -257,11 +257,10 @@ fn embed_models_without_explicit_model_default_to_all_minilm() {
 
     let ollama: Settings =
         serde_json::from_str(r#"{"embed_provider": {"type": "ollama"}}"#).unwrap();
-    assert_eq!(
-        ollama.embed_provider,
-        EmbedProvider::Ollama {
-            url: "http://localhost:11434".to_string(),
-            model: "all-minilm:latest".to_string()
-        }
-    );
+    // An Ollama provider without a model falls back to Candle's all-MiniLM-L6-v2.
+    assert_eq!(ollama.embed_provider, candle.embed_provider);
+
+    let blank: Settings =
+        serde_json::from_str(r#"{"embed_provider": {"type": "ollama", "model": " "}}"#).unwrap();
+    assert_eq!(blank.embed_provider, candle.embed_provider);
 }

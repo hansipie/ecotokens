@@ -318,3 +318,40 @@ fn test_config_rewrite_model_set_and_reset() {
     assert!(out.status.success());
     assert_eq!(rewrite_model(&run(&["--json"])), Value::Null);
 }
+
+#[test]
+fn test_config_ollama_without_model_falls_back_to_candle() {
+    let dir = tempdir().unwrap();
+    let run = |args: &[&str]| {
+        Command::new(ecotokens())
+            .arg("config")
+            .args(args)
+            .env("XDG_CONFIG_HOME", dir.path())
+            .output()
+            .expect("failed to run ecotokens config")
+    };
+
+    let out = run(&["--embed-provider", "ollama"]);
+    assert!(out.status.success());
+    assert!(String::from_utf8_lossy(&out.stderr).contains("falling back to candle"));
+
+    let out = run(&["--json"]);
+    let v: Value = serde_json::from_slice(&out.stdout).expect("config --json output");
+    assert_eq!(v["embed_provider"]["type"], "candle");
+    assert_eq!(
+        v["embed_provider"]["model"],
+        "sentence-transformers/all-MiniLM-L6-v2"
+    );
+
+    let out = run(&[
+        "--embed-provider",
+        "ollama",
+        "--embed-model",
+        "qwen3-embedding:latest",
+    ]);
+    assert!(out.status.success());
+    let out = run(&["--json"]);
+    let v: Value = serde_json::from_slice(&out.stdout).expect("config --json output");
+    assert_eq!(v["embed_provider"]["type"], "ollama");
+    assert_eq!(v["embed_provider"]["model"], "qwen3-embedding:latest");
+}

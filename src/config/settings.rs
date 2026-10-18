@@ -8,10 +8,6 @@ pub const DEFAULT_LOCAL_MODEL: &str = "llama3.2:latest";
 /// all-MiniLM-L6-v2 as a Candle (HuggingFace) model id: the default embedding model.
 pub const DEFAULT_CANDLE_EMBED_MODEL: &str = "sentence-transformers/all-MiniLM-L6-v2";
 
-/// all-MiniLM-L6-v2 under its Ollama name: the embedding model used when an Ollama
-/// provider is configured without a model.
-pub const DEFAULT_OLLAMA_EMBED_MODEL: &str = "all-minilm:latest";
-
 #[derive(Debug, Clone, Serialize, PartialEq)]
 #[serde(rename_all = "snake_case", tag = "type")]
 pub enum EmbedProvider {
@@ -22,7 +18,8 @@ pub enum EmbedProvider {
     },
     /// Disabled — embed_text returns None, search falls back to BM25 only.
     None,
-    /// Ollama HTTP embedding API (default model: all-minilm, e.g. also qwen3-embedding:latest).
+    /// Ollama HTTP embedding API (e.g. qwen3-embedding:latest). An Ollama provider without a
+    /// model is not valid: it falls back to Candle's all-MiniLM-L6-v2.
     Ollama { url: String, model: String },
     /// Catch-all for legacy configs (ollama, lm_studio) — migrated to Candle at load time.
     Legacy,
@@ -50,12 +47,17 @@ impl<'de> serde::Deserialize<'de> for EmbedProvider {
                     .and_then(|v| v.as_str())
                     .unwrap_or("http://localhost:11434")
                     .to_string();
-                let model = value
+                match value
                     .get("model")
                     .and_then(|v| v.as_str())
-                    .unwrap_or(DEFAULT_OLLAMA_EMBED_MODEL)
-                    .to_string();
-                Ok(EmbedProvider::Ollama { url, model })
+                    .filter(|m| !m.trim().is_empty())
+                {
+                    Some(model) => Ok(EmbedProvider::Ollama {
+                        url,
+                        model: model.to_string(),
+                    }),
+                    None => Ok(EmbedProvider::default()),
+                }
             }
             // Unknown type tag or missing type field (old externally-tagged format) → Legacy
             _ => Ok(EmbedProvider::Legacy),
