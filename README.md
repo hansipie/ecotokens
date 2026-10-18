@@ -217,7 +217,7 @@ command or a message.
 - Rust ≥ 1.75 (stable)
 - One or more of: Claude Code (with hook support), Codex, Hermes, Pi ≥ 0.62.0, Gemini CLI ≥ 0.1.0, Qwen Code, OpenCode
 - Internet access on first use (Candle downloads `all-MiniLM-L6-v2` ~90 MB from HuggingFace Hub; cached locally after that)
-- Ollama (optional, for AI summarization and/or Ollama-backed embeddings)
+- Ollama (optional, for AI summarization, [text rewrite](docs/local-models.md) and/or Ollama-backed embeddings), running locally with at least the `llama3.2:latest` model pulled (`ollama pull llama3.2`). It is the default model of AI summaries and rewrite; set `ai_summary_model` / `rewrite_model` to use another one. When Ollama is the embedding provider, `all-minilm` (the Ollama build of all-MiniLM-L6-v2) is the default embedding model (`ollama pull all-minilm`)
 - A [TypeSafe](https://docs.typesafe.ai) API key in the `TYPESAFE_API_KEY` environment variable (optional, for [Jev judgments](docs/jev-integration.md) and the [model router](docs/model-router.md)); without it, every Jev use falls back to the existing heuristic
 
 ## Contributing

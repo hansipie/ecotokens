@@ -5,6 +5,13 @@ use std::path::{Path, PathBuf};
 /// Ollama model used by AI summaries and `rewrite` when no model is configured.
 pub const DEFAULT_LOCAL_MODEL: &str = "llama3.2:latest";
 
+/// all-MiniLM-L6-v2 as a Candle (HuggingFace) model id: the default embedding model.
+pub const DEFAULT_CANDLE_EMBED_MODEL: &str = "sentence-transformers/all-MiniLM-L6-v2";
+
+/// all-MiniLM-L6-v2 under its Ollama name: the embedding model used when an Ollama
+/// provider is configured without a model.
+pub const DEFAULT_OLLAMA_EMBED_MODEL: &str = "all-minilm:latest";
+
 #[derive(Debug, Clone, Serialize, PartialEq)]
 #[serde(rename_all = "snake_case", tag = "type")]
 pub enum EmbedProvider {
@@ -15,7 +22,7 @@ pub enum EmbedProvider {
     },
     /// Disabled — embed_text returns None, search falls back to BM25 only.
     None,
-    /// Ollama HTTP embedding API (e.g. qwen3-embedding:latest).
+    /// Ollama HTTP embedding API (default model: all-minilm, e.g. also qwen3-embedding:latest).
     Ollama { url: String, model: String },
     /// Catch-all for legacy configs (ollama, lm_studio) — migrated to Candle at load time.
     Legacy,
@@ -32,7 +39,7 @@ impl<'de> serde::Deserialize<'de> for EmbedProvider {
                 let model = value
                     .get("model")
                     .and_then(|v| v.as_str())
-                    .unwrap_or("sentence-transformers/all-MiniLM-L6-v2")
+                    .unwrap_or(DEFAULT_CANDLE_EMBED_MODEL)
                     .to_string();
                 Ok(EmbedProvider::Candle { model })
             }
@@ -46,7 +53,7 @@ impl<'de> serde::Deserialize<'de> for EmbedProvider {
                 let model = value
                     .get("model")
                     .and_then(|v| v.as_str())
-                    .unwrap_or("qwen3-embedding:latest")
+                    .unwrap_or(DEFAULT_OLLAMA_EMBED_MODEL)
                     .to_string();
                 Ok(EmbedProvider::Ollama { url, model })
             }
@@ -65,7 +72,7 @@ impl Default for EmbedProvider {
 }
 
 fn default_candle_model() -> String {
-    "sentence-transformers/all-MiniLM-L6-v2".to_string()
+    DEFAULT_CANDLE_EMBED_MODEL.to_string()
 }
 
 #[derive(Debug, Clone, Serialize, Deserialize)]

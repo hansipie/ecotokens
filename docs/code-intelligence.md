@@ -129,6 +129,8 @@ ecotokens search "your query"
 
 **Ollama** — delegates embedding to a running Ollama instance. Supports any Ollama embedding model, including large-dimension models like `qwen3-embedding:latest` (2560 dim).
 
+Without `--embed-model`, Ollama uses `all-minilm:latest`, the Ollama build of the same all-MiniLM-L6-v2 model as the Candle default (`ollama pull all-minilm`).
+
 ```bash
 # Switch to Ollama with qwen3-embedding (Ollama must be running)
 ecotokens config --embed-provider ollama --embed-model qwen3-embedding:latest

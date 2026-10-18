@@ -243,3 +243,25 @@ fn handoff_settings_round_trip() {
     assert_eq!(back.handoff_retention_days, 10);
     assert_eq!(back.handoff_consumed_retention_hours, 12);
 }
+
+#[test]
+fn embed_models_without_explicit_model_default_to_all_minilm() {
+    let candle: Settings =
+        serde_json::from_str(r#"{"embed_provider": {"type": "candle"}}"#).unwrap();
+    assert_eq!(
+        candle.embed_provider,
+        EmbedProvider::Candle {
+            model: "sentence-transformers/all-MiniLM-L6-v2".to_string()
+        }
+    );
+
+    let ollama: Settings =
+        serde_json::from_str(r#"{"embed_provider": {"type": "ollama"}}"#).unwrap();
+    assert_eq!(
+        ollama.embed_provider,
+        EmbedProvider::Ollama {
+            url: "http://localhost:11434".to_string(),
+            model: "all-minilm:latest".to_string()
+        }
+    );
+}
