@@ -38,6 +38,11 @@ pub struct IndexStats {
     pub symbolic_chunk_count: u32,
     pub vector_count: u32,
     pub embed_model: Option<String>,
+    /// Chunks of this run for which the configured embedding provider returned
+    /// nothing (provider down, model missing, ...). They are still searchable
+    /// through BM25. Always 0 when no provider is configured.
+    #[serde(default)]
+    pub embed_failed_count: u32,
 }
 
 /// A single indexable unit — either a tree-sitter symbol or a 50-line window.
@@ -316,6 +321,12 @@ pub fn index_directory(opts: IndexOptions) -> tantivy::Result<IndexStats> {
     let mut file_count = 0u32;
     let mut chunk_count = 0u32;
     let mut symbolic_chunk_count = 0u32;
+    let mut embed_failed_count = 0u32;
+    let embeds = matches!(
+        opts.embed_provider,
+        crate::config::settings::EmbedProvider::Candle { .. }
+            | crate::config::settings::EmbedProvider::Ollama { .. }
+    );
     // Seed with existing embeddings so unchanged chunks keep their vectors.
     // Prefer hnsw_index.bin (current format); fall back to legacy embeddings.json.
     let mut embeddings: HashMap<String, Vec<f32>> = if opts.reset {
@@ -422,6 +433,8 @@ pub fn index_directory(opts: IndexOptions) -> tantivy::Result<IndexStats> {
             if !embeddings.contains_key(&chunk.id) {
                 if let Some(vec) = embed_text(&chunk.content, &opts.embed_provider) {
                     embeddings.insert(chunk.id.clone(), vec);
+                } else if embeds {
+                    embed_failed_count += 1;
                 }
             }
         }
@@ -503,6 +516,7 @@ pub fn index_directory(opts: IndexOptions) -> tantivy::Result<IndexStats> {
         symbolic_chunk_count,
         vector_count: final_vector_count,
         embed_model: final_embed_model,
+        embed_failed_count,
     })
 }
 

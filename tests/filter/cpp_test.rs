@@ -2,9 +2,9 @@ use ecotokens::filter::cpp::filter_cpp;
 use std::process::Command;
 use tempfile::TempDir;
 
-fn ecotokens() -> String {
-    env!("CARGO_BIN_EXE_ecotokens").to_string()
-}
+#[path = "../helpers.rs"]
+mod helpers;
+use helpers::ecotokens_bin as ecotokens;
 
 #[test]
 fn compiler_errors_are_preserved() {

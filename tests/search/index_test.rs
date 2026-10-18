@@ -329,3 +329,35 @@ fn incremental_update_with_manifest_keeps_vector_count_stable() {
     assert_eq!(stats.vector_count, 1);
     assert!(embeddings.contains_key("main.rs::keep#fn"));
 }
+
+#[test]
+fn chunks_the_embedding_provider_cannot_embed_are_counted() {
+    use ecotokens::config::settings::EmbedProvider;
+
+    let src = TempDir::new().unwrap();
+    make_fixture(&src);
+    let index = |embed_provider| {
+        let idx = TempDir::new().unwrap();
+        index_directory(IndexOptions {
+            reset: true,
+            path: src.path().to_path_buf(),
+            index_dir: idx.path().to_path_buf(),
+            progress: None,
+            embed_provider,
+            log_tx: None,
+        })
+        .unwrap()
+    };
+
+    // Nothing listens on port 1: every embedding request fails.
+    let stats = index(EmbedProvider::Ollama {
+        url: "http://127.0.0.1:1".to_string(),
+        model: "m".to_string(),
+    });
+    assert!(stats.chunk_count > 0);
+    assert_eq!(stats.vector_count, 0);
+    assert_eq!(stats.embed_failed_count, stats.chunk_count);
+
+    // Without a provider there is nothing to fail.
+    assert_eq!(index(EmbedProvider::None).embed_failed_count, 0);
+}

@@ -29,6 +29,13 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 - **`router.db`** gains ten nullable columns on `router_decisions` and a `router_outcomes` table, migrated additively on first use (tolerant of concurrent first opens). Older binaries keep working.
 - **`ecotokens doctor`** reports the helper agents, the session hooks, the custom rules file and the location counts of the router.
 
+### Fixed
+
+- **Large chunks left without a vector (Ollama)**: embeddings now go through `/api/embed` with `truncate: true`, so a chunk longer than the model's context is cut instead of rejected (the legacy `/api/embeddings` answered HTTP 500 "exceeds the available context size" and the chunk was silently indexed without a vector). Ollama older than 0.1.26, which has no `/api/embed`, still falls back to `/api/embeddings`.
+- **Embedding failures visible in the watch log**: a re-indexation that could not embed some chunks is now reported as `re-indexed (N chunks without vector)` and written to the watch log even when `debug` is off, as errors are. `IndexStats` gains `embed_failed_count`.
+- **Watch logs no longer grow without bound**: "ignored" events (every file touched under `target/` or `.git/`, 99.6% of a 177 MB log) are no longer written, and a watch log over 10 MiB is rotated to `<name>.log.1`. An existing oversized log is rotated on its next write. The "ignored" count is still shown in the watch TUI.
+- **Tests no longer write to the real config directory**: the test helpers point `XDG_CONFIG_HOME` at a throwaway directory, so spawned binaries stop leaving their config, metrics, debug log and index entries in `~/.config/ecotokens`.
+
 ## [0.30.1] - 2026-10-16
 
 ### Fixed

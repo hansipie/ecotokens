@@ -11,7 +11,8 @@ use std::time::{Duration, Instant};
 pub struct WatchEvent {
     pub path: PathBuf,
     pub timestamp: String,
-    /// "re-indexed", "ignored", ou "error: <message>"
+    /// "re-indexed" (suivi de "(N chunks without vector)" si l'embedding a échoué),
+    /// "ignored", ou "error: <message>"
     pub status: String,
 }
 
@@ -161,7 +162,106 @@ fn run_full_index(watch_path: &Path, index_dir: &Path, embed_provider: &EmbedPro
     };
 
     match index_directory(opts) {
+        Ok(stats) if stats.embed_failed_count > 0 => format!(
+            "re-indexed ({} chunks without vector)",
+            stats.embed_failed_count
+        ),
         Ok(_) => "re-indexed".to_string(),
         Err(e) => format!("error: {e}"),
+    }
+}
+
+/// Size above which a watch log is rotated to `<name>.log.1` (one generation kept).
+const WATCH_LOG_MAX_BYTES: u64 = 10 * 1024 * 1024;
+
+/// The line to write to the watch log for `event`, or `None` for an event that
+/// carries no information. "ignored" events are skipped: they are the bulk of a
+/// log (a `cargo build` fires one per file under `target/`) and only say that a
+/// file was skipped on purpose.
+pub fn watch_log_line(event: &WatchEvent) -> Option<String> {
+    if event.status == "ignored" {
+        return None;
+    }
+    Some(format!(
+        "[{}] {} {}\n",
+        event.timestamp,
+        event.path.display(),
+        event.status
+    ))
+}
+
+/// Appends `line` to the watch log at `path`, rotating the log first when it
+/// exceeds [`WATCH_LOG_MAX_BYTES`] so a long-running watcher cannot fill the disk.
+pub fn append_watch_log(path: &Path, line: &str) {
+    append_watch_log_capped(path, line, WATCH_LOG_MAX_BYTES);
+}
+
+fn append_watch_log_capped(path: &Path, line: &str, max_bytes: u64) {
+    use std::io::Write;
+    if std::fs::metadata(path).is_ok_and(|m| m.len() > max_bytes) {
+        let mut rotated = path.as_os_str().to_owned();
+        rotated.push(".1");
+        let _ = std::fs::rename(path, rotated);
+    }
+    let _ = std::fs::OpenOptions::new()
+        .create(true)
+        .append(true)
+        .open(path)
+        .and_then(|mut f| f.write_all(line.as_bytes()));
+}
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+
+    fn event(status: &str) -> WatchEvent {
+        WatchEvent {
+            path: PathBuf::from("/p/target/debug/x.rs"),
+            timestamp: "2026-10-18 12:00:00".to_string(),
+            status: status.to_string(),
+        }
+    }
+
+    #[test]
+    fn ignored_events_are_not_logged() {
+        assert_eq!(watch_log_line(&event("ignored")), None);
+    }
+
+    #[test]
+    fn other_events_are_logged_with_their_status() {
+        assert_eq!(
+            watch_log_line(&event("re-indexed (3 chunks without vector)")).as_deref(),
+            Some(
+                "[2026-10-18 12:00:00] /p/target/debug/x.rs re-indexed (3 chunks without vector)\n"
+            )
+        );
+        assert!(watch_log_line(&event("error: boom")).is_some());
+    }
+
+    #[test]
+    fn log_is_rotated_once_over_the_cap() {
+        let dir = tempfile::tempdir().unwrap();
+        let log = dir.path().join("watch_x.log");
+        append_watch_log_capped(&log, "first line\n", 20);
+        append_watch_log_capped(&log, "second line\n", 20);
+        // 23 bytes > cap 20: the next write starts a fresh file.
+        append_watch_log_capped(&log, "third\n", 20);
+
+        let rotated = dir.path().join("watch_x.log.1");
+        assert_eq!(
+            std::fs::read_to_string(&rotated).unwrap(),
+            "first line\nsecond line\n"
+        );
+        assert_eq!(std::fs::read_to_string(&log).unwrap(), "third\n");
+    }
+
+    #[test]
+    fn log_below_the_cap_is_appended_to() {
+        let dir = tempfile::tempdir().unwrap();
+        let log = dir.path().join("watch_y.log");
+        append_watch_log(&log, "a\n");
+        append_watch_log(&log, "b\n");
+        assert_eq!(std::fs::read_to_string(&log).unwrap(), "a\nb\n");
+        assert!(!dir.path().join("watch_y.log.1").exists());
     }
 }

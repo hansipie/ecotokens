@@ -3187,7 +3187,7 @@ fn cmd_watch(
 
             loop {
                 while let Ok(e) = event_rx.try_recv() {
-                    if e.status == "re-indexed" {
+                    if e.status.starts_with("re-indexed") {
                         watch_stats.reindexed += 1;
                         events.push(e);
                     } else if e.status.starts_with("error") {
@@ -3257,24 +3257,22 @@ fn cmd_watch(
             )
         });
 
-        // Background mode: log events to watch.log (only if debug is enabled)
-        let settings = config::Settings::load();
-        let log_file = if settings.debug {
-            config::SessionStore::load()
-                .log_file_for(&watch_path_str)
-                .map(std::path::PathBuf::from)
-        } else {
-            None
-        };
+        // Background mode: events go to watch.log when debug is enabled; errors and
+        // embedding failures are always logged, otherwise a provider that is down
+        // leaves chunks without a vector with no trace anywhere.
+        let debug = config::Settings::load().debug;
+        let log_file = config::SessionStore::load()
+            .log_file_for(&watch_path_str)
+            .map(std::path::PathBuf::from);
 
         while let Ok(e) = event_rx.recv() {
+            let is_problem = e.status.starts_with("error") || e.status.contains("without vector");
             if let Some(ref path) = log_file {
-                let line = format!("[{}] {} {}\n", e.timestamp, e.path.display(), e.status);
-                let _ = std::fs::OpenOptions::new()
-                    .create(true)
-                    .append(true)
-                    .open(path)
-                    .and_then(|mut f| std::io::Write::write_all(&mut f, line.as_bytes()));
+                if debug || is_problem {
+                    if let Some(line) = daemon::watcher::watch_log_line(&e) {
+                        daemon::watcher::append_watch_log(path, &line);
+                    }
+                }
             }
         }
 
