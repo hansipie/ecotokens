@@ -8,7 +8,7 @@ use ratatui::{
 };
 use similar::{ChangeTag, TextDiff};
 
-use crate::metrics::report::Report;
+use crate::metrics::report::{Report, MAIN_SESSION_BUCKET};
 use crate::metrics::store::Interception;
 
 #[derive(Clone, Copy, Default)]
@@ -349,6 +349,35 @@ fn render_stats(
         .total_tokens_before
         .saturating_sub(report.total_tokens_after);
     let since = since_days(report, items);
+    // Savings made inside Claude Code subagents, shown only when there are any.
+    let subagents: Vec<Span> = {
+        let (runs, saved) = report
+            .by_subagent
+            .iter()
+            .filter(|(k, _)| k.as_str() != MAIN_SESSION_BUCKET)
+            .fold((0u32, 0u64), |(r, s), (_, st)| {
+                (
+                    r + st.count,
+                    s + st.tokens_before.saturating_sub(st.tokens_after),
+                )
+            });
+        if runs == 0 {
+            Vec::new()
+        } else {
+            vec![
+                Span::styled("   Subagents: ", Style::default().fg(Color::Cyan)),
+                Span::raw(format!("{} saved in {runs} runs", fmt_tok(saved))),
+            ]
+        }
+    };
+    let mut cost_line = vec![
+        Span::styled("Cost avoided: ", Style::default().fg(Color::Cyan)),
+        Span::raw(match report.cost_avoided_usd {
+            Some(cost) => format!("${cost:.4} USD"),
+            None => "n/a (run: ecotokens gain price --input <usd/Mtok>)".to_string(),
+        }),
+    ];
+    cost_line.extend(subagents);
     let text = vec![
         Line::from(vec![
             Span::styled("Interceptions: ", Style::default().fg(Color::Cyan)),
@@ -362,13 +391,7 @@ fn render_stats(
             Span::styled("Savings: ", Style::default().fg(Color::Cyan)),
             Span::raw(format!("{:.1}%", report.total_savings_pct)),
         ]),
-        Line::from(vec![
-            Span::styled("Cost avoided: ", Style::default().fg(Color::Cyan)),
-            Span::raw(match report.cost_avoided_usd {
-                Some(cost) => format!("${cost:.4} USD"),
-                None => "n/a (run: ecotokens gain price --input <usd/Mtok>)".to_string(),
-            }),
-        ]),
+        Line::from(cost_line),
     ];
     let text = if report.rewrite_overhead_tokens > 0 {
         let mut text = text;

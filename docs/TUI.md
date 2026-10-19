@@ -50,7 +50,7 @@ Shows how many tokens ecotokens saved, grouped by command family or by project. 
 +------------------------------------------------------------+
 ```
 
-1. **Stats panel.** Title `ecotokens gain - updated HH:MM:SS UTC`. Shows interceptions, days covered, tokens used, tokens saved, savings percentage and cost avoided (`n/a (run: ecotokens gain price --input <usd/Mtok>)` until a price is set). A yellow `Rewrite overhead` line appears when the automatic rewrite pipeline added tokens.
+1. **Stats panel.** Title `ecotokens gain - updated HH:MM:SS UTC`. Shows interceptions, days covered, tokens used, tokens saved, savings percentage and cost avoided (`n/a (run: ecotokens gain price --input <usd/Mtok>)` until a price is set). A yellow `Rewrite overhead` line appears when the automatic rewrite pipeline added tokens. Once an interception made inside a Claude Code subagent is recorded, the cost line also shows `Subagents: <tokens> saved in <N> runs` (see [Savings per subagent](commands.md#savings-per-subagent)).
 2. **Gauges.** One gauge per command family (`By family`) or per project (`By project`), sorted by savings percentage, highest first. The selected row is bold green with a `▶` marker. When the list does not fit, the title shows a `[position/total]` scroll hint.
 3. **History panel** (bottom left). The interceptions of the selected family or project, newest first: timestamp, command (truncated to 30 characters), tokens before and after, and savings. The selected line is highlighted.
 4. **Detail panel** (bottom right). The selected interception, rendered in one of three modes (see below). Without an explicit selection it shows the latest interception that actually changed the content.

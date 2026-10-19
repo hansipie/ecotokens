@@ -617,3 +617,51 @@ fn gain_project_history_panel_refreshes_between_draws() {
         "second draw should include newest command, got: {second_content:?}"
     );
 }
+
+// ── Subagent savings ──────────────────────────────────────────────────────────
+
+#[test]
+fn gain_shows_subagent_savings_when_a_subagent_ran() {
+    let mut sub = make_interception(2000, 500, CommandFamily::Cargo);
+    sub.agent_type = Some("router-large".to_string());
+    let items = vec![make_interception(1000, 400, CommandFamily::Git), sub];
+    let content = draw_gain(
+        &items,
+        140,
+        25,
+        GainMode::Family,
+        None,
+        Default::default(),
+        None,
+    );
+    assert!(
+        content.contains("Subagents: 1,500 saved in 1 runs"),
+        "stats panel should show subagent savings: {content:?}"
+    );
+}
+
+#[test]
+fn gain_hides_subagent_savings_without_subagents() {
+    let items = vec![make_interception(1000, 400, CommandFamily::Git)];
+    let content = draw_gain(
+        &items,
+        140,
+        25,
+        GainMode::Family,
+        None,
+        Default::default(),
+        None,
+    );
+    assert!(!content.contains("Subagents"), "{content:?}");
+
+    let empty = draw_gain(
+        &[],
+        140,
+        25,
+        GainMode::Family,
+        None,
+        Default::default(),
+        None,
+    );
+    assert!(!empty.contains("Subagents"), "{empty:?}");
+}

@@ -325,3 +325,11 @@ fn the_analyst_delivers_options_and_does_not_implement() {
         "research is sourced: {body}"
     );
 }
+
+#[test]
+fn the_reviewer_is_told_to_open_with_a_machine_readable_verdict() {
+    let reviewer = agent_markdown(AgentKind::Reviewer, DEFAULT_ATTEMPTS);
+    assert!(reviewer.contains("`Verdict: approve` or `Verdict: reject`"));
+    let analyst = agent_markdown(AgentKind::Analyst, DEFAULT_ATTEMPTS);
+    assert!(!analyst.contains("Verdict:"));
+}

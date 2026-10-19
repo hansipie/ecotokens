@@ -1,4 +1,4 @@
-//! `ecotokens router on|off|status|try|price`.
+//! `ecotokens router on|off|status|try|price|reset|…`.
 
 use std::path::Path;
 use std::time::Duration;
@@ -116,6 +116,8 @@ pub fn status(settings_path: &Path, agents_dir: &Path, json: bool) -> std::io::R
             "by_category": outcomes.by_category,
             "by_policy": summary.by_policy,
             "outcomes": outcomes.outcomes,
+            "totals": outcomes.totals,
+            "prices": prices_json(&settings),
         });
         println!("{}", serde_json::to_string_pretty(&v).unwrap_or_default());
         return Ok(());
@@ -207,6 +209,96 @@ fn yes_no(b: bool) -> &'static str {
     } else {
         "no"
     }
+}
+
+/// The helper prices `router status --json` reports: the global price and,
+/// per tier, the price applied to it with the source of each part.
+fn prices_json(settings: &Settings) -> serde_json::Value {
+    let tiers: serde_json::Map<String, serde_json::Value> = super::Size::ALL
+        .iter()
+        .map(|size| {
+            let p = settings.effective_tier_price(Some(size.as_str()));
+            (
+                size.as_str().to_string(),
+                serde_json::json!({
+                    "input_usd_per_mtok": p.input,
+                    "output_usd_per_mtok": p.output,
+                    "input_source": p.input_source.as_str(),
+                    "output_source": p.output_source.as_str(),
+                }),
+            )
+        })
+        .collect();
+    serde_json::json!({
+        "global": {
+            "input_usd_per_mtok": settings.price_input_usd_per_mtok,
+            "output_usd_per_mtok": settings.price_output_usd_per_mtok,
+        },
+        "tiers": tiers,
+    })
+}
+
+/// One part of a tier price for display: the tier's own value, the global
+/// fallback, or `unset`.
+fn fmt_tier_part(value: Option<f64>, source: crate::config::settings::PriceSource) -> String {
+    use crate::config::settings::PriceSource;
+    match source {
+        PriceSource::Tier => crate::config::fmt_price(value),
+        PriceSource::Global => format!("{} (global)", crate::config::fmt_price(value)),
+        PriceSource::Unset => "unset".into(),
+    }
+}
+
+/// `ecotokens router price --tier <tier> [--input X] [--output Y] [--clear]`:
+/// sets, clears or shows the helper price of one router tier. Without a
+/// value it only shows the price. Costs already stored are not recomputed.
+pub fn tier_price(
+    tier: &str,
+    input: Option<f64>,
+    output: Option<f64>,
+    clear: bool,
+) -> std::io::Result<()> {
+    let invalid = |m: String| std::io::Error::new(std::io::ErrorKind::InvalidInput, m);
+    for (flag, value) in [("--input", input), ("--output", output)] {
+        crate::config::validate_price(flag, value).map_err(invalid)?;
+    }
+    let mut settings = Settings::load();
+    let Some(own) = settings.router_tier_prices.get_mut(tier) else {
+        return Err(invalid(format!(
+            "unknown tier `{tier}`: expected one of {}",
+            crate::config::settings::RouterTierPrices::TIERS.join(", ")
+        )));
+    };
+    let changed = clear || input.is_some() || output.is_some();
+    if clear {
+        *own = Default::default();
+    }
+    if input.is_some() {
+        own.input_usd_per_mtok = input;
+    }
+    if output.is_some() {
+        own.output_usd_per_mtok = output;
+    }
+    if changed {
+        settings.save()?;
+    }
+    let p = settings.effective_tier_price(Some(tier));
+    println!(
+        "{tier} helper price: input {} · output {} (USD per million tokens)",
+        fmt_tier_part(p.input, p.input_source),
+        fmt_tier_part(p.output, p.output_source)
+    );
+    if changed {
+        println!("Applies to jobs measured from now on; costs already stored are not recomputed.");
+    }
+    if !p.is_priced() {
+        println!(
+            "No price applies to this tier: its cost stays blank. Set one with \
+             `ecotokens router price --tier {tier} --input <usd/Mtok> --output <usd/Mtok>` \
+             or a global one with `ecotokens gain price`."
+        );
+    }
+    Ok(())
 }
 
 pub fn price(input: Option<f64>, output: Option<f64>) -> std::io::Result<()> {
@@ -835,10 +927,128 @@ pub fn dossier(json: bool) -> std::io::Result<()> {
     Ok(())
 }
 
+// ── Reset ───────────────────────────────────────────────────────────────
+
+/// `ecotokens router reset [--yes] [--backup] [--json]`: deletes the routing
+/// decisions and their outcomes from `router.db`. The Jev call log
+/// (`jev_calls`), the settings, the locations and the rules are kept.
+///
+/// Without `--yes` it asks on the terminal, and refuses when standard input is
+/// not a terminal. An empty or missing database is reported as 0 without a
+/// question, and nothing is deleted then.
+pub fn reset(yes: bool, backup: bool, json: bool) -> std::io::Result<()> {
+    use std::io::{BufRead, IsTerminal, Write};
+    let invalid = |m: String| std::io::Error::new(std::io::ErrorKind::InvalidInput, m);
+    let Some(db) = stats::router_db_path() else {
+        return Err(invalid("cannot locate the configuration directory".into()));
+    };
+    let before = stats::routing_rows(&db)?;
+    let backup_file = if backup && db.exists() {
+        Some(stats::backup_path(&db, chrono::Utc::now()))
+    } else {
+        None
+    };
+
+    let report = |deleted: stats::RoutingRows, backup_file: Option<&Path>| {
+        if json {
+            println!(
+                "{}",
+                serde_json::json!({
+                    "decisions": deleted.decisions,
+                    "outcomes": deleted.outcomes,
+                    "backup": backup_file.map(|p| p.to_string_lossy().into_owned()),
+                })
+            );
+        } else {
+            println!(
+                "router reset: deleted {} decision(s) and {} outcome(s)",
+                deleted.decisions, deleted.outcomes
+            );
+            if let Some(p) = backup_file {
+                println!("  backup : {}", p.display());
+            } else if backup {
+                println!("  backup : none (no database yet)");
+            }
+            println!("  kept   : Jev call log, settings, locations and rules");
+        }
+    };
+
+    if before.is_empty() {
+        if let Some(dest) = &backup_file {
+            stats::backup(&db, dest)?;
+        }
+        report(stats::RoutingRows::default(), backup_file.as_deref());
+        return Ok(());
+    }
+
+    if !yes {
+        if !std::io::stdin().is_terminal() {
+            return Err(invalid(format!(
+                "refusing to delete {} decision(s) and {} outcome(s) without confirmation: \
+                 standard input is not a terminal. Re-run with --yes",
+                before.decisions, before.outcomes
+            )));
+        }
+        let mut err = std::io::stderr();
+        let _ = write!(
+            err,
+            "About to delete {} routing decision(s) and {} outcome(s) from {}{}. \
+             The Jev call log, settings, locations and rules are kept. Confirm? [y/N] ",
+            before.decisions,
+            before.outcomes,
+            db.display(),
+            if backup_file.is_some() {
+                " (after a backup)"
+            } else {
+                ""
+            }
+        );
+        let _ = err.flush();
+        let mut answer = String::new();
+        std::io::stdin().lock().read_line(&mut answer)?;
+        let answer = answer.trim();
+        if !answer.eq_ignore_ascii_case("y") && !answer.eq_ignore_ascii_case("yes") {
+            if json {
+                println!("{}", serde_json::json!({ "aborted": true }));
+            } else {
+                println!("Aborted. Nothing was deleted.");
+            }
+            return Ok(());
+        }
+    }
+
+    if let Some(dest) = &backup_file {
+        stats::backup(&db, dest)?;
+    }
+    let deleted = stats::reset(&db)?;
+    report(deleted, backup_file.as_deref());
+    Ok(())
+}
+
 // ── Outcomes ────────────────────────────────────────────────────────────
 
 fn opt(v: Option<f64>, f: impl Fn(f64) -> String) -> String {
     v.map_or("-".to_string(), f)
+}
+
+/// A token count in a few characters: `950`, `41.0k`, `1.2M`.
+pub fn compact_count(n: f64) -> String {
+    let n = n.max(0.0);
+    if n < 1_000.0 {
+        format!("{n:.0}")
+    } else if n < 999_950.0 {
+        format!("{:.1}k", n / 1_000.0)
+    } else {
+        format!("{:.1}M", n / 1_000_000.0)
+    }
+}
+
+/// Input and output tokens as `41.0k→2.0k`; `-` when nothing was measured.
+fn in_out(tokens_in: Option<f64>, tokens_out: Option<f64>) -> String {
+    match (tokens_in, tokens_out) {
+        (None, None) => "-".into(),
+        (i, o) => format!("{}→{}", opt(i, compact_count), opt(o, compact_count)),
+    }
 }
 
 fn print_group_table(
@@ -850,17 +1060,28 @@ fn print_group_table(
     }
     println!();
     println!(
-        "{:<18} {:>9} {:>6} {:>8} {:>10} {:>9} {:>8} {:>5}  corrections n/m/M · regressions",
-        title, "delegated", "judged", "success", "avg tokens", "avg cost", "avg time", "runs"
+        "{:<18} {:>9} {:>6} {:>7} {:>7} {:>6} {:>13} {:>9} {:>8} {:>4}  corr. n/m/M · regr.",
+        title,
+        "delegated",
+        "judged",
+        "by rev.",
+        "success",
+        "manual",
+        "avg in→out",
+        "avg cost",
+        "avg time",
+        "runs"
     );
     for (name, g) in groups {
         println!(
-            "{:<18} {:>9} {:>6} {:>8} {:>10} {:>9} {:>8} {:>5}  {}/{}/{} · {}",
+            "{:<18} {:>9} {:>6} {:>7} {:>7} {:>6} {:>13} {:>9} {:>8} {:>4}  {}/{}/{} · {}",
             name,
             g.delegated,
             g.judged,
+            g.judged_by_reviewer,
             opt(g.success_rate, |r| format!("{:.0}%", r * 100.0)),
-            opt(g.avg_tokens, |t| format!("{t:.0}")),
+            opt(g.success_rate_manual, |r| format!("{:.0}%", r * 100.0)),
+            in_out(g.avg_tokens_in, g.avg_tokens_out),
             opt(g.avg_cost_usd, |c| format!("${c:.4}")),
             opt(g.avg_duration_ms, |ms| format!("{:.1}s", ms / 1000.0)),
             opt(g.avg_runs, |r| format!("{r:.1}")),
@@ -872,12 +1093,56 @@ fn print_group_table(
     }
 }
 
+/// Totals of measured tokens and cost per route, plus a line for all routes.
+/// Only measured jobs count; `measured` says how many of the delegated jobs
+/// that is, and a figure nobody measured shows `-`, never 0.
+fn print_usage_table(
+    groups: &std::collections::BTreeMap<String, outcome::GroupStats>,
+    totals: &outcome::GroupStats,
+) {
+    if groups.is_empty() {
+        return;
+    }
+    let row = |name: &str, g: &outcome::GroupStats| {
+        let cost = match g.cost_usd {
+            None => "-".to_string(),
+            // Fewer priced jobs than measured: the total covers only those.
+            Some(c) if g.priced < g.measured => format!("${c:.4}*"),
+            Some(c) => format!("${c:.4}"),
+        };
+        println!(
+            "{:<18} {:>9} {:>10} {:>10} {:>11}",
+            name,
+            format!("{}/{}", g.measured, g.delegated),
+            opt(g.tokens_in.map(|t| t as f64), compact_count),
+            opt(g.tokens_out.map(|t| t as f64), compact_count),
+            cost
+        );
+    };
+    println!();
+    println!(
+        "{:<18} {:>9} {:>10} {:>10} {:>11}",
+        "usage (totals)", "measured", "tokens in", "tokens out", "cost"
+    );
+    for (name, g) in groups {
+        row(name, g);
+    }
+    row("total", totals);
+    println!(
+        "Tokens are measured from the session transcripts (retries and reviews included); \
+         unmeasured jobs are left out. Cost = measured tokens × the price you configured \
+         (`router price --tier`, else `gain price`), so an estimate; `*` = known for fewer \
+         jobs than measured. No saving against a bigger model is computed."
+    );
+}
+
 fn print_outcome_tables(
     outcomes: &outcome::Aggregates,
     summary: &stats::Summary,
     policy_version: &str,
 ) {
     print_group_table("route", &outcomes.by_route);
+    print_usage_table(&outcomes.by_route, &outcomes.totals);
     print_group_table("category", &outcomes.by_category);
     if !summary.by_policy.is_empty() {
         println!();
@@ -891,7 +1156,9 @@ fn print_outcome_tables(
         println!();
         println!(
             "Outcomes: {} judged · {} unknown (excluded from success rates). \
-             Judge a job with `ecotokens router outcome --pending`.",
+             `by rev.` counts verdicts taken from router-reviewer; `manual` is the success \
+             rate of your own judgments only. Judge a job with \
+             `ecotokens router outcome --pending`.",
             o.judged, o.unknown
         );
     }

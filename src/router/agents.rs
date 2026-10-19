@@ -179,6 +179,9 @@ fn role_rules(kind: AgentKind) -> &'static str {
              - Your reply is a verdict only: approve or reject, with the reasons, the constraints \
              that are not met and the evidence (file and line). You are read-only: do not edit, do \
              not fix, do not propose a rewrite.\n\
+             - The first line of your reply is exactly `Verdict: approve` or `Verdict: reject`; \
+             the router reads it. Approve only what the diff and the test output show to be \
+             correct; when the evidence is missing, reject and say what is missing.\n\
              \n"
         }
     }

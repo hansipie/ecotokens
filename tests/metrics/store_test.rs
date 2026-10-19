@@ -380,3 +380,172 @@ fn opencode_agent_maps_to_opencode_hook_type() {
     assert_eq!(agent_to_hook_type_post("opencode"), HookType::OpenCode);
     assert_eq!(HookType::OpenCode.agent_label(), "opencode");
 }
+
+// ── Session / subagent attribution ────────────────────────────────────────────
+
+use ecotokens::metrics::store::{sanitize_identifier, AgentContext};
+
+#[test]
+fn agent_context_round_trips_through_the_store() {
+    let dir = TempDir::new().unwrap();
+    let path = metrics_file(&dir);
+
+    let ctx = AgentContext::new(
+        Some("3f2a9c1e-5b7d-4e8f-9a0b-1c2d3e4f5a6b"),
+        Some("a1b2c3d4"),
+        Some("router-large"),
+    );
+    let sub = make_interception(100, 40, FilterMode::Filtered).with_agent_context(&ctx);
+    let main = make_interception(50, 20, FilterMode::Filtered);
+    append_to(&path, &sub).unwrap();
+    append_to(&path, &main).unwrap();
+
+    let items = read_from(&path).unwrap();
+    let sub_row = items.iter().find(|i| i.id == sub.id).unwrap();
+    assert_eq!(sub_row.agent_type.as_deref(), Some("router-large"));
+    assert_eq!(sub_row.agent_id.as_deref(), Some("a1b2c3d4"));
+    assert_eq!(
+        sub_row.session_id.as_deref(),
+        Some("3f2a9c1e-5b7d-4e8f-9a0b-1c2d3e4f5a6b")
+    );
+    let main_row = items.iter().find(|i| i.id == main.id).unwrap();
+    assert_eq!(main_row.agent_type, None, "main session stores NULL");
+    assert_eq!(main_row.agent_id, None);
+    assert_eq!(main_row.session_id, None);
+}
+
+/// The `interceptions` schema as created before session/subagent columns.
+const OLD_SCHEMA: &str = "CREATE TABLE interceptions (
+    id              TEXT    NOT NULL PRIMARY KEY,
+    timestamp       TEXT    NOT NULL,
+    command         TEXT    NOT NULL,
+    command_family  TEXT    NOT NULL,
+    git_root        TEXT,
+    tokens_before   INTEGER NOT NULL,
+    tokens_after    INTEGER NOT NULL,
+    savings_pct     REAL    NOT NULL,
+    mode            TEXT    NOT NULL,
+    redacted        INTEGER NOT NULL,
+    duration_ms     INTEGER NOT NULL,
+    content_before  TEXT,
+    content_after   TEXT,
+    hook_type       TEXT    NOT NULL DEFAULT 'pre_tool_use'
+);";
+
+#[test]
+fn old_schema_database_is_migrated_and_keeps_its_totals() {
+    use ecotokens::metrics::report::{aggregate_with_price, Period};
+
+    let dir = TempDir::new().unwrap();
+    let path = metrics_file(&dir);
+    {
+        let conn = rusqlite::Connection::open(&path).unwrap();
+        conn.execute_batch(OLD_SCHEMA).unwrap();
+        for (id, before, after, hook) in [
+            ("a", 1000, 200, "pre_tool_use"),
+            ("b", 500, 500, "post_tool_use"),
+            ("c", 300, 100, "codex_pre_tool_use"),
+        ] {
+            conn.execute(
+                "INSERT INTO interceptions (id, timestamp, command, command_family, git_root,
+                 tokens_before, tokens_after, savings_pct, mode, redacted, duration_ms, hook_type)
+                 VALUES (?1, '2026-01-01T00:00:00+00:00', 'git status', 'git', '/repo',
+                         ?2, ?3, 0.0, 'filtered', 0, 1, ?4)",
+                rusqlite::params![id, before, after, hook],
+            )
+            .unwrap();
+        }
+    }
+
+    let items = read_from(&path).unwrap();
+    assert_eq!(items.len(), 3, "every old row is still readable");
+    assert!(items
+        .iter()
+        .all(|i| i.agent_type.is_none() && i.agent_id.is_none() && i.session_id.is_none()));
+
+    let report = aggregate_with_price(&items, Period::All, None);
+    assert_eq!(report.total_tokens_before, 1800);
+    assert_eq!(report.total_tokens_after, 800);
+    assert_eq!(
+        report.by_subagent.len(),
+        1,
+        "old rows all count as main session"
+    );
+
+    // The migrated database accepts attributed rows next to the old ones.
+    let ctx = AgentContext::new(None, None, Some("router-large"));
+    append_to(
+        &path,
+        &make_interception(100, 40, FilterMode::Filtered).with_agent_context(&ctx),
+    )
+    .unwrap();
+    let items = read_from(&path).unwrap();
+    assert_eq!(items.len(), 4);
+    assert_eq!(items.iter().filter(|i| i.agent_type.is_some()).count(), 1);
+
+    // Opening again is a no-op: the columns already exist.
+    assert_eq!(read_from(&path).unwrap().len(), 4);
+}
+
+#[test]
+fn legacy_jsonl_without_agent_fields_migrates_to_null() {
+    let dir = TempDir::new().unwrap();
+    let path = metrics_file(&dir);
+    let line = r#"{"id":"abc","timestamp":"2026-01-01T00:00:00+00:00","command":"git status","command_family":"git","git_root":null,"tokens_before":100,"tokens_after":40,"savings_pct":60.0,"mode":"filtered","redacted":false,"duration_ms":10,"hook_type":"post_tool_use"}"#;
+    std::fs::write(path.with_extension("jsonl"), format!("{line}\n")).unwrap();
+
+    let items = read_from(&path).unwrap();
+    assert_eq!(items.len(), 1);
+    assert_eq!(items[0].agent_type, None);
+    assert_eq!(items[0].agent_id, None);
+    assert_eq!(items[0].session_id, None);
+}
+
+#[test]
+fn sanitize_identifier_keeps_plain_identifiers() {
+    for id in [
+        "router-large",
+        "claude-seo:seo-backlinks",
+        "Explore",
+        "general_purpose.v2",
+        "3f2a9c1e-5b7d-4e8f-9a0b-1c2d3e4f5a6b",
+        "a1b2c3d4e5f6a7b8",
+        "agent-0f3c9a2b7e1d4c5a",
+        "9f86d081884c7d659a2feaa0c55ad015a3bf4f1b2b0b822cd15d6c15b0f00a08",
+    ] {
+        assert_eq!(sanitize_identifier(Some(id)).as_deref(), Some(id), "{id}");
+    }
+    assert_eq!(
+        sanitize_identifier(Some("  router-large \n")).as_deref(),
+        Some("router-large"),
+        "surrounding blanks are trimmed"
+    );
+}
+
+#[test]
+fn sanitize_identifier_drops_free_text_and_secrets() {
+    let long = "a".repeat(129);
+    for raw in [
+        "",
+        "   ",
+        "router large",
+        "x; rm -rf /",
+        "$(id)",
+        "`id`",
+        "-x",
+        "--help",
+        "a/b",
+        "router'large",
+        "né",
+        long.as_str(),
+        "ghp_0123456789abcdefghijklmnopqrstuvwxyzAB",
+        "AKIAIOSFODNN7EXAMPLE",
+    ] {
+        assert_eq!(
+            sanitize_identifier(Some(raw)),
+            None,
+            "{raw:?} must be dropped"
+        );
+    }
+    assert_eq!(sanitize_identifier(None), None);
+}

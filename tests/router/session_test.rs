@@ -145,7 +145,11 @@ fn cost_and_duration_are_summed_over_every_router_run_of_the_job() {
         first.cost, None,
         "one run has no input/output split: no invented cost"
     );
-    assert_eq!(first.success, None, "judgment is manual");
+    assert_eq!(
+        first.success,
+        Some(1),
+        "one producer, then a reviewer that approves"
+    );
 
     // Second job: one run with a full split, priced.
     assert_eq!(second.id, 2);
@@ -159,6 +163,106 @@ fn cost_and_duration_are_summed_over_every_router_run_of_the_job() {
         "{:?}",
         second.cost
     );
+}
+
+#[test]
+fn the_price_of_the_jobs_tier_is_used_and_an_unset_part_falls_back_to_the_global_one() {
+    let w = world();
+    let mut settings = priced();
+    // The second job runs on router-everyday: input from its tier, output global.
+    settings.router_tier_prices.everyday.input_usd_per_mtok = Some(1.0);
+    // Another tier's price changes nothing for it.
+    settings.router_tier_prices.tiny.output_usd_per_mtok = Some(99.0);
+    end(&w.db, &settings, &input(&w), true);
+    let second = &rows(&w.db)[1];
+    let expected = 2_500.0 / 1e6 * 1.0 + 500.0 / 1e6 * 15.0;
+    assert!(
+        (second.cost.unwrap() - expected).abs() < 1e-9,
+        "{:?}",
+        second.cost
+    );
+}
+
+#[test]
+fn a_tier_price_alone_prices_the_job_without_a_global_price() {
+    let w = world();
+    let mut settings = Settings {
+        router_enabled: true,
+        ..Settings::default()
+    };
+    settings.router_tier_prices.everyday.input_usd_per_mtok = Some(2.0);
+    settings.router_tier_prices.everyday.output_usd_per_mtok = Some(10.0);
+    end(&w.db, &settings, &input(&w), true);
+    let r = rows(&w.db);
+    let expected = 2_500.0 / 1e6 * 2.0 + 500.0 / 1e6 * 10.0;
+    assert!(
+        (r[1].cost.unwrap() - expected).abs() < 1e-9,
+        "{:?}",
+        r[1].cost
+    );
+}
+
+/// Cost of job 1 after `end` over a transcript of `runs` (100 input and 10
+/// output tokens each) with `settings`.
+fn cost_after(runs: &[(&str, &str)], settings: &Settings) -> Option<f64> {
+    let w = world();
+    std::fs::write(&w.transcript, transcript_of(runs)).unwrap();
+    end(&w.db, settings, &input(&w), true);
+    rows(&w.db)[0].cost
+}
+
+#[test]
+fn each_run_is_priced_at_its_own_tier_and_the_reviewer_runs_on_large() {
+    let mut settings = priced();
+    settings.router_tier_prices.tiny.input_usd_per_mtok = Some(1.0);
+    settings.router_tier_prices.tiny.output_usd_per_mtok = Some(5.0);
+    settings.router_tier_prices.large.input_usd_per_mtok = Some(15.0);
+    settings.router_tier_prices.large.output_usd_per_mtok = Some(75.0);
+    let cost = cost_after(
+        &[
+            ("router-tiny", "done"),
+            ("router-reviewer", "Verdict: approve"),
+        ],
+        &settings,
+    )
+    .unwrap();
+    let tiny = 100.0 / 1e6 * 1.0 + 10.0 / 1e6 * 5.0;
+    let large = 100.0 / 1e6 * 15.0 + 10.0 / 1e6 * 75.0;
+    assert!((cost - (tiny + large)).abs() < 1e-12, "{cost}");
+}
+
+#[test]
+fn a_helper_of_no_known_tier_uses_the_global_price() {
+    let mut settings = priced();
+    for tier in ["tiny", "everyday", "large", "hardest"] {
+        let p = settings.router_tier_prices.get_mut(tier).unwrap();
+        p.input_usd_per_mtok = Some(1_000.0);
+        p.output_usd_per_mtok = Some(1_000.0);
+    }
+    let cost = cost_after(&[("router-custom", "done")], &settings).unwrap();
+    let global = 100.0 / 1e6 * 3.0 + 10.0 / 1e6 * 15.0;
+    assert!((cost - global).abs() < 1e-12, "{cost}");
+}
+
+#[test]
+fn one_unpriced_run_leaves_the_job_cost_unknown() {
+    // No global price; only the tiny tier has one, the reviewer (large) none.
+    let mut settings = Settings {
+        router_enabled: true,
+        ..Settings::default()
+    };
+    settings.router_tier_prices.tiny.input_usd_per_mtok = Some(1.0);
+    assert_eq!(
+        cost_after(
+            &[
+                ("router-tiny", "done"),
+                ("router-reviewer", "Verdict: approve")
+            ],
+            &settings
+        ),
+        None
+    );
+    assert!(cost_after(&[("router-tiny", "done")], &settings).is_some());
 }
 
 #[test]
@@ -263,7 +367,8 @@ fn the_reminder_is_one_line_with_a_count_and_a_command_and_shows_once() {
     end(&w.db, &priced(), &input(&w), true);
     let out = start(&w.db, &priced(), &input(&w), true).expect("a reminder is due");
     let text = message(&out);
-    assert!(text.contains('2'), "{text}");
+    // The first job was judged by its reviewer, so only the second is due.
+    assert!(text.contains("1 delegated job has"), "{text}");
     assert!(
         text.contains("ecotokens router outcome --pending"),
         "{text}"
@@ -276,7 +381,9 @@ fn the_reminder_is_one_line_with_a_count_and_a_command_and_shows_once() {
 
     // Once per job.
     assert_eq!(start(&w.db, &priced(), &input(&w), true), None);
-    assert!(rows(&w.db).iter().all(|r| r.reminded == 1));
+    assert!(rows(&w.db)
+        .iter()
+        .all(|r| r.reminded == 1 || r.success.is_some()));
 }
 
 #[test]
@@ -419,4 +526,132 @@ fn the_session_hooks_are_fail_open() {
             assert!(stdout_of(&out).is_empty(), "{event} {input:?}");
         }
     }
+}
+
+// ── Reviewer verdicts ────────────────────────────────────────────────────
+
+/// A transcript of one session with the given `(subagent_type, reply)` runs,
+/// one minute apart from 10:00:30, each with a full token split.
+fn transcript_of(runs: &[(&str, &str)]) -> String {
+    let mut out = String::new();
+    for (i, (agent, reply)) in runs.iter().enumerate() {
+        let id = format!("tu{i}");
+        let (start, end) = (30 + i * 60, 50 + i * 60);
+        let ts = |s: usize| format!("2026-10-17T10:{:02}:{:02}.000Z", s / 60, s % 60);
+        out.push_str(&format!(
+            "{}\n",
+            serde_json::json!({"type": "assistant", "timestamp": ts(start),
+                "message": {"role": "assistant", "content": [{"type": "tool_use", "id": id,
+                    "name": "Agent", "input": {"subagent_type": agent, "prompt": "p"}}]}})
+        ));
+        out.push_str(&format!(
+            "{}\n",
+            serde_json::json!({"type": "user", "timestamp": ts(end),
+                "message": {"role": "user", "content": [{"type": "tool_result", "tool_use_id": id,
+                    "content": [{"type": "text", "text": reply}]}]},
+                "toolUseResult": {"usage": {"input_tokens": 100, "output_tokens": 10}}})
+        ));
+    }
+    out
+}
+
+/// The success of job 1 after `end` over a transcript made of `runs`.
+fn success_after(runs: &[(&str, &str)]) -> Option<i64> {
+    let w = world();
+    std::fs::write(&w.transcript, transcript_of(runs)).unwrap();
+    end(&w.db, &priced(), &input(&w), true);
+    rows(&w.db)[0].success
+}
+
+#[test]
+fn an_approval_after_a_single_producer_is_a_success() {
+    let reply = "Verdict: approve\nthe diff matches the goal";
+    assert_eq!(
+        success_after(&[("router-large", "done"), ("router-reviewer", reply)]),
+        Some(1)
+    );
+}
+
+#[test]
+fn a_rejection_is_a_failure_even_after_a_retry() {
+    let reply = "**Verdict: reject** — the test fails";
+    assert_eq!(
+        success_after(&[
+            ("router-large", "done"),
+            ("router-large", "done again"),
+            ("router-reviewer", reply),
+        ]),
+        Some(0)
+    );
+}
+
+#[test]
+fn an_approval_after_a_retry_is_not_a_first_attempt_success() {
+    let reply = "Verdict: approve";
+    assert_eq!(
+        success_after(&[
+            ("router-large", "done"),
+            ("router-large", "done again"),
+            ("router-reviewer", reply),
+        ]),
+        None
+    );
+}
+
+#[test]
+fn a_reply_without_a_readable_verdict_leaves_the_job_unjudged() {
+    for reply in [
+        "Looks fine to me",
+        "Verdict: unclear, the test output is missing",
+        "I would not approve this. Verdict:",
+    ] {
+        assert_eq!(
+            success_after(&[("router-large", "done"), ("router-reviewer", reply)]),
+            None,
+            "{reply}"
+        );
+    }
+}
+
+#[test]
+fn no_review_means_no_verdict() {
+    assert_eq!(success_after(&[("router-large", "Verdict: approve")]), None);
+}
+
+#[test]
+fn the_user_judgment_is_never_overwritten_by_the_reviewer() {
+    let w = world();
+    std::fs::write(
+        &w.transcript,
+        transcript_of(&[
+            ("router-large", "done"),
+            ("router-reviewer", "Verdict: approve"),
+        ]),
+    )
+    .unwrap();
+    // The user judged job 1 by hand (a row with no `judged_by`, as written by
+    // older versions, counts as theirs too).
+    let conn = Connection::open(&w.db).unwrap();
+    conn.execute(
+        "INSERT INTO router_outcomes (decision_id, success) VALUES (1, 0)",
+        [],
+    )
+    .unwrap();
+    drop(conn);
+    end(&w.db, &priced(), &input(&w), true);
+    assert_eq!(rows(&w.db)[0].success, Some(0));
+}
+
+#[test]
+fn a_later_review_replaces_an_earlier_automatic_verdict() {
+    let w = world();
+    for verdict in ["Verdict: reject", "Verdict: approve"] {
+        std::fs::write(
+            &w.transcript,
+            transcript_of(&[("router-large", "done"), ("router-reviewer", verdict)]),
+        )
+        .unwrap();
+        end(&w.db, &priced(), &input(&w), true);
+    }
+    assert_eq!(rows(&w.db)[0].success, Some(1));
 }

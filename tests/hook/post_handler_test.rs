@@ -13,6 +13,7 @@ fn make_input(
         tool_input,
         tool_response,
         cwd: None,
+        ..Default::default()
     }
 }
 
@@ -281,4 +282,81 @@ fn codex_bash_output_separates_stdout_without_trailing_newline() {
         codex_bash_output_text(&serde_json::json!({"output": "a", "stderr": "b"})),
         "a\nb"
     );
+}
+
+// ── Subagent attribution ──────────────────────────────────────────────────────
+
+use ecotokens::hook::post_handler::post_interception;
+use ecotokens::metrics::store::HookType;
+
+fn claude_read_json(subagent: bool) -> String {
+    let mut v = serde_json::json!({
+        "session_id": "3f2a9c1e-5b7d-4e8f-9a0b-1c2d3e4f5a6b",
+        "transcript_path": "/tmp/t.jsonl",
+        "hook_event_name": "PostToolUse",
+        "tool_name": "Read",
+        "tool_input": {"file_path": "/tmp/a.rs"},
+        "tool_response": {"file": {"content": "fn main() {}"}},
+        "cwd": "/tmp",
+    });
+    if subagent {
+        v["agent_id"] = serde_json::json!("a1b2c3d4");
+        v["agent_type"] = serde_json::json!("router-large");
+    }
+    v.to_string()
+}
+
+fn read_row(input: &PostHookInput) -> ecotokens::metrics::store::Interception {
+    post_interception(
+        input,
+        CommandFamily::NativeRead,
+        100,
+        20,
+        "before",
+        "after",
+        HookType::PostToolUse,
+    )
+}
+
+#[test]
+fn subagent_read_input_is_attributed() {
+    let input: PostHookInput = serde_json::from_str(&claude_read_json(true)).unwrap();
+    let row = read_row(&input);
+    assert_eq!(row.agent_type.as_deref(), Some("router-large"));
+    assert_eq!(row.agent_id.as_deref(), Some("a1b2c3d4"));
+    assert_eq!(
+        row.session_id.as_deref(),
+        Some("3f2a9c1e-5b7d-4e8f-9a0b-1c2d3e4f5a6b")
+    );
+}
+
+#[test]
+fn main_session_read_input_has_no_agent_type() {
+    let input: PostHookInput = serde_json::from_str(&claude_read_json(false)).unwrap();
+    let row = read_row(&input);
+    assert_eq!(row.agent_type, None);
+    assert_eq!(row.agent_id, None);
+    assert!(row.session_id.is_some());
+}
+
+#[test]
+fn inputs_without_agent_fields_deserialize_to_none() {
+    // Codex / Gemini / Qwen / older Claude Code payloads.
+    for json in [
+        r#"{"tool_name":"Bash","tool_input":{"command":"ls"},"tool_response":"x"}"#,
+        r#"{"tool_name":"read_file","tool_input":{},"tool_response":{},"cwd":"/tmp"}"#,
+    ] {
+        let input: PostHookInput = serde_json::from_str(json).unwrap();
+        assert_eq!(input.agent_context(), Default::default());
+    }
+}
+
+#[test]
+fn non_identifier_agent_values_are_not_stored() {
+    let mut input: PostHookInput = serde_json::from_str(&claude_read_json(true)).unwrap();
+    input.agent_type = Some("router large; echo pwned".to_string());
+    input.agent_id = Some("ghp_0123456789abcdefghijklmnopqrstuvwxyzAB".to_string());
+    let row = read_row(&input);
+    assert_eq!(row.agent_type, None);
+    assert_eq!(row.agent_id, None);
 }

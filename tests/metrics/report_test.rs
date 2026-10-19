@@ -32,6 +32,9 @@ fn make_interception_ago(
         content_before: None,
         content_after: None,
         hook_type: HookType::PreToolUse,
+        session_id: None,
+        agent_id: None,
+        agent_type: None,
     }
 }
 
@@ -206,4 +209,128 @@ fn keep_project_retains_only_that_git_root() {
 
     keep_project(&mut items, "/missing");
     assert!(items.is_empty());
+}
+
+// ── by_subagent ───────────────────────────────────────────────────────────────
+
+use ecotokens::metrics::report::{subagent_lines, MAIN_SESSION_BUCKET};
+
+fn with_agent_type(mut item: Interception, agent_type: &str) -> Interception {
+    item.agent_type = Some(agent_type.to_string());
+    item
+}
+
+fn subagent_items() -> Vec<Interception> {
+    vec![
+        make_interception_ago(10, CommandFamily::Git, 1000, 200),
+        with_agent_type(
+            make_interception_ago(20, CommandFamily::Cargo, 500, 100),
+            "router-large",
+        ),
+        with_agent_type(
+            make_interception_ago(30, CommandFamily::Git, 300, 300),
+            "router-large",
+        ),
+        with_agent_type(
+            make_interception_ago(40, CommandFamily::Grep, 400, 100),
+            "Explore",
+        ),
+    ]
+}
+
+#[test]
+fn by_subagent_buckets_add_up_to_the_totals() {
+    let report = aggregate_with_price(&subagent_items(), Period::All, None);
+
+    let before: u64 = report.by_subagent.values().map(|s| s.tokens_before).sum();
+    let after: u64 = report.by_subagent.values().map(|s| s.tokens_after).sum();
+    let count: u32 = report.by_subagent.values().map(|s| s.count).sum();
+    assert_eq!(before, report.total_tokens_before);
+    assert_eq!(after, report.total_tokens_after);
+    assert_eq!(count, report.total_interceptions);
+
+    let main = &report.by_subagent[MAIN_SESSION_BUCKET];
+    assert_eq!(
+        (main.count, main.tokens_before, main.tokens_after),
+        (1, 1000, 200)
+    );
+    let large = &report.by_subagent["router-large"];
+    assert_eq!(
+        (large.count, large.tokens_before, large.tokens_after),
+        (2, 800, 400)
+    );
+    assert!((large.savings_pct - 50.0).abs() < 0.01);
+    assert_eq!(report.by_subagent["Explore"].count, 1);
+}
+
+#[test]
+fn by_agent_keeps_grouping_by_host_tool() {
+    let report = aggregate_with_price(&subagent_items(), Period::All, None);
+    // Every row is a Claude Code PreToolUse row: subagents do not split by_agent.
+    assert_eq!(report.by_agent.len(), 1);
+    assert_eq!(report.by_agent["claude"].count, 4);
+}
+
+#[test]
+fn by_subagent_excludes_rewrite_rows_like_the_totals() {
+    let mut items = subagent_items();
+    let mut rewrite = with_agent_type(
+        make_interception_ago(5, CommandFamily::Generic, 100, 900),
+        "router-large",
+    );
+    rewrite.mode = FilterMode::Rewritten;
+    items.push(rewrite);
+    let report = aggregate_with_price(&items, Period::All, None);
+    let before: u64 = report.by_subagent.values().map(|s| s.tokens_before).sum();
+    assert_eq!(before, report.total_tokens_before);
+    assert_eq!(report.by_subagent["router-large"].count, 2);
+}
+
+#[test]
+fn by_subagent_json_shape() {
+    let report = aggregate_with_price(&subagent_items(), Period::All, None);
+    let v = serde_json::to_value(&report).unwrap();
+    let by_subagent = v["by_subagent"].as_object().expect("by_subagent object");
+    assert!(by_subagent.contains_key("[main]"));
+    let large = &by_subagent["router-large"];
+    for key in ["count", "tokens_before", "tokens_after", "savings_pct"] {
+        assert!(large.get(key).is_some(), "missing {key}");
+    }
+    assert!(v["by_agent"].is_object(), "by_agent is kept");
+
+    // A report serialized before the field existed still deserializes.
+    let mut old = v.clone();
+    old.as_object_mut().unwrap().remove("by_subagent");
+    let back: ecotokens::metrics::report::Report = serde_json::from_value(old).unwrap();
+    assert!(back.by_subagent.is_empty());
+}
+
+#[test]
+fn by_subagent_on_empty_data() {
+    let report = aggregate_with_price(&[], Period::All, None);
+    assert!(report.by_subagent.is_empty());
+    assert!(subagent_lines(&report).is_empty());
+    let v = serde_json::to_value(&report).unwrap();
+    assert_eq!(v["by_subagent"], serde_json::json!({}));
+}
+
+#[test]
+fn subagent_lines_only_when_a_subagent_ran() {
+    let main_only = aggregate_with_price(&make_items(), Period::All, None);
+    assert!(
+        subagent_lines(&main_only).is_empty(),
+        "no section when every row is from the main session"
+    );
+
+    let report = aggregate_with_price(&subagent_items(), Period::All, None);
+    let lines = subagent_lines(&report);
+    assert_eq!(lines[0], "By subagent    :");
+    assert!(lines[1].trim_start().starts_with("[main]"), "{lines:?}");
+    assert!(lines[2].trim_start().starts_with("Explore"), "{lines:?}");
+    assert!(
+        lines[3].trim_start().starts_with("router-large"),
+        "{lines:?}"
+    );
+    assert!(lines[3].contains("400 tokens saved"), "{lines:?}");
+    assert!(lines[3].contains("50.0% savings"), "{lines:?}");
 }

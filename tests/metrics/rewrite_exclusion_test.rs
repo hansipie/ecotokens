@@ -18,6 +18,9 @@ fn base_interception(family: CommandFamily, tokens_before: u32, tokens_after: u3
         content_before: None,
         content_after: None,
         hook_type: HookType::PreToolUse,
+        session_id: None,
+        agent_id: None,
+        agent_type: None,
     }
 }
 
@@ -37,6 +40,9 @@ fn rewrite_row(tokens_before: u32, tokens_after: u32, hook_type: HookType) -> In
         content_before: None,
         content_after: None,
         hook_type,
+        session_id: None,
+        agent_id: None,
+        agent_type: None,
     }
 }
 

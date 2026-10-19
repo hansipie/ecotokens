@@ -1120,6 +1120,9 @@ mod tests {
             content_before: None,
             content_after: None,
             hook_type: HookType::PreToolUse,
+            session_id: None,
+            agent_id: None,
+            agent_type: None,
         }
     }
 

@@ -101,6 +101,12 @@ enum Commands {
         /// Harness that triggered this filter (claude, gemini, qwen, pi, opencode, cli). Default: cli
         #[arg(long, default_value = "cli")]
         agent: String,
+        /// Claude Code subagent type that ran the command (set by the hook inside a subagent)
+        #[arg(long)]
+        agent_type: Option<String>,
+        /// Claude Code subagent instance that ran the command (set by the hook inside a subagent)
+        #[arg(long)]
+        agent_id: Option<String>,
     },
     /// Filter an already captured tool output from stdin, record metrics
     FilterOutput {
@@ -452,12 +458,19 @@ enum RouterAction {
         #[arg(long)]
         timeout_ms: Option<u64>,
     },
-    /// Set the Jev price used for cost estimates (USD per million tokens)
+    /// Set the Jev price, or with --tier a helper tier's price, used for cost estimates (USD per million tokens)
     Price {
         #[arg(long)]
         input: Option<f64>,
         #[arg(long)]
         output: Option<f64>,
+        /// Set or show the helper price of this router tier instead of the Jev price
+        /// (unset parts fall back to the global `gain price`)
+        #[arg(long, value_parser = ["tiny", "everyday", "large", "hardest"])]
+        tier: Option<String>,
+        /// With --tier: unset that tier's price, so the global price applies again
+        #[arg(long, requires = "tier", conflicts_with_all = ["input", "output"])]
+        clear: bool,
     },
     /// Record how a delegated job went, or list the jobs that await a judgment
     Outcome {
@@ -483,6 +496,19 @@ enum RouterAction {
     /// commands, errors, discarded)
     Dossier {
         /// Print {"path", "chars"} instead of the Markdown
+        #[arg(long)]
+        json: bool,
+    },
+    /// Delete the recorded routing decisions and their outcomes (keeps the Jev
+    /// call log, settings, locations and rules)
+    Reset {
+        /// Skip the confirmation prompt (required when stdin is not a terminal)
+        #[arg(long, short = 'y')]
+        yes: bool,
+        /// Copy router.db to router.db.bak-<timestamp> before deleting
+        #[arg(long)]
+        backup: bool,
+        /// Output as JSON
         #[arg(long)]
         json: bool,
     },
@@ -747,7 +773,13 @@ fn default_claude_json_path() -> PathBuf {
         .join(".claude.json")
 }
 
-fn cmd_filter(args: Vec<String>, debug: bool, cwd: Option<PathBuf>, agent: String) {
+fn cmd_filter(
+    args: Vec<String>,
+    debug: bool,
+    cwd: Option<PathBuf>,
+    agent: String,
+    subagent: metrics::store::AgentContext,
+) {
     if args.is_empty() {
         eprintln!("ecotokens filter: no command given");
         std::process::exit(1);
@@ -791,12 +823,13 @@ fn cmd_filter(args: Vec<String>, debug: bool, cwd: Option<PathBuf>, agent: Strin
 
     let duration_ms = start.elapsed().as_millis().min(u32::MAX as u128) as u32;
     let hook_type = metrics::store::agent_to_hook_type_pre(&agent);
-    let (filtered, tokens_before, tokens_after) = filter::run_filter_pipeline_with_cwd(
+    let (filtered, tokens_before, tokens_after) = filter::run_filter_pipeline_with_context(
         &command,
         &raw,
         duration_ms,
         cwd.as_deref(),
         hook_type,
+        &subagent,
     );
 
     if debug || settings.debug {
@@ -1236,6 +1269,9 @@ fn cmd_gain(period: metrics::report::Period, json: bool, history: bool, project:
                     agent, stats.count, stats.savings_pct
                 );
             }
+        }
+        for line in metrics::report::subagent_lines(&report) {
+            println!("{line}");
         }
     }
 }
@@ -2225,8 +2261,17 @@ fn cmd_router(action: RouterAction) {
             json,
             timeout_ms,
         } => std::process::exit(router::cli::try_messages(&messages, json, timeout_ms)),
-        RouterAction::Price { input, output } => router::cli::price(input, output),
+        RouterAction::Price {
+            input,
+            output,
+            tier,
+            clear,
+        } => match tier {
+            Some(tier) => router::cli::tier_price(&tier, input, output, clear),
+            None => router::cli::price(input, output),
+        },
         RouterAction::Rules { json } => router::cli::rules(json),
+        RouterAction::Reset { yes, backup, json } => router::cli::reset(yes, backup, json),
         RouterAction::Dossier { json } => router::cli::dossier(json),
         RouterAction::Outcome {
             id,
@@ -4294,7 +4339,13 @@ fn main() {
             debug,
             cwd,
             agent,
-        } => cmd_filter(args, debug, cwd, agent),
+            agent_type,
+            agent_id,
+        } => {
+            let subagent =
+                metrics::store::AgentContext::new(None, agent_id.as_deref(), agent_type.as_deref());
+            cmd_filter(args, debug, cwd, agent, subagent)
+        }
         Commands::FilterOutput {
             command,
             exit_code,

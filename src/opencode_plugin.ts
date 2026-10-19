@@ -109,7 +109,8 @@ function parseBashC(s: string, i: number): string | null {
 }
 
 /**
- * Parse one `ecotokens filter [--agent A] [--cwd C] -- bash -c '<inner>'`
+ * Parse one `ecotokens filter [--agent A] [--agent-type T] [--agent-id I]
+ * [--cwd C] -- bash -c '<inner>'`
  * layer — exactly the shape the hook and the plugins emit — and return
  * `<inner>`. Anything else (other options, a marker inside a comment, commands
  * before the marker, text after the quoted token) is not a wrapper: null.
@@ -126,7 +127,9 @@ function parseWrapper(cmd: string): string | null {
   for (;;) {
     i = skipBlank(s, i)
     if (s.startsWith("-- ", i)) return parseBashC(s, i + "-- ".length)
-    const opt = ["--agent ", "--cwd "].find((o) => s.startsWith(o, i))
+    const opt = ["--agent ", "--agent-type ", "--agent-id ", "--cwd "].find((o) =>
+      s.startsWith(o, i),
+    )
     if (!opt || seen.has(opt)) return null
     seen.add(opt)
     i = skipBlank(s, i + opt.length)

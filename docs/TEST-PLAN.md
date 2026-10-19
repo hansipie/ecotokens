@@ -187,6 +187,7 @@ Scenarios:
 - Run grep through the agent and confirm result trimming
 - Run glob or list-directory through the agent and confirm noisy directories are removed
 - Repeat with malformed or empty tool results and confirm safe passthrough
+- Run a Bash command and a Read inside a Claude Code subagent: the Bash rewrite carries `--agent-type` / `--agent-id`, both rows record the subagent type, and main-session rewrites are unchanged
 
 Verify:
 - Output is filtered only when appropriate
@@ -237,12 +238,17 @@ Verify:
 - By-family and by-project grouping looks correct
 - JSON output is valid and stable enough for automation
 - Cost avoided is non-negative when savings exist
+- `by_subagent` buckets add up to `total_tokens_before` / `total_tokens_after`; main-session, non-Claude and pre-existing rows land in `[main]`; `by_agent` still groups by host tool
+- A metrics database created before subagent tracking opens without error and reports the same totals
 
 Model router (`ecotokens router status`, `outcome`):
 - `router status --json` keeps every pre-existing key and only adds keys; rows written before the policy router are reported as `legacy-size`
 - An empty store renders `No messages routed yet.` and empty `by_route` / `by_category` maps
 - Judge a job with `router outcome ID --success yes|no`; success rates leave out unknown outcomes and are `null` when nothing is judged
 - Cost, tokens and helper time come from the transcript at `SessionEnd`; an unreadable transcript leaves them unknown, never zero
+- `router status` shows input and output tokens apart (`avg in→out`) and a `usage (totals)` table with `measured N/M` per route and a `total` line; unmeasured jobs are left out of totals and averages, and a route with none measured shows `-`
+- `router status --json` exposes `measured`, `priced`, `tokens_in`, `tokens_out`, `cost_usd`, `avg_tokens_in`, `avg_tokens_out` per route and category, a `totals` object and a `prices` object; no savings figure appears anywhere
+- `router price --tier T --input X --output Y` sets only that tier (the Jev price is untouched); an unset part falls back to the global `gain price`; `--clear` unsets the tier; a price change leaves stored costs as they are
 
 ### F. Search and code-intelligence features
 

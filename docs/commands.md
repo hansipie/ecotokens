@@ -23,7 +23,7 @@ Every `ecotokens` command, shell completions, the gain dashboard and the filter 
 | `ecotokens gain` | Interactive TUI dashboard - savings by family or project |
 | `ecotokens gain --period PERIOD` | Filter TUI to a time window (`all`, `today`, `week`, `month`) |
 | `ecotokens gain --history` | Print a savings summary table for 24h / 7 days / 30 days |
-| `ecotokens gain --json` | JSON report |
+| `ecotokens gain --json` | JSON report (includes `by_agent` per host tool and `by_subagent` per Claude Code subagent) |
 | `ecotokens gain --project PATH` | Only the interceptions of one project (a directory inside a repository stands for its git root); works with the TUI, `--json` and `--history` |
 | `ecotokens jev [--period PERIOD] [--project PATH] [--json]` | TUI with detailed Jev usage - calls, fallbacks, latency, tokens, cost, recent calls (also `v` in `gain`); `--project` keeps the calls made in one project |
 | `ecotokens game [--period PERIOD]` | Space Invaders mini-game - filtered commands spawn enemies scaled by tokens saved |
@@ -60,9 +60,10 @@ Every `ecotokens` command, shell completions, the gain dashboard and the filter 
 | `ecotokens rewrite --mode MODE [--to TARGET]` | Paraphrase, retone, adjust reading level, or translate text using a local model |
 | `ecotokens router on [--timeout-ms N]` | Turn the model router on: `UserPromptSubmit` hook plus `router-*` helper agents in `~/.claude` (Claude Code only, needs `TYPESAFE_API_KEY`) |
 | `ecotokens router off` | Turn the router off and remove its hook and helper agents |
-| `ecotokens router status [--json]` | Messages per size and decision, Jev requests, tokens, latency and estimated cost |
+| `ecotokens router status [--json]` | Messages per size and decision, measured helper tokens (input and output) and cost per route with totals, Jev requests, tokens, latency and estimated cost |
 | `ecotokens router try MESSAGE... [--json] [--timeout-ms N]` | Size sample messages with Jev (live, not recorded, works while the router is off) |
 | `ecotokens router price --input USD --output USD` | Set the Jev price per million tokens used for cost estimates |
+| `ecotokens router price --tier TIER [--input USD] [--output USD] [--clear]` | Set, show or clear the helper price of one router tier (`tiny`, `everyday`, `large`, `hardest`); unset parts fall back to `gain price`; stored costs are not recomputed — see [Model router](model-router.md#tokens-and-cost-per-tier) |
 | `ecotokens handoff on\|off\|status\|list\|load\|clean` | Session handoff across `/clear` and compaction (Claude Code only) — see [Session handoff](handoff.md) |
 
 ## Shell completions
@@ -113,6 +114,18 @@ Interactive TUI showing token savings per command family and per project, with a
 
 Keybindings for every view are listed in [TUI.md](TUI.md#gain-dashboard).
 
+### Savings per subagent
+
+Claude Code runs the ecotokens hooks inside subagents too (for example the `router-*` helpers or `Explore`), and its hook input then names the subagent. ecotokens records that name with each interception, so `gain` can tell savings made inside subagents from those of the main session:
+
+- `gain --json` has a `by_subagent` object keyed by subagent type (`agent_type`, e.g. `router-large`). Interceptions made outside any subagent — the main session, other hosts (Codex, Gemini, Qwen, Pi, OpenCode, Hermes) and every row recorded before this was tracked — fall in the `[main]` bucket. Each bucket has the same fields as `by_family` (`count`, `tokens_before`, `tokens_after`, `savings_pct`), and the buckets add up to `total_tokens_before` / `total_tokens_after`.
+- `by_agent` is unchanged: it still groups by host tool (`claude`, `codex`, `pi`, …), so a subagent's calls stay under `claude` there.
+- The plain-text `gain` output (when stdout is not a terminal) adds a `By subagent` section, and the TUI adds a `Subagents: … saved in N runs` figure to its stats panel, both only once a subagent has been recorded.
+
+What is stored: the subagent type and instance id (`agent_type`, `agent_id`) and, for native Read/Grep/Glob results, the Claude Code `session_id`. Only plain identifiers are kept (letters, digits, `_ - . :`, up to 128 characters, unchanged by secret masking); anything else is dropped and stored as empty. For Bash commands the hook passes the subagent to `ecotokens filter` as `--agent-type` / `--agent-id` (main-session commands keep the short wrapper); the session id is not passed there, so Bash rows have no `session_id`.
+
+Not recorded: calls to the ecotokens MCP tools (`ecotokens_search`, `ecotokens_outline`, …) are still not written to the metrics store, from the main session or from subagents, so `gain` does not count them.
+
 ## Filter command
 
 `ecotokens filter` runs a command directly and returns its filtered output. Useful for testing filters or wrapping commands in scripts:
@@ -121,6 +134,7 @@ Keybindings for every view are listed in [TUI.md](TUI.md#gain-dashboard).
 ecotokens filter -- cargo test
 ecotokens filter --debug -- git log --oneline -50
 ecotokens filter --cwd /path/to/project -- cargo test
+ecotokens filter --agent claude --agent-type router-large -- cargo test   # attribute to a subagent
 ```
 
 The output is compressed by the same family-specific filters used by the hook, and token savings are recorded in the metrics store.
