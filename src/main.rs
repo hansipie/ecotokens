@@ -780,6 +780,8 @@ fn cmd_filter(args: Vec<String>, debug: bool, cwd: Option<PathBuf>, agent: Strin
     );
 
     if debug || settings.debug {
+        // stderr reaches the model: the command line is user input and may carry a secret.
+        let (command, _) = masking::mask(&command);
         eprintln!("[ecotokens debug] command={command} tokens_before={tokens_before} tokens_after={tokens_after}");
     }
     logger.log(
@@ -834,6 +836,8 @@ fn cmd_filter_output(
     );
 
     if debug || settings.debug {
+        // stderr reaches the model: the command line is user input and may carry a secret.
+        let (command, _) = masking::mask(&command);
         eprintln!("[ecotokens debug] command={command} exit_code={exit_code} tokens_before={tokens_before} tokens_after={tokens_after}");
     }
     logger.log(

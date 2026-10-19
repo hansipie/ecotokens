@@ -40,4 +40,10 @@ Sensitive values are detected and replaced before any content reaches the model.
 
 The implementation lives in [`src/masking/patterns.rs`](../src/masking/patterns.rs).
 
+## Stored data
+
+The same patterns apply to what ecotokens stores in `metrics.db`, not only to the output sent to the model. The metrics store (`insert_one` in [`src/metrics/store.rs`](../src/metrics/store.rs)) masks every free-text column before it is written: the command line or tool input (`command`, e.g. `Read <path>` for a post-hook row), the working directory (`git_root`) and the before/after content snapshots. `ecotokens gain` therefore shows `echo [AWS_KEY]`, never the key typed on the command line. The `--debug` line of `ecotokens filter` and `ecotokens filter-output` masks the command too.
+
+Rows written by earlier versions are not rewritten: a secret already stored in clear in an existing `metrics.db` stays there. `ecotokens clear` removes the rows from the table, but it is a plain `DELETE` and the database runs in WAL mode, so the deleted bytes can remain in free pages and in the `-wal` file until they are overwritten. To get rid of them for good, delete `metrics.db` (with its `-wal` and `-shm` files) or run `VACUUM` on it.
+
 The GCP, GitHub fine-grained, GitLab and PyPI patterns match ASCII characters only (`(?-u)`): the credentials they target are ASCII, and a Unicode `\w` makes the first masking call about 95 ms slower. `tests/masking/word_class_test.rs` keeps it that way.

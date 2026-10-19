@@ -125,6 +125,8 @@ The record includes:
 - duration in milliseconds
 - truncated before/after content snapshots
 
+The command string, git root and content snapshots are passed through `crate::masking::mask(...)` by the store itself just before the insert, so no recording path can store a secret typed on the command line (see [secret-patterns.md](secret-patterns.md#stored-data)).
+
 The write is append-only, which keeps metrics collection simple and resilient.
 
 ## 6. Compressed output goes back to the model
