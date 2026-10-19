@@ -218,7 +218,8 @@ pub struct Settings {
     #[serde(default = "default_jev_line_keep_min_prob")]
     pub jev_line_keep_min_prob: f64,
     /// Model input price in USD per million tokens, entered by the user with
-    /// `ecotokens gain price`. Drives the "cost avoided" figure of `gain`.
+    /// `ecotokens gain price`. Drives the "cost avoided" figure of `gain`,
+    /// and is the helper price of every router tier without one of its own.
     #[serde(default)]
     pub price_input_usd_per_mtok: Option<f64>,
     /// Model output price in USD per million tokens (see above).
@@ -232,6 +233,11 @@ pub struct Settings {
     /// Jev output price in USD per million tokens (see above).
     #[serde(default)]
     pub jev_usd_per_mtok_output: Option<f64>,
+    /// Helper prices per router tier, entered by the user with
+    /// `ecotokens router price --tier <tier>`. Unset by default: a part left
+    /// unset falls back to `price_input_usd_per_mtok` / `price_output_usd_per_mtok`.
+    #[serde(default)]
+    pub router_tier_prices: RouterTierPrices,
 
     // ── Model router (UserPromptSubmit hook, sized by Jev) ──
     /// Size every Claude Code message with Jev and hand small jobs to a
@@ -312,6 +318,92 @@ pub struct Settings {
     /// count-based pruning.
     #[serde(default = "default_raw_recovery_max_entries")]
     pub raw_recovery_max_entries: u32,
+}
+
+/// Price of the model of one router tier, in USD per million tokens. Either
+/// part may be unset; it then falls back to the global price of the same kind.
+#[derive(Debug, Clone, Copy, Default, PartialEq, Serialize, Deserialize)]
+pub struct TierPrice {
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub input_usd_per_mtok: Option<f64>,
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub output_usd_per_mtok: Option<f64>,
+}
+
+/// Helper prices of the four router tiers. No price is built in: every tier
+/// is unset until the user enters one.
+#[derive(Debug, Clone, Copy, Default, PartialEq, Serialize, Deserialize)]
+pub struct RouterTierPrices {
+    #[serde(default)]
+    pub tiny: TierPrice,
+    #[serde(default)]
+    pub everyday: TierPrice,
+    #[serde(default)]
+    pub large: TierPrice,
+    #[serde(default)]
+    pub hardest: TierPrice,
+}
+
+impl RouterTierPrices {
+    /// The tier names, smallest first (the router's `Size` names).
+    pub const TIERS: [&'static str; 4] = ["tiny", "everyday", "large", "hardest"];
+
+    pub fn get(&self, tier: &str) -> Option<&TierPrice> {
+        match tier {
+            "tiny" => Some(&self.tiny),
+            "everyday" => Some(&self.everyday),
+            "large" => Some(&self.large),
+            "hardest" => Some(&self.hardest),
+            _ => None,
+        }
+    }
+
+    pub fn get_mut(&mut self, tier: &str) -> Option<&mut TierPrice> {
+        match tier {
+            "tiny" => Some(&mut self.tiny),
+            "everyday" => Some(&mut self.everyday),
+            "large" => Some(&mut self.large),
+            "hardest" => Some(&mut self.hardest),
+            _ => None,
+        }
+    }
+}
+
+/// Where a part of an effective price comes from.
+#[derive(Debug, Clone, Copy, PartialEq, Eq)]
+pub enum PriceSource {
+    /// The tier's own price.
+    Tier,
+    /// The global `price_*_usd_per_mtok`, because the tier part is unset.
+    Global,
+    /// Neither is set.
+    Unset,
+}
+
+impl PriceSource {
+    pub fn as_str(self) -> &'static str {
+        match self {
+            PriceSource::Tier => "tier",
+            PriceSource::Global => "global",
+            PriceSource::Unset => "unset",
+        }
+    }
+}
+
+/// The helper price actually applied to a tier, part by part.
+#[derive(Debug, Clone, Copy, PartialEq)]
+pub struct EffectivePrice {
+    pub input: Option<f64>,
+    pub output: Option<f64>,
+    pub input_source: PriceSource,
+    pub output_source: PriceSource,
+}
+
+impl EffectivePrice {
+    /// Whether any part is set, i.e. whether a cost can be computed at all.
+    pub fn is_priced(&self) -> bool {
+        self.input.is_some() || self.output.is_some()
+    }
 }
 
 #[derive(Debug, Clone, Default, Deserialize)]
@@ -469,6 +561,7 @@ impl Default for Settings {
             price_output_usd_per_mtok: None,
             jev_usd_per_mtok_input: None,
             jev_usd_per_mtok_output: None,
+            router_tier_prices: RouterTierPrices::default(),
             router_enabled: false,
             router_timeout_ms: default_router_timeout_ms(),
             router_min_confidence: default_router_min_confidence(),
@@ -494,6 +587,29 @@ impl Default for Settings {
 }
 
 impl Settings {
+    /// The helper price of a router tier: each part is the tier's own price
+    /// when set, else the global `price_*_usd_per_mtok` of the same kind.
+    /// `None` as `tier` (a helper of no known tier) uses the global price.
+    pub fn effective_tier_price(&self, tier: Option<&str>) -> EffectivePrice {
+        let own = tier
+            .and_then(|t| self.router_tier_prices.get(t))
+            .copied()
+            .unwrap_or_default();
+        let pick = |own: Option<f64>, global: Option<f64>| match (own, global) {
+            (Some(v), _) => (Some(v), PriceSource::Tier),
+            (None, Some(v)) => (Some(v), PriceSource::Global),
+            (None, None) => (None, PriceSource::Unset),
+        };
+        let (input, input_source) = pick(own.input_usd_per_mtok, self.price_input_usd_per_mtok);
+        let (output, output_source) = pick(own.output_usd_per_mtok, self.price_output_usd_per_mtok);
+        EffectivePrice {
+            input,
+            output,
+            input_source,
+            output_source,
+        }
+    }
+
     /// The handoff size limit actually applied: Claude Code truncates injected
     /// hook output above 10,000 characters, so the setting never goes above 9,000.
     pub fn effective_handoff_max_chars(&self) -> usize {

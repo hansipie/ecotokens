@@ -3,7 +3,10 @@
 //!
 //! `end` reads the session transcript and attaches cost, tokens and helper
 //! time to the session's delegated jobs, and the `router-reviewer` verdict as
-//! their (automatic) success. `start` prints one line reminding
+//! their (automatic) success. The cost is the measured tokens times the
+//! configured price of each run's tier (else the global price); it is
+//! computed once, so a later price change never alters a stored cost.
+//! `start` prints one line reminding
 //! the user of jobs nobody judged, once per job. Both are fail-open and
 //! never touch a private or not-allowed folder: its transcript is not even
 //! opened.
@@ -20,6 +23,7 @@ use chrono::{DateTime, Utc};
 use serde::Deserialize;
 use serde_json::Value;
 
+use super::agents::AgentKind;
 use super::location::{self, GateResult};
 use super::outcome::{attach_on, attach_reviewer_verdict, Measurement};
 use super::stats;
@@ -246,6 +250,15 @@ fn finished(run: &Run) -> Option<DateTime<Utc>> {
         .or_else(|| Some(run.start? + chrono::Duration::milliseconds(run.duration_ms?)))
 }
 
+/// The router tier whose price applies to a run: the tier of its helper (the
+/// analyst and the reviewer run on `large`), `None` for an unknown helper.
+fn tier_of(agent: &str) -> Option<&'static str> {
+    AgentKind::ALL
+        .into_iter()
+        .find(|k| k.name() == agent)
+        .map(|k| k.tier().as_str())
+}
+
 fn measure(runs: &[&Run], from: DateTime<Utc>, settings: &Settings) -> Measurement {
     if runs.is_empty() {
         return Measurement::default();
@@ -254,7 +267,9 @@ fn measure(runs: &[&Run], from: DateTime<Utc>, settings: &Settings) -> Measureme
     let mut tokens_out = 0i64;
     let mut any_tokens = false;
     let mut any_split = false;
-    let mut all_split = true;
+    // Each run is priced at the price of its own tier (else the global one);
+    // one run without a split or without any price leaves the cost unknown.
+    let mut cost = Some(0.0f64);
     for run in runs {
         match (run.tokens_in, run.tokens_out, run.tokens_total) {
             (Some(i), Some(o), _) => {
@@ -262,22 +277,22 @@ fn measure(runs: &[&Run], from: DateTime<Utc>, settings: &Settings) -> Measureme
                 tokens_out += o;
                 any_tokens = true;
                 any_split = true;
+                let price = settings.effective_tier_price(tier_of(&run.agent));
+                cost = cost.filter(|_| price.is_priced()).map(|c| {
+                    c + i as f64 / 1e6 * price.input.unwrap_or(0.0)
+                        + o as f64 / 1e6 * price.output.unwrap_or(0.0)
+                });
             }
             (_, _, Some(total)) => {
                 // Only a total: counted as input, and the cost stays unknown.
                 tokens_in += total;
                 any_tokens = true;
-                all_split = false;
+                cost = None;
             }
-            _ => all_split = false,
+            _ => cost = None,
         }
     }
-    let priced =
-        settings.price_input_usd_per_mtok.is_some() || settings.price_output_usd_per_mtok.is_some();
-    let cost_usd = (any_tokens && all_split && priced).then(|| {
-        tokens_in as f64 / 1e6 * settings.price_input_usd_per_mtok.unwrap_or(0.0)
-            + tokens_out as f64 / 1e6 * settings.price_output_usd_per_mtok.unwrap_or(0.0)
-    });
+    let cost_usd = cost.filter(|_| any_tokens);
     let last_end = runs.iter().filter_map(|r| finished(r)).max();
     Measurement {
         cost_usd,

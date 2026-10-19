@@ -59,9 +59,10 @@ Every `ecotokens` command, shell completions, the gain dashboard and the filter 
 | `ecotokens rewrite --mode MODE [--to TARGET]` | Paraphrase, retone, adjust reading level, or translate text using a local model |
 | `ecotokens router on [--timeout-ms N]` | Turn the model router on: `UserPromptSubmit` hook plus `router-*` helper agents in `~/.claude` (Claude Code only, needs `TYPESAFE_API_KEY`) |
 | `ecotokens router off` | Turn the router off and remove its hook and helper agents |
-| `ecotokens router status [--json]` | Messages per size and decision, Jev requests, tokens, latency and estimated cost |
+| `ecotokens router status [--json]` | Messages per size and decision, measured helper tokens (input and output) and cost per route with totals, Jev requests, tokens, latency and estimated cost |
 | `ecotokens router try MESSAGE... [--json] [--timeout-ms N]` | Size sample messages with Jev (live, not recorded, works while the router is off) |
 | `ecotokens router price --input USD --output USD` | Set the Jev price per million tokens used for cost estimates |
+| `ecotokens router price --tier TIER [--input USD] [--output USD] [--clear]` | Set, show or clear the helper price of one router tier (`tiny`, `everyday`, `large`, `hardest`); unset parts fall back to `gain price`; stored costs are not recomputed — see [Model router](model-router.md#tokens-and-cost-per-tier) |
 | `ecotokens handoff on\|off\|status\|list\|load\|clean` | Session handoff across `/clear` and compaction (Claude Code only) — see [Session handoff](handoff.md) |
 
 ## Shell completions

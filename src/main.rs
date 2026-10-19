@@ -438,12 +438,19 @@ enum RouterAction {
         #[arg(long)]
         timeout_ms: Option<u64>,
     },
-    /// Set the Jev price used for cost estimates (USD per million tokens)
+    /// Set the Jev price, or with --tier a helper tier's price, used for cost estimates (USD per million tokens)
     Price {
         #[arg(long)]
         input: Option<f64>,
         #[arg(long)]
         output: Option<f64>,
+        /// Set or show the helper price of this router tier instead of the Jev price
+        /// (unset parts fall back to the global `gain price`)
+        #[arg(long, value_parser = ["tiny", "everyday", "large", "hardest"])]
+        tier: Option<String>,
+        /// With --tier: unset that tier's price, so the global price applies again
+        #[arg(long, requires = "tier", conflicts_with_all = ["input", "output"])]
+        clear: bool,
     },
     /// Record how a delegated job went, or list the jobs that await a judgment
     Outcome {
@@ -2234,7 +2241,15 @@ fn cmd_router(action: RouterAction) {
             json,
             timeout_ms,
         } => std::process::exit(router::cli::try_messages(&messages, json, timeout_ms)),
-        RouterAction::Price { input, output } => router::cli::price(input, output),
+        RouterAction::Price {
+            input,
+            output,
+            tier,
+            clear,
+        } => match tier {
+            Some(tier) => router::cli::tier_price(&tier, input, output, clear),
+            None => router::cli::price(input, output),
+        },
         RouterAction::Rules { json } => router::cli::rules(json),
         RouterAction::Reset { yes, backup, json } => router::cli::reset(yes, backup, json),
         RouterAction::Dossier { json } => router::cli::dossier(json),

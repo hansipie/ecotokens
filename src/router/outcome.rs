@@ -249,9 +249,25 @@ pub struct GroupStats {
     /// Success rate over the user's own judgments only: the reference the
     /// reviewer's verdicts are to be compared with. `None` until one exists.
     pub success_rate_manual: Option<f64>,
+    /// Average of input plus output tokens over the measured jobs.
     pub avg_tokens: Option<f64>,
     /// Helper cost, `None` unless some job was measured and priced.
     pub avg_cost_usd: Option<f64>,
+    /// Delegated jobs whose tokens were measured. Totals and averages of
+    /// tokens cover only these: an unmeasured job is never counted as zero.
+    pub measured: u64,
+    /// Of the jobs, those with a known cost (measured with a full
+    /// input/output split and a configured price). `cost_usd` covers these.
+    pub priced: u64,
+    /// Total input tokens over the measured jobs, `None` when none was.
+    pub tokens_in: Option<i64>,
+    /// Total output tokens over the jobs whose output is known.
+    pub tokens_out: Option<i64>,
+    /// Total helper cost over the `priced` jobs: measured tokens times the
+    /// configured price, so an estimate. No saving is computed.
+    pub cost_usd: Option<f64>,
+    pub avg_tokens_in: Option<f64>,
+    pub avg_tokens_out: Option<f64>,
     /// Helper time: from the delegation to the end of the last helper run.
     pub avg_duration_ms: Option<f64>,
     pub avg_runs: Option<f64>,
@@ -269,6 +285,8 @@ pub struct OutcomeCounts {
 pub struct Aggregates {
     pub by_route: BTreeMap<String, GroupStats>,
     pub by_category: BTreeMap<String, GroupStats>,
+    /// The same figures over every delegated job, all routes together.
+    pub totals: GroupStats,
     pub outcomes: OutcomeCounts,
 }
 
@@ -278,6 +296,8 @@ struct Acc {
     successes: u64,
     manual_successes: u64,
     tokens: (f64, u64),
+    tokens_in: (i64, u64),
+    tokens_out: (i64, u64),
     cost: (f64, u64),
     duration: (f64, u64),
     runs: (f64, u64),
@@ -286,6 +306,8 @@ struct Acc {
 impl Acc {
     fn finish(mut self) -> GroupStats {
         let avg = |(sum, n): (f64, u64)| (n > 0).then(|| sum / n as f64);
+        let total = |(sum, n): (i64, u64)| (n > 0).then_some(sum);
+        let avg_int = |(sum, n): (i64, u64)| (n > 0).then(|| sum as f64 / n as f64);
         self.stats.success_rate =
             (self.stats.judged > 0).then(|| self.successes as f64 / self.stats.judged as f64);
         let manual = self.stats.judged - self.stats.judged_by_reviewer;
@@ -293,6 +315,13 @@ impl Acc {
             (manual > 0).then(|| self.manual_successes as f64 / manual as f64);
         self.stats.avg_tokens = avg(self.tokens);
         self.stats.avg_cost_usd = avg(self.cost);
+        self.stats.measured = self.tokens_in.1;
+        self.stats.priced = self.cost.1;
+        self.stats.tokens_in = total(self.tokens_in);
+        self.stats.tokens_out = total(self.tokens_out);
+        self.stats.cost_usd = (self.cost.1 > 0).then_some(self.cost.0);
+        self.stats.avg_tokens_in = avg_int(self.tokens_in);
+        self.stats.avg_tokens_out = avg_int(self.tokens_out);
         self.stats.avg_duration_ms = avg(self.duration);
         self.stats.avg_runs = avg(self.runs);
         self.stats
@@ -318,6 +347,7 @@ pub fn aggregates(db: &Path, _settings: &Settings) -> io::Result<Aggregates> {
     let mut stmt = conn.prepare(&query).map_err(sql)?;
     let mut by_route: BTreeMap<String, Acc> = BTreeMap::new();
     let mut by_category: BTreeMap<String, Acc> = BTreeMap::new();
+    let mut all = Acc::default();
     let rows = stmt
         .query_map([], |r| {
             Ok((
@@ -345,6 +375,7 @@ pub fn aggregates(db: &Path, _settings: &Settings) -> io::Result<Aggregates> {
         for acc in [
             by_route.entry(route).or_default(),
             by_category.entry(category).or_default(),
+            &mut all,
         ] {
             acc.stats.delegated += 1;
             if let Some(s) = success {
@@ -366,6 +397,12 @@ pub fn aggregates(db: &Path, _settings: &Settings) -> io::Result<Aggregates> {
             if let Some(tin) = tin {
                 acc.tokens.0 += (tin + tout.unwrap_or(0)) as f64;
                 acc.tokens.1 += 1;
+                acc.tokens_in.0 += tin;
+                acc.tokens_in.1 += 1;
+                if let Some(tout) = tout {
+                    acc.tokens_out.0 += tout;
+                    acc.tokens_out.1 += 1;
+                }
             }
             if let Some(cost) = cost {
                 acc.cost.0 += cost;
@@ -386,5 +423,6 @@ pub fn aggregates(db: &Path, _settings: &Settings) -> io::Result<Aggregates> {
         .into_iter()
         .map(|(k, v)| (k, v.finish()))
         .collect();
+    out.totals = all.finish();
     Ok(out)
 }

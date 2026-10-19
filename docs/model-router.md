@@ -142,6 +142,36 @@ ecotokens router outcome 12 --success yes --correction minor --regressions 0
 
 A job nobody judged is *unknown* and is left out of success rates. The next `SessionStart` prints one line (`2 delegated jobs have no judgment yet`) once per job; nothing is printed for private or not-allowed folders. The transcript of a private folder is never opened.
 
+### Tokens and cost per tier
+
+`ecotokens router status` shows, per route, the average input and output tokens of a job (`avg in→out`, e.g. `20.5k→1.0k`) and a `usage (totals)` table with the total input tokens, output tokens and cost of each route, plus a `total` line over all routes:
+
+```text
+usage (totals)      measured  tokens in tokens out        cost
+router-everyday          1/1       2.5k        500           -
+router-large             2/2      41.0k       2.0k     $0.3000
+router-tiny              0/1          -          -           -
+total                    3/4      43.5k       2.5k    $0.3000*
+```
+
+- **Measured, not estimated.** Token counts are read from the session transcript at `SessionEnd` (input includes cache creation and cache reads; retries and reviews are included). A run that reports only a total is counted as input and gives no output figure.
+- **Unmeasured jobs never count as zero.** `measured 3/4` means 3 of the 4 delegated jobs were measured; totals and averages cover only those. A route with no measured job shows `-`.
+- **Cost = measured tokens × the price you configured.** ecotokens has no built-in price list, so the cost is only as good as the price you entered (an estimate when you enter list prices yourself). A job's cost is blank when one of its runs has no price at all (neither input nor output) or no input/output split; a price with only one part set (say no output price anywhere) counts the missing part as $0 and the cost is still shown. `*` marks a total that covers fewer jobs than were measured (`priced` in `--json`).
+- **No savings figure.** Nothing is compared with what a bigger model would have cost: these are the costs of the helpers only.
+
+Prices are per million tokens, in USD. Each helper run is priced at the price of its tier (`router-analyst` and `router-reviewer` run on the `large` tier); each part (input, output) that a tier leaves unset falls back to the global price of `ecotokens gain price`. Tier prices are unset by default: set the ones you want yourself.
+
+```bash
+ecotokens router price --tier large --input 15 --output 75   # set the large tier
+ecotokens router price --tier tiny --output 4                # one part only
+ecotokens router price --tier tiny                           # show it (with the global fallback)
+ecotokens router price --tier large --clear                  # unset it: the global price applies again
+```
+
+A cost is computed once, when the job is measured at `SessionEnd`. **Costs already stored are not recomputed** when a price changes: only jobs measured afterwards use the new price, and a job stored without a cost stays without one. Run `ecotokens router reset` to start the figures over after changing the prices.
+
+`router status --json` gives the same figures with stable names. Each entry of `by_route` and `by_category`, and the new `totals` object (all delegated jobs), carries `delegated`, `measured`, `priced`, `tokens_in`, `tokens_out`, `cost_usd` (totals, `null` when nothing was measured or priced), `avg_tokens_in` and `avg_tokens_out`, next to the existing keys (`avg_tokens` keeps the combined average). A `prices` object lists the global price and, per tier, the price applied with the source of each part (`tier`, `global` or `unset`).
+
 ### Starting over: `router reset`
 
 ```bash
@@ -205,7 +235,7 @@ Each request used about 555 input and 66 output tokens (two questions).
 | --- | --- |
 | `ecotokens router on [--timeout-ms N]` | sets `router_enabled`, installs the `UserPromptSubmit`, `SessionStart` and `SessionEnd` hooks in `~/.claude/settings.json`, writes the six agents to `~/.claude/agents/` |
 | `ecotokens router off` | clears the flag, removes the hook entries and the agents ecotokens wrote |
-| `ecotokens router status [--json]` | per-size, per-decision, per-route, per-category and per-policy figures, outcomes, location counts, Jev requests, tokens, average latency, cost |
+| `ecotokens router status [--json]` | per-size, per-decision, per-route, per-category and per-policy figures, outcomes, measured helper tokens (input and output) and cost per route with a total line, location counts, Jev requests, tokens, average latency, cost |
 | `ecotokens router try MSG… [--json] [--timeout-ms N]` | draws the card and applies the rules live without recording, even while the router is off; honors private and strict locations |
 | `ecotokens router rules [--json]` | the rules in evaluation order, their source and any invalid rule |
 | `ecotokens router private add\|remove\|list\|check` | private locations (`--json` on each) |
@@ -215,6 +245,7 @@ Each request used about 555 input and 66 output tokens (two questions).
 | `ecotokens router reset [--yes] [--backup] [--json]` | delete the routing decisions and their outcomes from `router.db`, after a confirmation (refused without `--yes` when stdin is not a terminal); keeps the Jev call log, settings, locations and rules; `--backup` copies the database to `router.db.bak-<timestamp>` first |
 | `ecotokens router dossier [--json]` | write the dossier of a helper that stops (JSON on stdin) |
 | `ecotokens router price --input X --output Y` | Jev price in USD per million tokens. TypeSafe publishes none, so cost stays blank until you set one. Separate from `ecotokens gain price` |
+| `ecotokens router price --tier tiny\|everyday\|large\|hardest [--input X] [--output Y] [--clear]` | helper price of one tier in USD per million tokens (shows it without a value; `--clear` unsets it). Unset parts fall back to the global `gain price`. Applies to jobs measured afterwards; stored costs are not recomputed |
 
 | Setting | Default | Role |
 | --- | --- | --- |
@@ -226,7 +257,8 @@ Each request used about 555 input and 66 output tokens (two questions).
 | `router_ambiguity_min_prob` / `router_verifiable_min_prob` | `0.5` | thresholds of the two probability questions |
 | `router_private` / `router_allowed` / `router_strict` | `[]` / `[]` / `false` | locations (managed by the commands above) |
 | `router_max_attempts` | `2` | attempts before a helper stops; written into the agent files, so re-run `ecotokens router on` after changing it |
-| `price_input_usd_per_mtok` / `_output` | unset | helper cost estimates (`ecotokens gain price`) |
+| `price_input_usd_per_mtok` / `_output` | unset | helper cost estimates (`ecotokens gain price`); the fallback of every tier |
+| `router_tier_prices.<tier>.input_usd_per_mtok` / `.output_usd_per_mtok` | unset | helper price of one tier (`tiny`, `everyday`, `large`, `hardest`), set with `ecotokens router price --tier`; no default price is built in |
 | `jev_usd_per_mtok_input` / `_output` | unset | Jev cost estimate |
 
 The router uses `TYPESAFE_API_KEY`, `jev_url` and `jev_max_input_chars`, but not `jev_enabled`, so turning it on does not turn on the other Jev uses.

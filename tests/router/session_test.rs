@@ -166,6 +166,106 @@ fn cost_and_duration_are_summed_over_every_router_run_of_the_job() {
 }
 
 #[test]
+fn the_price_of_the_jobs_tier_is_used_and_an_unset_part_falls_back_to_the_global_one() {
+    let w = world();
+    let mut settings = priced();
+    // The second job runs on router-everyday: input from its tier, output global.
+    settings.router_tier_prices.everyday.input_usd_per_mtok = Some(1.0);
+    // Another tier's price changes nothing for it.
+    settings.router_tier_prices.tiny.output_usd_per_mtok = Some(99.0);
+    end(&w.db, &settings, &input(&w), true);
+    let second = &rows(&w.db)[1];
+    let expected = 2_500.0 / 1e6 * 1.0 + 500.0 / 1e6 * 15.0;
+    assert!(
+        (second.cost.unwrap() - expected).abs() < 1e-9,
+        "{:?}",
+        second.cost
+    );
+}
+
+#[test]
+fn a_tier_price_alone_prices_the_job_without_a_global_price() {
+    let w = world();
+    let mut settings = Settings {
+        router_enabled: true,
+        ..Settings::default()
+    };
+    settings.router_tier_prices.everyday.input_usd_per_mtok = Some(2.0);
+    settings.router_tier_prices.everyday.output_usd_per_mtok = Some(10.0);
+    end(&w.db, &settings, &input(&w), true);
+    let r = rows(&w.db);
+    let expected = 2_500.0 / 1e6 * 2.0 + 500.0 / 1e6 * 10.0;
+    assert!(
+        (r[1].cost.unwrap() - expected).abs() < 1e-9,
+        "{:?}",
+        r[1].cost
+    );
+}
+
+/// Cost of job 1 after `end` over a transcript of `runs` (100 input and 10
+/// output tokens each) with `settings`.
+fn cost_after(runs: &[(&str, &str)], settings: &Settings) -> Option<f64> {
+    let w = world();
+    std::fs::write(&w.transcript, transcript_of(runs)).unwrap();
+    end(&w.db, settings, &input(&w), true);
+    rows(&w.db)[0].cost
+}
+
+#[test]
+fn each_run_is_priced_at_its_own_tier_and_the_reviewer_runs_on_large() {
+    let mut settings = priced();
+    settings.router_tier_prices.tiny.input_usd_per_mtok = Some(1.0);
+    settings.router_tier_prices.tiny.output_usd_per_mtok = Some(5.0);
+    settings.router_tier_prices.large.input_usd_per_mtok = Some(15.0);
+    settings.router_tier_prices.large.output_usd_per_mtok = Some(75.0);
+    let cost = cost_after(
+        &[
+            ("router-tiny", "done"),
+            ("router-reviewer", "Verdict: approve"),
+        ],
+        &settings,
+    )
+    .unwrap();
+    let tiny = 100.0 / 1e6 * 1.0 + 10.0 / 1e6 * 5.0;
+    let large = 100.0 / 1e6 * 15.0 + 10.0 / 1e6 * 75.0;
+    assert!((cost - (tiny + large)).abs() < 1e-12, "{cost}");
+}
+
+#[test]
+fn a_helper_of_no_known_tier_uses_the_global_price() {
+    let mut settings = priced();
+    for tier in ["tiny", "everyday", "large", "hardest"] {
+        let p = settings.router_tier_prices.get_mut(tier).unwrap();
+        p.input_usd_per_mtok = Some(1_000.0);
+        p.output_usd_per_mtok = Some(1_000.0);
+    }
+    let cost = cost_after(&[("router-custom", "done")], &settings).unwrap();
+    let global = 100.0 / 1e6 * 3.0 + 10.0 / 1e6 * 15.0;
+    assert!((cost - global).abs() < 1e-12, "{cost}");
+}
+
+#[test]
+fn one_unpriced_run_leaves_the_job_cost_unknown() {
+    // No global price; only the tiny tier has one, the reviewer (large) none.
+    let mut settings = Settings {
+        router_enabled: true,
+        ..Settings::default()
+    };
+    settings.router_tier_prices.tiny.input_usd_per_mtok = Some(1.0);
+    assert_eq!(
+        cost_after(
+            &[
+                ("router-tiny", "done"),
+                ("router-reviewer", "Verdict: approve")
+            ],
+            &settings
+        ),
+        None
+    );
+    assert!(cost_after(&[("router-tiny", "done")], &settings).is_some());
+}
+
+#[test]
 fn without_a_price_the_cost_stays_null_but_tokens_are_measured() {
     let w = world();
     let settings = Settings {

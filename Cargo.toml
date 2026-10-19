@@ -494,6 +494,10 @@ name = "router_reset_test"
 path = "tests/router/reset_test.rs"
 
 [[test]]
+name = "router_usage_test"
+path = "tests/router/usage_test.rs"
+
+[[test]]
 name = "jev_stats_test"
 path = "tests/jev/stats_test.rs"
 

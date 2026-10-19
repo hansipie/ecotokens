@@ -246,6 +246,9 @@ Model router (`ecotokens router status`, `outcome`):
 - An empty store renders `No messages routed yet.` and empty `by_route` / `by_category` maps
 - Judge a job with `router outcome ID --success yes|no`; success rates leave out unknown outcomes and are `null` when nothing is judged
 - Cost, tokens and helper time come from the transcript at `SessionEnd`; an unreadable transcript leaves them unknown, never zero
+- `router status` shows input and output tokens apart (`avg in→out`) and a `usage (totals)` table with `measured N/M` per route and a `total` line; unmeasured jobs are left out of totals and averages, and a route with none measured shows `-`
+- `router status --json` exposes `measured`, `priced`, `tokens_in`, `tokens_out`, `cost_usd`, `avg_tokens_in`, `avg_tokens_out` per route and category, a `totals` object and a `prices` object; no savings figure appears anywhere
+- `router price --tier T --input X --output Y` sets only that tier (the Jev price is untouched); an unset part falls back to the global `gain price`; `--clear` unsets the tier; a price change leaves stored costs as they are
 
 ### F. Search and code-intelligence features
 
