@@ -375,7 +375,26 @@ fn row_to_interception(row: &Row) -> rusqlite::Result<Interception> {
 
 // ── Insert ────────────────────────────────────────────────────────────────────
 
+/// Mask secrets in a free-text column before it is written.
+fn masked(text: &str) -> String {
+    crate::masking::mask(text).0
+}
+
+/// Every write path (`append_to`, `write_to`, the JSONL migration) goes through
+/// here, so this is where the free-text columns are masked. The command line and
+/// the working directory are tool input that may carry a secret (`curl -H
+/// "Authorization: Bearer …"`, `export TOKEN=…`, a path) and never went through
+/// the filter pipeline's output masking; the contents are already masked by
+/// their callers, but a post-hook outline echoes the file path, so they are
+/// masked again here (masking is idempotent). Cost: one pass of the masking
+/// patterns over the command, the path and at most 2 × `CONTENT_MAX_CHARS` of
+/// content per recorded call; the patterns are compiled once per process and
+/// already in use by the output masking on the same path.
 fn insert_one(conn: &Connection, i: &Interception) -> io::Result<()> {
+    let command = masked(&i.command);
+    let git_root = i.git_root.as_deref().map(masked);
+    let content_before = i.content_before.as_deref().map(masked);
+    let content_after = i.content_after.as_deref().map(masked);
     conn.execute(
         "INSERT OR IGNORE INTO interceptions
          (id, timestamp, command, command_family, git_root,
@@ -385,17 +404,17 @@ fn insert_one(conn: &Connection, i: &Interception) -> io::Result<()> {
         params![
             i.id,
             i.timestamp,
-            i.command,
+            command,
             command_family_to_str(&i.command_family),
-            i.git_root,
+            git_root,
             i.tokens_before as i64,
             i.tokens_after as i64,
             i.savings_pct as f64,
             filter_mode_to_str(&i.mode),
             i.redacted as i32,
             i.duration_ms as i64,
-            i.content_before,
-            i.content_after,
+            content_before,
+            content_after,
             hook_type_to_str(&i.hook_type),
         ],
     )

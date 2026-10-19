@@ -205,6 +205,175 @@ fn content_is_stored_and_truncated() {
     assert!(before.contains("[truncated]"));
 }
 
+// ── Secrets in the stored command ─────────────────────────────────────────────
+//
+// The command line (or tool input) is persisted in the `command` column and
+// shown back by `ecotokens gain`. A secret typed on that command line must be
+// masked before it reaches the database. The keys are built at runtime so no
+// secret-shaped literal sits in the source.
+
+fn fake_aws_key() -> String {
+    format!("AKIA{}", "IOSFODNN7EXAMPLE")
+}
+
+fn fake_github_token() -> String {
+    format!("ghp_{}", "a1B2".repeat(9))
+}
+
+/// Raw bytes of the database and its write-ahead log: a row that has not been
+/// checkpointed yet only lives in `-wal`.
+fn raw_db_bytes(path: &std::path::Path) -> Vec<u8> {
+    let mut bytes = std::fs::read(path).unwrap_or_default();
+    let mut wal = path.as_os_str().to_owned();
+    wal.push("-wal");
+    bytes.extend(std::fs::read(std::path::PathBuf::from(wal)).unwrap_or_default());
+    bytes
+}
+
+fn contains_bytes(haystack: &[u8], needle: &str) -> bool {
+    haystack
+        .windows(needle.len())
+        .any(|w| w == needle.as_bytes())
+}
+
+fn assert_no_secret_stored(path: &std::path::Path) {
+    let (aws, gh) = (fake_aws_key(), fake_github_token());
+    let bytes = raw_db_bytes(path);
+    assert!(!contains_bytes(&bytes, &aws), "AWS key stored in clear");
+    assert!(!contains_bytes(&bytes, &gh), "GitHub token stored in clear");
+    for item in read_from(path).unwrap() {
+        assert!(!item.command.contains(&aws), "{}", item.command);
+        assert!(!item.command.contains(&gh), "{}", item.command);
+        assert!(item.command.contains("[AWS_KEY]"), "{}", item.command);
+        assert!(item.command.contains("[GITHUB_TOKEN]"), "{}", item.command);
+    }
+}
+
+fn interception_with_command(command: String, mode: FilterMode) -> Interception {
+    Interception::new(
+        command,
+        CommandFamily::Generic,
+        None,
+        100,
+        40,
+        mode,
+        false,
+        1,
+        None,
+        None,
+    )
+}
+
+#[test]
+fn append_masks_secrets_in_the_stored_command() {
+    let dir = TempDir::new().unwrap();
+    let path = metrics_file(&dir);
+    let cmd = format!(
+        "echo {} && curl -H 'x: {}' example.org",
+        fake_aws_key(),
+        fake_github_token()
+    );
+    append_to(&path, &interception_with_command(cmd, FilterMode::Filtered)).unwrap();
+    assert_no_secret_stored(&path);
+    let items = read_from(&path).unwrap();
+    assert_eq!(
+        items[0].command, "echo [AWS_KEY] && curl -H 'x: [GITHUB_TOKEN]' example.org",
+        "only the secrets are replaced, the rest of the command is kept"
+    );
+}
+
+#[test]
+fn append_masks_secrets_in_a_post_hook_read_command() {
+    // Post-hook rows store `Read <file_path>` (see `metrics_command`).
+    let dir = TempDir::new().unwrap();
+    let path = metrics_file(&dir);
+    let cmd = format!(
+        "Read /tmp/{}/{}/notes.rs",
+        fake_aws_key(),
+        fake_github_token()
+    );
+    let item =
+        interception_with_command(cmd, FilterMode::Filtered).with_hook_type(HookType::PostToolUse);
+    append_to(&path, &item).unwrap();
+    assert_no_secret_stored(&path);
+}
+
+#[test]
+fn append_masks_secrets_in_the_post_hook_cwd_and_outline() {
+    // A post-hook row stores the hook's `cwd` as `git_root`, and the Read outline
+    // stored as `content_after` starts with the file path: both are tool input.
+    let dir = TempDir::new().unwrap();
+    let path = metrics_file(&dir);
+    let secret_dir = format!("/tmp/{}/{}", fake_aws_key(), fake_github_token());
+    let item = Interception::new(
+        format!("Read {secret_dir}/notes.rs"),
+        CommandFamily::NativeRead,
+        Some(secret_dir.clone()),
+        100,
+        40,
+        FilterMode::Filtered,
+        false,
+        0,
+        Some("fn main() {}".to_string()),
+        Some(format!(
+            "[ecotokens outline] {secret_dir}/notes.rs\n  fn main (l.1)"
+        )),
+    )
+    .with_hook_type(HookType::PostToolUse);
+    append_to(&path, &item).unwrap();
+    assert_no_secret_stored(&path);
+    let stored = &read_from(&path).unwrap()[0];
+    assert_eq!(
+        stored.git_root.as_deref(),
+        Some("/tmp/[AWS_KEY]/[GITHUB_TOKEN]")
+    );
+    assert!(stored
+        .content_after
+        .as_deref()
+        .unwrap()
+        .contains("/tmp/[AWS_KEY]/[GITHUB_TOKEN]/notes.rs"));
+}
+
+#[test]
+fn append_masks_secrets_in_an_auto_rewrite_row_command() {
+    // The auto-rewrite stage records a second `Rewritten` row for the same command.
+    let dir = TempDir::new().unwrap();
+    let path = metrics_file(&dir);
+    let cmd = format!("cat {} {}", fake_aws_key(), fake_github_token());
+    append_to(
+        &path,
+        &interception_with_command(cmd, FilterMode::Rewritten),
+    )
+    .unwrap();
+    assert_no_secret_stored(&path);
+}
+
+#[test]
+fn write_to_masks_secrets_in_the_stored_command() {
+    let dir = TempDir::new().unwrap();
+    let path = metrics_file(&dir);
+    let cmd = format!("echo {} {}", fake_aws_key(), fake_github_token());
+    ecotokens::metrics::store::write_to(
+        &path,
+        &[interception_with_command(cmd, FilterMode::Filtered)],
+    )
+    .unwrap();
+    assert_no_secret_stored(&path);
+}
+
+#[test]
+fn a_command_without_secrets_is_stored_unchanged() {
+    let dir = TempDir::new().unwrap();
+    let path = metrics_file(&dir);
+    let cmd = "git log --oneline -n 5 -- src/metrics/store.rs".to_string();
+    append_to(
+        &path,
+        &interception_with_command(cmd.clone(), FilterMode::Filtered),
+    )
+    .unwrap();
+    assert_eq!(read_from(&path).unwrap()[0].command, cmd);
+}
+
 #[test]
 fn opencode_agent_maps_to_opencode_hook_type() {
     assert_eq!(agent_to_hook_type_pre("opencode"), HookType::OpenCode);

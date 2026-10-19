@@ -201,6 +201,74 @@ fn content_carrying_a_secret_makes_zero_provider_calls() {
     );
 }
 
+/// The auto-rewrite stage records a second (`Rewritten`) metrics row for the
+/// same command: a secret on that command line must be masked in both rows.
+#[test]
+fn auto_rewrite_rows_never_store_secrets_from_the_command() {
+    let tmp = tempdir().unwrap();
+    let expanded =
+        PROSE.to_string() + " " + &"Additional elaborated context and detail. ".repeat(20);
+    let (port, count) = spawn_counting_server(&expanded);
+    write_config(
+        tmp.path(),
+        &serde_json::json!({
+            "rewrite_auto_enabled": true,
+            "rewrite_auto_mode": "paraphrase",
+            "rewrite_auto_min_tokens": 1,
+            "rewrite_url": format!("http://127.0.0.1:{port}"),
+        })
+        .to_string(),
+    );
+    // Built at runtime so no secret-shaped literal sits in the source.
+    let aws = format!("AKIA{}", "IOSFODNN7EXAMPLE");
+    let gh = format!("ghp_{}", "a1B2".repeat(9));
+    let command = format!("cat notes.txt --key {aws} --token {gh}");
+
+    let mut child = Command::new(ecotokens_bin())
+        .args(["filter-output", "--command", &command, "--exit-code", "0"])
+        .env("XDG_CONFIG_HOME", tmp.path())
+        .stdin(Stdio::piped())
+        .stdout(Stdio::piped())
+        .stderr(Stdio::piped())
+        .spawn()
+        .expect("spawn ecotokens filter-output");
+    child
+        .stdin
+        .as_mut()
+        .unwrap()
+        .write_all(PROSE.as_bytes())
+        .unwrap();
+    let out = child.wait_with_output().expect("wait");
+    assert!(out.status.success());
+    assert!(
+        count.load(Ordering::SeqCst) >= 1,
+        "the model must have been called"
+    );
+
+    let db = tmp.path().join("ecotokens").join("metrics.db");
+    let rows = ecotokens::metrics::store::read_from(&db).unwrap();
+    assert!(
+        rows.iter()
+            .any(|r| r.mode == ecotokens::metrics::store::FilterMode::Rewritten),
+        "the auto-rewrite row should be recorded"
+    );
+    for r in &rows {
+        assert_eq!(
+            r.command, "cat notes.txt --key [AWS_KEY] --token [GITHUB_TOKEN]",
+            "mode {:?}",
+            r.mode
+        );
+    }
+    let mut bytes = std::fs::read(&db).unwrap();
+    bytes.extend(std::fs::read(db.with_extension("db-wal")).unwrap_or_default());
+    for secret in [&aws, &gh] {
+        assert!(
+            !bytes.windows(secret.len()).any(|w| w == secret.as_bytes()),
+            "secret stored in clear in metrics.db"
+        );
+    }
+}
+
 /// T079: the specific regression research.md §10 predicts — an *expanding*
 /// transformation must survive the pipeline rather than being silently
 /// clamped back to the shorter pre-rewrite text by the anti-expansion clamp
