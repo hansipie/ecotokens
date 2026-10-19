@@ -7,6 +7,8 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ## [Unreleased]
 
+## [0.31.0] - 2026-10-20
+
 ### Added
 
 - **Policy-based model router**: the router now answers six questions in the same single Jev request (`size`, `needs_conversation`, plus the new `nature`, `risk`, `ambiguity` and `verifiability`) and applies an ordered list of rules to the resulting task card. Eight default rules ship in the binary (policy `2026.1`); with no custom rules and no sensitive, design or research trait the route is exactly the size-only route of the previous release. An unreliable `risk` raises the size-only route by one tier; an unreliable `nature` only disables the rules that need it.
@@ -33,6 +35,7 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 - **`router try --json`** gains `message_index`, `card` (with the reliability of each answer), `rule`, `rule_source`, `route`, `raised` and `policy_version`; `agent` now names the routed helper. In a private or not-allowed folder it reports the gate and asks nobody.
 - **`router.db`** gains ten nullable columns on `router_decisions` and a `router_outcomes` table, migrated additively on first use (tolerant of concurrent first opens). Older binaries keep working.
 - **`ecotokens doctor`** reports the helper agents, the session hooks, the custom rules file and the location counts of the router.
+- **Version**: bumped the crate to `0.31.0`.
 
 ### Fixed
 
