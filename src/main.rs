@@ -327,11 +327,30 @@ enum Commands {
         /// Id printed after filtered output ("Full output saved: ecotokens show <id>")
         id: String,
     },
-    /// Delete recorded interceptions (selective or total)
+    /// Delete recorded interceptions (selective or total), or mask the secrets
+    /// older versions stored in clear (--scrub-secrets)
     Clear {
         /// Delete ALL interceptions (required when no other filter is given)
         #[arg(long)]
         all: bool,
+        /// Instead of deleting, mask secrets left in clear by older versions in
+        /// the recorded commands, paths and content snapshots, then compact the
+        /// database (VACUUM) and empty its WAL so the old bytes are gone from
+        /// metrics.db and metrics.db-wal. No backup is made: a backup would keep
+        /// the secrets. Copies made outside ecotokens (file backups, filesystem
+        /// snapshots) are not affected.
+        #[arg(
+            long,
+            conflicts_with_all = ["all", "before", "older_than", "family", "project"]
+        )]
+        scrub_secrets: bool,
+        /// With --scrub-secrets: report what would change and write nothing
+        #[arg(
+            long,
+            requires = "scrub_secrets",
+            conflicts_with_all = ["all", "before", "older_than", "family", "project"]
+        )]
+        dry_run: bool,
         /// Delete interceptions recorded before DATE (format: YYYY-MM-DD)
         #[arg(long, value_name = "DATE")]
         before: Option<String>,
@@ -344,7 +363,8 @@ enum Commands {
         /// Delete only interceptions for a specific project (git root path, or "[undefined]" for entries without a git root)
         #[arg(long, value_name = "PATH")]
         project: Option<String>,
-        /// Skip the confirmation prompt
+        /// Skip the confirmation prompt (required with --scrub-secrets when
+        /// standard input is not a terminal)
         #[arg(long, short = 'y')]
         yes: bool,
     },
@@ -3454,7 +3474,8 @@ fn cmd_clear(
 
     if !all && !has_filter {
         eprintln!(
-            "Error: specify at least one of --all, --before, --older-than, --family, --project"
+            "Error: specify at least one of --all, --before, --older-than, --family, --project \
+             (or --scrub-secrets to mask secrets instead of deleting)"
         );
         std::process::exit(1);
     }
@@ -3599,6 +3620,138 @@ fn cmd_clear(
             std::process::exit(1);
         }
     }
+}
+
+/// `(column, rows)` pairs as `command (2), content_after (1)`.
+fn format_scrub_columns(report: &metrics::scrub::ScrubReport) -> String {
+    report
+        .columns_touched()
+        .iter()
+        .map(|(c, n)| format!("{c} ({n})"))
+        .collect::<Vec<_>>()
+        .join(", ")
+}
+
+/// Legacy JSONL files next to `db`: written before the SQLite store, never
+/// masked, and out of the scrub's scope. Listed so the user can delete them.
+fn print_legacy_metrics_files_note(db: &Path) {
+    for ext in ["jsonl", "jsonl.migrating", "jsonl.migrated"] {
+        let p = db.with_extension(ext);
+        if p.exists() {
+            println!(
+                "Note: {} is a legacy metrics file from before the SQLite store and may hold \
+                 commands in clear. It is not scrubbed: delete it if you no longer need it.",
+                p.display()
+            );
+        }
+    }
+}
+
+/// `ecotokens clear --scrub-secrets [--dry-run] [--yes]`: mask the secrets
+/// older versions stored in clear in `metrics.db`, then purge the old bytes.
+/// See `metrics::scrub` for how the bytes are removed.
+fn cmd_clear_scrub_secrets(dry_run: bool, yes: bool) {
+    use metrics::scrub::{scrub_secrets, ScrubError};
+    use std::io::{BufRead, IsTerminal, Write};
+
+    let Some(path) = metrics::store::metrics_path() else {
+        eprintln!("Cannot locate metrics file");
+        std::process::exit(1);
+    };
+    let fail = |e: ScrubError| -> ! {
+        eprintln!("Error: {e}");
+        std::process::exit(1);
+    };
+
+    // Always preview read-only first: it is the dry run's answer, and it sizes
+    // the confirmation question.
+    let preview = match scrub_secrets(&path, true) {
+        Ok(r) => r,
+        Err(ScrubError::Missing) => {
+            println!(
+                "No metrics database at {}: nothing to scrub.",
+                path.display()
+            );
+            print_legacy_metrics_files_note(&path);
+            return;
+        }
+        Err(e) => fail(e),
+    };
+    println!(
+        "Scanned {} interception(s) in {}.",
+        preview.rows_scanned,
+        path.display()
+    );
+
+    if dry_run {
+        if preview.rows_changed == 0 {
+            println!("No secret left in clear: nothing would change.");
+        } else {
+            println!(
+                "Would mask secrets in {} row(s): {}.",
+                preview.rows_changed,
+                format_scrub_columns(&preview)
+            );
+        }
+        println!("Dry run: nothing was written.");
+        print_legacy_metrics_files_note(&path);
+        return;
+    }
+
+    if preview.rows_changed > 0 && !yes {
+        let n = preview.rows_changed;
+        if !std::io::stdin().is_terminal() {
+            eprintln!(
+                "Error: refusing to rewrite {n} row(s) without confirmation: standard input \
+                 is not a terminal. Re-run with --yes (or use --dry-run to only report)."
+            );
+            std::process::exit(1);
+        }
+        let mut err = std::io::stderr();
+        let _ = write!(
+            err,
+            "About to mask secrets in {n} row(s) of {} ({}), then compact the database. \
+             This cannot be undone and no backup is made (a backup would keep the secrets). \
+             Confirm? [y/N] ",
+            path.display(),
+            format_scrub_columns(&preview)
+        );
+        let _ = err.flush();
+        let mut answer = String::new();
+        if std::io::stdin().lock().read_line(&mut answer).is_err() {
+            answer.clear();
+        }
+        let answer = answer.trim();
+        if !answer.eq_ignore_ascii_case("y") && !answer.eq_ignore_ascii_case("yes") {
+            println!("Aborted. Nothing was changed.");
+            return;
+        }
+    }
+
+    // A database that vanished between the preview and now is not recreated.
+    let report = match scrub_secrets(&path, false) {
+        Ok(r) => r,
+        Err(e) => fail(e),
+    };
+    if report.rows_changed == 0 {
+        println!("No secret left in clear: 0 row(s) changed.");
+    } else {
+        println!(
+            "Masked secrets in {} row(s): {}.",
+            report.rows_changed,
+            format_scrub_columns(&report)
+        );
+    }
+    println!(
+        "Compacted the database (VACUUM) and emptied its WAL: the previous bytes are gone \
+         from {} and its -wal file.",
+        path.display()
+    );
+    println!(
+        "Reminder: copies made outside ecotokens are not affected (file backups, filesystem \
+         snapshots, synced folders). No backup was made."
+    );
+    print_legacy_metrics_files_note(&path);
 }
 
 fn stable_hash(s: &str) -> u64 {
@@ -4316,12 +4469,19 @@ fn main() {
             json,
         } => cmd_duplicates(threshold, min_lines, index_dir, json),
         Commands::Clear {
+            scrub_secrets: true,
+            dry_run,
+            yes,
+            ..
+        } => cmd_clear_scrub_secrets(dry_run, yes),
+        Commands::Clear {
             all,
             before,
             older_than,
             family,
             project,
             yes,
+            ..
         } => cmd_clear(all, before, older_than, family, project, yes),
         Commands::Show { id } => cmd_show(&id),
         Commands::SessionStart => cmd_session_start(),

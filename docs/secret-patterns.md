@@ -44,6 +44,15 @@ The implementation lives in [`src/masking/patterns.rs`](../src/masking/patterns.
 
 The same patterns apply to what ecotokens stores in `metrics.db`, not only to the output sent to the model. The metrics store (`insert_one` in [`src/metrics/store.rs`](../src/metrics/store.rs)) masks every free-text column before it is written: the command line or tool input (`command`, e.g. `Read <path>` for a post-hook row), the working directory (`git_root`) and the before/after content snapshots. `ecotokens gain` therefore shows `echo [AWS_KEY]`, never the key typed on the command line. The `--debug` line of `ecotokens filter` and `ecotokens filter-output` masks the command too.
 
-Rows written by earlier versions are not rewritten: a secret already stored in clear in an existing `metrics.db` stays there. `ecotokens clear` removes the rows from the table, but it is a plain `DELETE` and the database runs in WAL mode, so the deleted bytes can remain in free pages and in the `-wal` file until they are overwritten. To get rid of them for good, delete `metrics.db` (with its `-wal` and `-shm` files) or run `VACUUM` on it.
+Rows written by earlier versions are not rewritten automatically: a secret already stored in clear in an existing `metrics.db` stays there until you run the one-off scrub:
+
+```bash
+ecotokens clear --scrub-secrets --dry-run   # report the rows and columns that would change, write nothing
+ecotokens clear --scrub-secrets             # asks for confirmation when rows would change; --yes when stdin is not a terminal
+```
+
+The scrub reads every row, applies the same masking as new rows to `command`, `git_root`, `content_before` and `content_after`, and updates only the values that change, in one transaction. It enables `PRAGMA secure_delete` before writing, so replaced cell content and freed overflow pages are zeroed, then runs `PRAGMA wal_checkpoint(TRUNCATE)`, `VACUUM` and a final `wal_checkpoint(TRUNCATE)`: the file is rebuilt from its live rows only and the `-wal` file is emptied. This also purges the bytes left by an earlier `ecotokens clear`, which is a plain `DELETE`: run the scrub after a `clear` to drop them from the file. A second run reports 0 rows changed. If another ecotokens process holds the database, the scrub stops with a "busy" error instead of waiting forever; if the rows were masked but the purge could not finish, it says so and a second run completes it.
+
+No backup is made, and the command offers none: a backup would keep the secrets. Copies made outside ecotokens are not affected: file backups, filesystem snapshots (Btrfs, ZFS, Time Machine), synced folders, and blocks the filesystem or SSD has not reused yet. The scrub covers `metrics.db` only. A legacy `metrics.jsonl.migrated` file, left next to it by the JSONL to SQLite migration, can hold commands in clear: the scrub points it out but does not touch it, delete it if you no longer need it. Secrets that none of the patterns above recognise are not masked.
 
 The GCP, GitHub fine-grained, GitLab and PyPI patterns match ASCII characters only (`(?-u)`): the credentials they target are ASCII, and a Unicode `\w` makes the first masking call about 95 ms slower. `tests/masking/word_class_test.rs` keeps it that way.

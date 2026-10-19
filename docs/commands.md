@@ -55,6 +55,7 @@ Every `ecotokens` command, shell completions, the gain dashboard and the filter 
 | `ecotokens clear --older-than DURATION` | Delete interceptions older than a duration (e.g. `30d`, `2w`, `1m`) |
 | `ecotokens clear --family FAMILY` | Delete interceptions of a specific command family |
 | `ecotokens clear --project PATH` | Delete interceptions for a specific project (use `"[undefined]"` for entries without a git root) |
+| `ecotokens clear --scrub-secrets [--dry-run] [--yes]` | Mask secrets that older versions stored in clear in `metrics.db` (commands, paths, content snapshots), then compact the database so the old bytes are gone from the file and its WAL. Asks for confirmation when rows would change (`--yes` is then required when stdin is not a terminal); no backup is made, since it would keep the secrets. See [Stored data](secret-patterns.md#stored-data) |
 | `ecotokens completions SHELL` | Generate a shell completion script (`bash`, `zsh`, `fish`, `powershell`, `elvish`) |
 | `ecotokens rewrite --mode MODE [--to TARGET]` | Paraphrase, retone, adjust reading level, or translate text using a local model |
 | `ecotokens router on [--timeout-ms N]` | Turn the model router on: `UserPromptSubmit` hook plus `router-*` helper agents in `~/.claude` (Claude Code only, needs `TYPESAFE_API_KEY`) |

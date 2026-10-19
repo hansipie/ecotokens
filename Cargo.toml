@@ -158,6 +158,10 @@ name = "clear_test"
 path = "tests/metrics/clear_test.rs"
 
 [[test]]
+name = "scrub_secrets_test"
+path = "tests/metrics/scrub_secrets_test.rs"
+
+[[test]]
 name = "report_test"
 path = "tests/metrics/report_test.rs"
 

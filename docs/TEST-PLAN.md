@@ -306,6 +306,12 @@ Raw output recovery (`ecotokens show`):
 - `ecotokens clear --all` also removes saved outputs; other `clear` filters leave them alone
 - An unwritable config directory does not change the filtered output
 
+Stored data scrub (`ecotokens clear --scrub-secrets`), on a temporary `XDG_CONFIG_HOME` only:
+- Legacy rows written in clear (plain SQL, bypassing `insert_one`) are masked; only the secret is replaced and rows without a secret are byte-identical
+- A byte search of `metrics.db` and `metrics.db-wal` finds neither the secret nor a fragment of it afterwards, including a secret only in the WAL and bytes left by an earlier `clear`
+- `--dry-run` leaves both files byte-identical; a second run changes 0 rows; without `--yes` and without a terminal it exits 1 and changes nothing
+- A missing database is reported and not created; a busy database fails with a "busy" error instead of hanging
+
 Model router:
 - A secret placed in any field of `ecotokens router dossier` input, or in the working-tree diff, is masked on stdout and on disk
 - No secret, path, project name or message text reaches `router.db`, `router status`, `router outcome --pending` or `doctor` (byte search of the database and its WAL after private messages)
