@@ -236,6 +236,19 @@ fn semantic_chunks_for_file(
     (chunks, raw_symbols)
 }
 
+/// Waits for pending segment merges, then deletes the segment files no longer
+/// referenced by `meta.json`. Tantivy never removes merged-away segments on its
+/// own, so without this every run leaves its old segments on disk.
+///
+/// Best-effort: the index is already committed, so a failure here only delays
+/// the cleanup to the next run.
+fn compact_index(index: &Index, writer: IndexWriter) {
+    let _ = writer.wait_merging_threads();
+    if let Ok(gc_writer) = index.writer::<tantivy::TantivyDocument>(15_000_000) {
+        let _ = gc_writer.garbage_collect_files().wait();
+    }
+}
+
 pub fn index_directory(opts: IndexOptions) -> tantivy::Result<IndexStats> {
     // If the embedding model changed, invalidate the existing HNSW index by
     // treating it as a full reset for the embeddings (but keep BM25 incremental).
@@ -468,6 +481,7 @@ pub fn index_directory(opts: IndexOptions) -> tantivy::Result<IndexStats> {
     }
 
     writer.commit()?;
+    compact_index(&index, writer);
 
     save_timestamps(&opts.index_dir, &timestamps);
     save_semantic_manifest(&opts.index_dir, &semantic_manifest);

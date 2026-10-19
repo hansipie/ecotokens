@@ -361,3 +361,53 @@ fn chunks_the_embedding_provider_cannot_embed_are_counted() {
     // Without a provider there is nothing to fail.
     assert_eq!(index(EmbedProvider::None).embed_failed_count, 0);
 }
+
+/// Segment ids that `meta.json` still references, as 32-char hex file prefixes.
+fn live_segment_ids(index_dir: &std::path::Path) -> std::collections::HashSet<String> {
+    let meta: serde_json::Value =
+        serde_json::from_slice(&fs::read(index_dir.join("meta.json")).unwrap()).unwrap();
+    meta["segments"]
+        .as_array()
+        .unwrap()
+        .iter()
+        .map(|s| s["segment_id"].as_str().unwrap().replace('-', ""))
+        .collect()
+}
+
+#[test]
+fn reindexing_leaves_no_orphan_segment_files() {
+    let src = TempDir::new().unwrap();
+    let idx = TempDir::new().unwrap();
+    make_fixture(&src);
+
+    for round in 0..4 {
+        // The index stores mtimes at one-second resolution.
+        std::thread::sleep(std::time::Duration::from_millis(1100));
+        fs::write(
+            src.path().join("main.rs"),
+            format!("fn main() {{ let round = {round}; }}\n"),
+        )
+        .unwrap();
+        index_directory(IndexOptions {
+            reset: false,
+            path: src.path().to_path_buf(),
+            index_dir: idx.path().to_path_buf(),
+            progress: None,
+            embed_provider: ecotokens::config::settings::EmbedProvider::None,
+            log_tx: None,
+        })
+        .unwrap();
+    }
+
+    let live = live_segment_ids(idx.path());
+    let orphans: Vec<String> = fs::read_dir(idx.path())
+        .unwrap()
+        .filter_map(|e| e.ok()?.file_name().into_string().ok())
+        .filter(|n| n.len() > 33 && n.as_bytes()[32] == b'.')
+        .filter(|n| !live.contains(&n[..32]))
+        .collect();
+    assert!(
+        orphans.is_empty(),
+        "segment files no longer referenced by meta.json: {orphans:?}"
+    );
+}
