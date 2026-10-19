@@ -142,6 +142,26 @@ ecotokens router outcome 12 --success yes --correction minor --regressions 0
 
 A job nobody judged is *unknown* and is left out of success rates. The next `SessionStart` prints one line (`2 delegated jobs have no judgment yet`) once per job; nothing is printed for private or not-allowed folders. The transcript of a private folder is never opened.
 
+### Starting over: `router reset`
+
+```bash
+ecotokens router reset --backup          # asks, then copies router.db and clears the routing data
+ecotokens router reset --yes --json      # scripts: no question, {"decisions", "outcomes", "backup"}
+```
+
+`router reset` deletes every row of `router_outcomes`, then of `router_decisions`, in one transaction, and prints how many of each it deleted. Use it after changing the rules or the thresholds, so that `router status` only shows figures of the new setup. It keeps:
+
+- the Jev call log (`jev_calls`, read by `ecotokens jev`), which shares the same `router.db` file;
+- the settings, the private and allowed locations, `router_rules.toml`, the helper agents and the dossiers.
+
+Safety:
+
+- Without `--yes` it asks for confirmation on the terminal. When standard input is not a terminal (a pipe, a script, a hook), it refuses and deletes nothing; pass `--yes` there.
+- `--backup` first writes a copy to `router.db.bak-<UTC timestamp>` next to the database, with SQLite's `VACUUM INTO`, which reads one consistent snapshot of the database and its WAL even while a hook is writing. An existing file is never overwritten. Restore it by copying it over `router.db` while no Claude Code session is running.
+- An empty or missing database is reported as 0 deleted, without a question; a missing database is not created.
+- Deleted rows are overwritten (`secure_delete`) and the WAL is checkpointed, so they do not linger in the file.
+- Job ids are not reused: the `AUTOINCREMENT` sequence of `router_decisions` is kept, so an id seen before the reset (in `outcome --pending`, a dossier or a session still running) never names a new job. A session that started before the reset and ends after it finds no decision of its own and records nothing.
+
 ## What it cannot do
 
 - The routing is advisory: the main model still reads every message and does the handoff, so it saves on the work itself, not on the whole turn.
@@ -192,6 +212,7 @@ Each request used about 555 input and 66 output tokens (two questions).
 | `ecotokens router allow add\|remove\|list` | strict-mode allow list |
 | `ecotokens router strict on\|off\|status` | strict mode |
 | `ecotokens router outcome [ID] [--pending] [--success yes\|no] [--correction none\|minor\|major] [--regressions N]` | judge a delegated job, or list the ones awaiting a judgment |
+| `ecotokens router reset [--yes] [--backup] [--json]` | delete the routing decisions and their outcomes from `router.db`, after a confirmation (refused without `--yes` when stdin is not a terminal); keeps the Jev call log, settings, locations and rules; `--backup` copies the database to `router.db.bak-<timestamp>` first |
 | `ecotokens router dossier [--json]` | write the dossier of a helper that stops (JSON on stdin) |
 | `ecotokens router price --input X --output Y` | Jev price in USD per million tokens. TypeSafe publishes none, so cost stays blank until you set one. Separate from `ecotokens gain price` |
 

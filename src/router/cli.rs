@@ -1,4 +1,4 @@
-//! `ecotokens router on|off|status|try|price`.
+//! `ecotokens router on|off|status|try|price|reset|…`.
 
 use std::path::Path;
 use std::time::Duration;
@@ -832,6 +832,104 @@ pub fn dossier(json: bool) -> std::io::Result<()> {
     } else {
         print!("{}", written.markdown);
     }
+    Ok(())
+}
+
+// ── Reset ───────────────────────────────────────────────────────────────
+
+/// `ecotokens router reset [--yes] [--backup] [--json]`: deletes the routing
+/// decisions and their outcomes from `router.db`. The Jev call log
+/// (`jev_calls`), the settings, the locations and the rules are kept.
+///
+/// Without `--yes` it asks on the terminal, and refuses when standard input is
+/// not a terminal. An empty or missing database is reported as 0 without a
+/// question, and nothing is deleted then.
+pub fn reset(yes: bool, backup: bool, json: bool) -> std::io::Result<()> {
+    use std::io::{BufRead, IsTerminal, Write};
+    let invalid = |m: String| std::io::Error::new(std::io::ErrorKind::InvalidInput, m);
+    let Some(db) = stats::router_db_path() else {
+        return Err(invalid("cannot locate the configuration directory".into()));
+    };
+    let before = stats::routing_rows(&db)?;
+    let backup_file = if backup && db.exists() {
+        Some(stats::backup_path(&db, chrono::Utc::now()))
+    } else {
+        None
+    };
+
+    let report = |deleted: stats::RoutingRows, backup_file: Option<&Path>| {
+        if json {
+            println!(
+                "{}",
+                serde_json::json!({
+                    "decisions": deleted.decisions,
+                    "outcomes": deleted.outcomes,
+                    "backup": backup_file.map(|p| p.to_string_lossy().into_owned()),
+                })
+            );
+        } else {
+            println!(
+                "router reset: deleted {} decision(s) and {} outcome(s)",
+                deleted.decisions, deleted.outcomes
+            );
+            if let Some(p) = backup_file {
+                println!("  backup : {}", p.display());
+            } else if backup {
+                println!("  backup : none (no database yet)");
+            }
+            println!("  kept   : Jev call log, settings, locations and rules");
+        }
+    };
+
+    if before.is_empty() {
+        if let Some(dest) = &backup_file {
+            stats::backup(&db, dest)?;
+        }
+        report(stats::RoutingRows::default(), backup_file.as_deref());
+        return Ok(());
+    }
+
+    if !yes {
+        if !std::io::stdin().is_terminal() {
+            return Err(invalid(format!(
+                "refusing to delete {} decision(s) and {} outcome(s) without confirmation: \
+                 standard input is not a terminal. Re-run with --yes",
+                before.decisions, before.outcomes
+            )));
+        }
+        let mut err = std::io::stderr();
+        let _ = write!(
+            err,
+            "About to delete {} routing decision(s) and {} outcome(s) from {}{}. \
+             The Jev call log, settings, locations and rules are kept. Confirm? [y/N] ",
+            before.decisions,
+            before.outcomes,
+            db.display(),
+            if backup_file.is_some() {
+                " (after a backup)"
+            } else {
+                ""
+            }
+        );
+        let _ = err.flush();
+        let mut answer = String::new();
+        std::io::stdin().lock().read_line(&mut answer)?;
+        let answer = answer.trim();
+        if !answer.eq_ignore_ascii_case("y") && !answer.eq_ignore_ascii_case("yes") {
+            if json {
+                println!("{}", serde_json::json!({ "aborted": true }));
+            } else {
+                println!("Aborted. Nothing was deleted.");
+            }
+            return Ok(());
+        }
+    }
+
+    if let Some(dest) = &backup_file {
+        stats::backup(&db, dest)?;
+    }
+    let deleted = stats::reset(&db)?;
+    report(deleted, backup_file.as_deref());
     Ok(())
 }
 

@@ -466,6 +466,19 @@ enum RouterAction {
         #[arg(long)]
         json: bool,
     },
+    /// Delete the recorded routing decisions and their outcomes (keeps the Jev
+    /// call log, settings, locations and rules)
+    Reset {
+        /// Skip the confirmation prompt (required when stdin is not a terminal)
+        #[arg(long, short = 'y')]
+        yes: bool,
+        /// Copy router.db to router.db.bak-<timestamp> before deleting
+        #[arg(long)]
+        backup: bool,
+        /// Output as JSON
+        #[arg(long)]
+        json: bool,
+    },
     /// List the routing rules in evaluation order (user rules first)
     Rules {
         /// Output as JSON
@@ -2207,6 +2220,7 @@ fn cmd_router(action: RouterAction) {
         } => std::process::exit(router::cli::try_messages(&messages, json, timeout_ms)),
         RouterAction::Price { input, output } => router::cli::price(input, output),
         RouterAction::Rules { json } => router::cli::rules(json),
+        RouterAction::Reset { yes, backup, json } => router::cli::reset(yes, backup, json),
         RouterAction::Dossier { json } => router::cli::dossier(json),
         RouterAction::Outcome {
             id,

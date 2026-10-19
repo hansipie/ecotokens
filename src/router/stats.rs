@@ -317,6 +317,104 @@ pub fn summarize(path: &Path, settings: &Settings) -> io::Result<Summary> {
     Ok(s)
 }
 
+// ── Reset ───────────────────────────────────────────────────────────────
+
+/// Rows held by, or removed from, the two routing tables.
+#[derive(Debug, Clone, Copy, Default, PartialEq, Eq, Serialize)]
+pub struct RoutingRows {
+    pub decisions: u64,
+    pub outcomes: u64,
+}
+
+impl RoutingRows {
+    pub fn is_empty(&self) -> bool {
+        self.decisions == 0 && self.outcomes == 0
+    }
+}
+
+fn count_rows(conn: &Connection) -> rusqlite::Result<RoutingRows> {
+    let count = |table: &str| {
+        conn.query_row(&format!("SELECT COUNT(*) FROM {table}"), [], |r| {
+            r.get::<_, i64>(0)
+        })
+        .map(|n| n.max(0) as u64)
+    };
+    Ok(RoutingRows {
+        decisions: count("router_decisions")?,
+        outcomes: count("router_outcomes")?,
+    })
+}
+
+/// Rows in `router_decisions` and `router_outcomes`. A missing database reads
+/// as zero and is not created.
+pub fn routing_rows(path: &Path) -> io::Result<RoutingRows> {
+    if !path.exists() {
+        return Ok(RoutingRows::default());
+    }
+    let conn = open(path)?;
+    count_rows(&conn).map_err(io::Error::other)
+}
+
+/// `<db>.bak-<UTC timestamp>` next to the database.
+pub fn backup_path(path: &Path, at: chrono::DateTime<chrono::Utc>) -> PathBuf {
+    let mut name = path
+        .file_name()
+        .map(|n| n.to_os_string())
+        .unwrap_or_else(|| "router.db".into());
+    name.push(format!(".bak-{}", at.format("%Y%m%d-%H%M%S")));
+    path.with_file_name(name)
+}
+
+/// Writes a consistent copy of the database to `dest` with `VACUUM INTO`,
+/// which reads one snapshot of the database and its WAL, so a copy taken
+/// while a hook is writing is never torn. Refuses to overwrite `dest`.
+pub fn backup(path: &Path, dest: &Path) -> io::Result<()> {
+    if dest.exists() {
+        return Err(io::Error::new(
+            io::ErrorKind::AlreadyExists,
+            format!("backup file already exists: {}", dest.display()),
+        ));
+    }
+    let conn = open(path)?;
+    conn.execute("VACUUM INTO ?1", params![dest.to_string_lossy()])
+        .map_err(io::Error::other)?;
+    Ok(())
+}
+
+/// Deletes every row of `router_outcomes`, then of `router_decisions`, in one
+/// transaction, and returns how many rows each lost. `jev_calls` and every
+/// other table are left untouched; a missing database is not created.
+///
+/// The `AUTOINCREMENT` sequence of `router_decisions` is kept, so ids stay
+/// monotonic: a job id seen before the reset (in `router outcome --pending`,
+/// a dossier or a session still running) never names a new decision. Deleted
+/// content is overwritten (`secure_delete`) and the WAL is checkpointed, so
+/// the old rows do not linger in the file.
+pub fn reset(path: &Path) -> io::Result<RoutingRows> {
+    if !path.exists() {
+        return Ok(RoutingRows::default());
+    }
+    let mut conn = open(path)?;
+    conn.execute_batch("PRAGMA secure_delete = ON;")
+        .map_err(io::Error::other)?;
+    let tx = conn
+        .transaction_with_behavior(rusqlite::TransactionBehavior::Immediate)
+        .map_err(io::Error::other)?;
+    let outcomes = tx
+        .execute("DELETE FROM router_outcomes", [])
+        .map_err(io::Error::other)? as u64;
+    let decisions = tx
+        .execute("DELETE FROM router_decisions", [])
+        .map_err(io::Error::other)? as u64;
+    tx.commit().map_err(io::Error::other)?;
+    // Best effort: a concurrent reader may keep part of the WAL alive.
+    let _ = conn.query_row("PRAGMA wal_checkpoint(TRUNCATE)", [], |_| Ok(()));
+    Ok(RoutingRows {
+        decisions,
+        outcomes,
+    })
+}
+
 /// Dollar estimate, only when at least one price is configured.
 pub fn cost_usd(input_tokens: u64, output_tokens: u64, settings: &Settings) -> Option<f64> {
     if settings.jev_usd_per_mtok_input.is_none() && settings.jev_usd_per_mtok_output.is_none() {
