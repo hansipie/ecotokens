@@ -106,9 +106,31 @@ fn init(conn: &Connection) -> rusqlite::Result<()> {
              correction   TEXT,
              regressions  INTEGER,
              judged_at    TEXT,
-             reminded     INTEGER NOT NULL DEFAULT 0
+             reminded     INTEGER NOT NULL DEFAULT 0,
+             judged_by    TEXT
          );",
-    )
+    )?;
+    migrate_outcomes(conn)
+}
+
+/// Databases created before automatic verdicts lack `judged_by`; a judged row
+/// without it was entered by the user.
+fn migrate_outcomes(conn: &Connection) -> rusqlite::Result<()> {
+    let mut stmt = conn.prepare("PRAGMA table_info(router_outcomes)")?;
+    let has_column = stmt
+        .query_map([], |r| r.get::<_, String>(1))?
+        .filter_map(Result::ok)
+        .any(|c| c == "judged_by");
+    drop(stmt);
+    if has_column {
+        return Ok(());
+    }
+    match conn.execute("ALTER TABLE router_outcomes ADD COLUMN judged_by TEXT", []) {
+        Ok(_) => Ok(()),
+        // Another process migrated between our check and our ALTER.
+        Err(e) if e.to_string().contains("duplicate column name") => Ok(()),
+        Err(e) => Err(e),
+    }
 }
 
 /// Opens the database, creating and migrating it. Concurrent first opens by

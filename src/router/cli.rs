@@ -850,16 +850,27 @@ fn print_group_table(
     }
     println!();
     println!(
-        "{:<18} {:>9} {:>6} {:>8} {:>10} {:>9} {:>8} {:>5}  corrections n/m/M · regressions",
-        title, "delegated", "judged", "success", "avg tokens", "avg cost", "avg time", "runs"
+        "{:<18} {:>9} {:>6} {:>8} {:>8} {:>8} {:>10} {:>9} {:>8} {:>5}  corrections n/m/M · regressions",
+        title,
+        "delegated",
+        "judged",
+        "by rev.",
+        "success",
+        "manual",
+        "avg tokens",
+        "avg cost",
+        "avg time",
+        "runs"
     );
     for (name, g) in groups {
         println!(
-            "{:<18} {:>9} {:>6} {:>8} {:>10} {:>9} {:>8} {:>5}  {}/{}/{} · {}",
+            "{:<18} {:>9} {:>6} {:>8} {:>8} {:>8} {:>10} {:>9} {:>8} {:>5}  {}/{}/{} · {}",
             name,
             g.delegated,
             g.judged,
+            g.judged_by_reviewer,
             opt(g.success_rate, |r| format!("{:.0}%", r * 100.0)),
+            opt(g.success_rate_manual, |r| format!("{:.0}%", r * 100.0)),
             opt(g.avg_tokens, |t| format!("{t:.0}")),
             opt(g.avg_cost_usd, |c| format!("${c:.4}")),
             opt(g.avg_duration_ms, |ms| format!("{:.1}s", ms / 1000.0)),
@@ -891,7 +902,9 @@ fn print_outcome_tables(
         println!();
         println!(
             "Outcomes: {} judged · {} unknown (excluded from success rates). \
-             Judge a job with `ecotokens router outcome --pending`.",
+             `by rev.` counts verdicts taken from router-reviewer; `manual` is the success \
+             rate of your own judgments only. Judge a job with \
+             `ecotokens router outcome --pending`.",
             o.judged, o.unknown
         );
     }

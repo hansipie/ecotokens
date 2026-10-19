@@ -2,7 +2,8 @@
 //! hooks of the router.
 //!
 //! `end` reads the session transcript and attaches cost, tokens and helper
-//! time to the session's delegated jobs. `start` prints one line reminding
+//! time to the session's delegated jobs, and the `router-reviewer` verdict as
+//! their (automatic) success. `start` prints one line reminding
 //! the user of jobs nobody judged, once per job. Both are fail-open and
 //! never touch a private or not-allowed folder: its transcript is not even
 //! opened.
@@ -20,7 +21,7 @@ use serde::Deserialize;
 use serde_json::Value;
 
 use super::location::{self, GateResult};
-use super::outcome::{attach_on, Measurement};
+use super::outcome::{attach_on, attach_reviewer_verdict, Measurement};
 use super::stats;
 use crate::config::Settings;
 
@@ -52,6 +53,35 @@ struct Run {
     /// Only a combined figure is known.
     tokens_total: Option<i64>,
     duration_ms: Option<i64>,
+    /// The `subagent_type` of the call, e.g. `router-large`.
+    agent: String,
+    /// For a `router-reviewer` run: `Some(true)` approved, `Some(false)`
+    /// rejected, `None` when the reply carries no readable verdict.
+    verdict: Option<bool>,
+}
+
+const REVIEWER: &str = "router-reviewer";
+
+/// The verdict of a reviewer's reply: its first line that starts with
+/// `Verdict:` and then approves or rejects. Anything else is no verdict, and
+/// the job stays unjudged.
+fn parse_verdict(text: &str) -> Option<bool> {
+    let line = text.lines().find_map(|l| {
+        let l = l.trim_start_matches(|c: char| c.is_whitespace() || "*#>_`".contains(c));
+        let head = l.get(.."verdict".len())?;
+        head.eq_ignore_ascii_case("verdict")
+            .then(|| &l["verdict".len()..])
+    })?;
+    let word = line
+        .trim_start_matches(|c: char| c.is_whitespace() || ":-*_`—".contains(c))
+        .to_ascii_lowercase();
+    if word.starts_with("approve") {
+        Some(true)
+    } else if word.starts_with("reject") {
+        Some(false)
+    } else {
+        None
+    }
 }
 
 fn parse_ts(v: &Value) -> Option<DateTime<Utc>> {
@@ -162,18 +192,19 @@ fn read_runs(path: &Path) -> Option<Vec<Run>> {
                         item.get("name").and_then(Value::as_str),
                         Some("Agent" | "Task")
                     );
-                    let router = item
+                    let agent = item
                         .pointer("/input/subagent_type")
                         .and_then(Value::as_str)
-                        .is_some_and(|s| s.starts_with("router-"));
-                    if let (true, true, Some(id)) =
-                        (is_agent, router, item.get("id").and_then(Value::as_str))
+                        .filter(|s| s.starts_with("router-"));
+                    if let (true, Some(agent), Some(id)) =
+                        (is_agent, agent, item.get("id").and_then(Value::as_str))
                     {
                         ids.push(id.to_string());
                         runs.insert(
                             id.to_string(),
                             Run {
                                 start: ts,
+                                agent: agent.to_string(),
                                 ..Run::default()
                             },
                         );
@@ -190,8 +221,11 @@ fn read_runs(path: &Path) -> Option<Vec<Run>> {
                     if let Some(r) = v.get("toolUseResult").filter(|r| r.is_object()) {
                         fill_from_tool_use_result(run, r);
                     }
-                    let (total, ms) =
-                        usage_in_text(&result_text(item.get("content").unwrap_or(&Value::Null)));
+                    let text = result_text(item.get("content").unwrap_or(&Value::Null));
+                    if run.agent == REVIEWER {
+                        run.verdict = parse_verdict(&text);
+                    }
+                    let (total, ms) = usage_in_text(&text);
                     if run.tokens_in.is_none() {
                         run.tokens_total = run.tokens_total.or(total);
                     }
@@ -254,6 +288,24 @@ fn measure(runs: &[&Run], from: DateTime<Utc>, settings: &Settings) -> Measureme
     }
 }
 
+/// What the reviewer's verdict says about a job's success. A rejection is a
+/// failure. An approval counts as the documented "verified success on the
+/// first attempt" only when exactly one helper produced the result: after a
+/// retry or a second producer the job stays unjudged. The last readable
+/// verdict wins.
+fn reviewed_success(runs: &[&Run]) -> Option<bool> {
+    let verdict = runs
+        .iter()
+        .rev()
+        .filter(|r| r.agent == REVIEWER)
+        .find_map(|r| r.verdict)?;
+    let producers = runs
+        .iter()
+        .filter(|r| r.agent != REVIEWER && r.agent != "router-analyst")
+        .count();
+    (!verdict || producers == 1).then_some(verdict)
+}
+
 fn gate_open(settings: &Settings, input: &SessionInput, trusted: bool) -> bool {
     settings.router_enabled
         && location::gate(input.cwd.as_deref(), settings, trusted) == GateResult::Open
@@ -288,6 +340,7 @@ pub fn end(db: &Path, settings: &Settings, input: &SessionInput, trusted: bool) 
     for i in jobs {
         let d = &decisions[i];
         let until = decisions.get(i + 1).map(|n| n.at);
+        let mut reviewed = None;
         let measurement = match (&runs, d.at) {
             (Some(runs), from) => {
                 let mine: Vec<&Run> = runs
@@ -297,6 +350,7 @@ pub fn end(db: &Path, settings: &Settings, input: &SessionInput, trusted: bool) 
                             .is_some_and(|s| s >= from && until.map_or(true, |u| s < u))
                     })
                     .collect();
+                reviewed = reviewed_success(&mine);
                 measure(&mine, from, settings)
             }
             _ => Measurement::default(),
@@ -304,6 +358,9 @@ pub fn end(db: &Path, settings: &Settings, input: &SessionInput, trusted: bool) 
         // An unmeasurable job still gets its (empty) row, so the reminder can
         // track it; unknown parts stay NULL.
         let _ = attach_on(&conn, d.id, &measurement);
+        if let Some(approved) = reviewed {
+            let _ = attach_reviewer_verdict(&conn, d.id, approved);
+        }
     }
     report
 }

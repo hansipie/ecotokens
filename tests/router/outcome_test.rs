@@ -512,3 +512,97 @@ fn status_on_an_empty_store_has_the_new_keys_with_empty_values() {
     assert!(stdout_of(&out).contains("No messages routed yet"));
     let _ = (Path::new(""), Size::Tiny);
 }
+
+// ── Automatic verdicts ───────────────────────────────────────────────────
+
+/// What `SessionEnd` writes for a reviewed job.
+fn reviewer_verdict(db: &Path, id: i64, approved: bool) {
+    Connection::open(db)
+        .unwrap()
+        .execute(
+            "INSERT INTO router_outcomes (decision_id, success, judged_by)
+             VALUES (?1, ?2, 'reviewer')",
+            rusqlite::params![id, approved],
+        )
+        .unwrap();
+}
+
+#[test]
+fn reviewer_and_manual_verdicts_are_counted_apart() {
+    let (_dir, db, ids) = db_with_jobs();
+    reviewer_verdict(&db, ids[0], true);
+    reviewer_verdict(&db, ids[1], true);
+    record_judgment(&db, ids[2], &judgment(Some(false), None, None)).unwrap();
+
+    let a = aggregates(&db, &Settings::default()).unwrap();
+    let large = &a.by_route["router-large"];
+    assert_eq!((large.judged, large.judged_by_reviewer), (2, 2));
+    assert_eq!(large.success_rate, Some(1.0));
+    assert_eq!(
+        large.success_rate_manual, None,
+        "no judgment of the user yet: no reference rate"
+    );
+    let everyday = &a.by_route["router-everyday"];
+    assert_eq!((everyday.judged, everyday.judged_by_reviewer), (1, 0));
+    assert_eq!(everyday.success_rate_manual, Some(0.0));
+}
+
+#[test]
+fn a_manual_verdict_replaces_the_reviewers_and_moves_to_the_manual_rate() {
+    let (_dir, db, ids) = db_with_jobs();
+    reviewer_verdict(&db, ids[0], true);
+    record_judgment(&db, ids[0], &judgment(Some(false), None, None)).unwrap();
+
+    let a = aggregates(&db, &Settings::default()).unwrap();
+    let large = &a.by_route["router-large"];
+    assert_eq!((large.judged, large.judged_by_reviewer), (1, 0));
+    assert_eq!(large.success_rate_manual, Some(0.0));
+}
+
+#[test]
+fn a_correction_alone_keeps_the_reviewers_verdict_as_the_reviewers() {
+    let (_dir, db, ids) = db_with_jobs();
+    reviewer_verdict(&db, ids[0], true);
+    record_judgment(&db, ids[0], &judgment(None, Some(Correction::Minor), None)).unwrap();
+
+    let a = aggregates(&db, &Settings::default()).unwrap();
+    let large = &a.by_route["router-large"];
+    assert_eq!(large.judged_by_reviewer, 1);
+    assert_eq!(large.correction.minor, 1);
+}
+
+#[test]
+fn a_database_without_judged_by_is_migrated_and_its_verdicts_stay_manual() {
+    let dir = TempDir::new().unwrap();
+    let db = dir.path().join("router.db");
+    let id = record_at(
+        &db,
+        &delegated("router-large", Nature::Bug, "2026.1"),
+        at(0),
+    )
+    .unwrap();
+    {
+        // The table as older versions created it.
+        let conn = Connection::open(&db).unwrap();
+        conn.execute_batch(
+            "DROP TABLE router_outcomes;
+             CREATE TABLE router_outcomes (
+                 decision_id INTEGER PRIMARY KEY, cost_usd REAL, tokens_in INTEGER,
+                 tokens_out INTEGER, duration_ms INTEGER, runs INTEGER, success INTEGER,
+                 correction TEXT, regressions INTEGER, judged_at TEXT,
+                 reminded INTEGER NOT NULL DEFAULT 0);",
+        )
+        .unwrap();
+        conn.execute(
+            "INSERT INTO router_outcomes (decision_id, success) VALUES (?1, 1)",
+            [id],
+        )
+        .unwrap();
+    }
+    let a = aggregates(&db, &Settings::default()).unwrap();
+    let large = &a.by_route["router-large"];
+    assert_eq!((large.judged, large.judged_by_reviewer), (1, 0));
+    assert_eq!(large.success_rate_manual, Some(1.0));
+    // Opening twice (two hooks) is idempotent.
+    assert!(pending(&db).unwrap().is_empty());
+}

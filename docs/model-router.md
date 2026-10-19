@@ -128,12 +128,17 @@ The analyst and the reviewer are read-only because their agent files declare an 
 
 ## Outcomes: which routes work
 
-`ecotokens router status` groups delegated jobs by route, category (nature) and policy version. Cost, tokens, helper time and the number of helper runs (retries and reviews included) are measured automatically at `SessionEnd` from the session transcript. Whether a job worked is **your** judgment:
+`ecotokens router status` groups delegated jobs by route, category (nature) and policy version. Cost, tokens, helper time and the number of helper runs (retries and reviews included) are measured automatically at `SessionEnd` from the session transcript. Whether a job worked is judged in two ways:
+
+- **By the reviewer, automatically.** `router-reviewer` starts its reply with `Verdict: approve` or `Verdict: reject`. At `SessionEnd` the router reads that line and records it as the job's success, marked as coming from the reviewer. A rejection is a failure. An approval counts as a success only when exactly one helper produced the result (a retry or a second producer leaves the job unjudged), because `success = yes` means "verified success on the first attempt". A reply without a readable verdict, or a job without a review, stays unjudged. Agent files installed before this change need `ecotokens router on` to pick up the verdict line.
+- **By you, manually.** Your judgment always wins: it replaces a reviewer verdict, and the reviewer never overwrites yours.
 
 ```bash
 ecotokens router outcome --pending                       # jobs awaiting a judgment
 ecotokens router outcome 12 --success yes --correction minor --regressions 0
 ```
+
+`ecotokens router status` shows how many verdicts came from the reviewer (`by rev.`) and the success rate of your own judgments only (`manual`). The reviewer is a model and can approve a wrong result, so the combined `success` rate may be optimistic. Judge a sample by hand and compare the `manual` rate with the combined one before relying on the reviewer's verdicts. The outcomes never change the routing itself.
 
 A job nobody judged is *unknown* and is left out of success rates. The next `SessionStart` prints one line (`2 delegated jobs have no judgment yet`) once per job; nothing is printed for private or not-allowed folders. The transcript of a private folder is never opened.
 

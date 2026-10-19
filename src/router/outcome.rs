@@ -1,8 +1,11 @@
 //! Outcomes of delegated jobs: what each route really cost and whether it
 //! worked. Cost, tokens and time are measured automatically from the session
 //! transcript ([`super::session`]); the judgment (did it work, how much did
-//! the user correct, any regression) is entered by the user. The two never
-//! overwrite each other, and a job nobody judged is "unknown", never a failure.
+//! the user correct, any regression) is entered by the user, or, for the
+//! success alone, taken from the verdict of `router-reviewer` and marked as
+//! such (`judged_by`). The user's judgment always wins over the reviewer's.
+//! Measurements and judgments never overwrite each other, and a job nobody
+//! judged is "unknown", never a failure.
 
 use std::collections::BTreeMap;
 use std::fmt;
@@ -112,13 +115,15 @@ pub fn record_judgment(db: &Path, id: i64, judgment: &Judgment) -> Result<(), Ju
         return Err(JudgmentError::UnknownJob(id));
     }
     conn.execute(
-        "INSERT INTO router_outcomes (decision_id, success, correction, regressions, judged_at)
-         VALUES (?1, ?2, ?3, ?4, ?5)
+        "INSERT INTO router_outcomes
+             (decision_id, success, correction, regressions, judged_at, judged_by)
+         VALUES (?1, ?2, ?3, ?4, ?5, CASE WHEN ?2 IS NULL THEN NULL ELSE 'manual' END)
          ON CONFLICT(decision_id) DO UPDATE SET
              success     = COALESCE(?2, success),
              correction  = COALESCE(?3, correction),
              regressions = COALESCE(?4, regressions),
-             judged_at   = ?5",
+             judged_at   = ?5,
+             judged_by   = CASE WHEN ?2 IS NULL THEN judged_by ELSE 'manual' END",
         params![
             id,
             judgment.success.map(i64::from),
@@ -151,6 +156,29 @@ pub(crate) fn attach_on(conn: &Connection, id: i64, m: &Measurement) -> io::Resu
              duration_ms = COALESCE(?5, duration_ms),
              runs        = COALESCE(?6, runs)",
         params![id, m.cost_usd, m.tokens_in, m.tokens_out, m.duration_ms, m.runs],
+    )
+    .map_err(sql)?;
+    Ok(())
+}
+
+/// Stores the verdict of the reviewer as the job's success. It never replaces
+/// a verdict the user entered (a judged row without `judged_by` predates
+/// automatic verdicts and counts as the user's); a later review of the same
+/// job does replace an earlier automatic one.
+pub(crate) fn attach_reviewer_verdict(
+    conn: &Connection,
+    id: i64,
+    approved: bool,
+) -> io::Result<()> {
+    conn.execute(
+        "INSERT INTO router_outcomes (decision_id, success, judged_at, judged_by)
+         VALUES (?1, ?2, ?3, 'reviewer')
+         ON CONFLICT(decision_id) DO UPDATE SET
+             success   = ?2,
+             judged_at = ?3,
+             judged_by = 'reviewer'
+         WHERE router_outcomes.success IS NULL OR router_outcomes.judged_by = 'reviewer'",
+        params![id, i64::from(approved), chrono::Utc::now().to_rfc3339()],
     )
     .map_err(sql)?;
     Ok(())
@@ -214,8 +242,13 @@ pub struct GroupStats {
     pub delegated: u64,
     /// Jobs with a verdict (success or failure).
     pub judged: u64,
+    /// Of `judged`, the jobs the reviewer judged; the rest the user did.
+    pub judged_by_reviewer: u64,
     /// `None` until a job is judged: unknown outcomes are never counted.
     pub success_rate: Option<f64>,
+    /// Success rate over the user's own judgments only: the reference the
+    /// reviewer's verdicts are to be compared with. `None` until one exists.
+    pub success_rate_manual: Option<f64>,
     pub avg_tokens: Option<f64>,
     /// Helper cost, `None` unless some job was measured and priced.
     pub avg_cost_usd: Option<f64>,
@@ -243,6 +276,7 @@ pub struct Aggregates {
 struct Acc {
     stats: GroupStats,
     successes: u64,
+    manual_successes: u64,
     tokens: (f64, u64),
     cost: (f64, u64),
     duration: (f64, u64),
@@ -254,6 +288,9 @@ impl Acc {
         let avg = |(sum, n): (f64, u64)| (n > 0).then(|| sum / n as f64);
         self.stats.success_rate =
             (self.stats.judged > 0).then(|| self.successes as f64 / self.stats.judged as f64);
+        let manual = self.stats.judged - self.stats.judged_by_reviewer;
+        self.stats.success_rate_manual =
+            (manual > 0).then(|| self.manual_successes as f64 / manual as f64);
         self.stats.avg_tokens = avg(self.tokens);
         self.stats.avg_cost_usd = avg(self.cost);
         self.stats.avg_duration_ms = avg(self.duration);
@@ -272,7 +309,8 @@ pub fn aggregates(db: &Path, _settings: &Settings) -> io::Result<Aggregates> {
     let query = format!(
         "SELECT {ROUTE_SQL}, COALESCE(d.nature, 'unknown'),
                 o.success, o.correction, o.regressions,
-                o.tokens_in, o.tokens_out, o.cost_usd, o.duration_ms, o.runs
+                o.tokens_in, o.tokens_out, o.cost_usd, o.duration_ms, o.runs,
+                o.judged_by = 'reviewer'
          FROM router_decisions d LEFT JOIN router_outcomes o ON o.decision_id = d.id
          WHERE d.decision = 'delegated'
          ORDER BY d.id"
@@ -293,11 +331,12 @@ pub fn aggregates(db: &Path, _settings: &Settings) -> io::Result<Aggregates> {
                 r.get::<_, Option<f64>>(7)?,
                 r.get::<_, Option<i64>>(8)?,
                 r.get::<_, Option<i64>>(9)?,
+                r.get::<_, Option<bool>>(10)?.unwrap_or(false),
             ))
         })
         .map_err(sql)?;
     for row in rows {
-        let (route, category, success, correction, regressions, tin, tout, cost, ms, runs) =
+        let (route, category, success, correction, regressions, tin, tout, cost, ms, runs, auto) =
             row.map_err(sql)?;
         match success {
             Some(_) => out.outcomes.judged += 1,
@@ -311,6 +350,11 @@ pub fn aggregates(db: &Path, _settings: &Settings) -> io::Result<Aggregates> {
             if let Some(s) = success {
                 acc.stats.judged += 1;
                 acc.successes += (s != 0) as u64;
+                if auto {
+                    acc.stats.judged_by_reviewer += 1;
+                } else {
+                    acc.manual_successes += (s != 0) as u64;
+                }
             }
             match correction.as_deref().and_then(Correction::parse) {
                 Some(Correction::None) => acc.stats.correction.none += 1,

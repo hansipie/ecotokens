@@ -572,3 +572,6 @@ path = "tests/handoff/perf_test.rs"
 [[test]]
 name = "masking_word_class_test"
 path = "tests/masking/word_class_test.rs"
+
+[profile.dev]
+debug = "line-tables-only"
