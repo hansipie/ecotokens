@@ -265,14 +265,19 @@ fn create_schema(conn: &Connection) -> io::Result<()> {
 
 // ── Connection ────────────────────────────────────────────────────────────────
 
+/// The in-process lock every connection to a metrics database is opened under.
+pub(crate) fn db_init_lock() -> std::sync::MutexGuard<'static, ()> {
+    DB_INIT_LOCK
+        .get_or_init(|| Mutex::new(()))
+        .lock()
+        .unwrap_or_else(|e| e.into_inner())
+}
+
 fn open_conn(path: &Path) -> io::Result<Connection> {
     if let Some(parent) = path.parent() {
         std::fs::create_dir_all(parent)?;
     }
-    let _guard = DB_INIT_LOCK
-        .get_or_init(|| Mutex::new(()))
-        .lock()
-        .unwrap_or_else(|e| e.into_inner());
+    let _guard = db_init_lock();
     let conn = Connection::open(path).map_err(io::Error::other)?;
     conn.execute_batch(
         // busy_timeout: retry for up to 5s under multi-process contention instead
@@ -375,8 +380,10 @@ fn row_to_interception(row: &Row) -> rusqlite::Result<Interception> {
 
 // ── Insert ────────────────────────────────────────────────────────────────────
 
-/// Mask secrets in a free-text column before it is written.
-fn masked(text: &str) -> String {
+/// Mask secrets in a free-text column before it is written. Also used by
+/// `scrub::scrub_secrets` so rows written by older versions are rewritten with
+/// exactly the masking new rows get.
+pub(crate) fn masked(text: &str) -> String {
     crate::masking::mask(text).0
 }
 
