@@ -134,7 +134,7 @@ It works only in Claude Code (terminal, or the Code tab of the desktop app), not
 
 | Command | What it does |
 |---------|--------------|
-| `ecotokens gain` | Savings dashboard (`--period today\|week\|month`, `--history`, `--json`) |
+| `ecotokens gain` | Savings dashboard (`--period today\|week\|month`, `--history`, `--json`); splits Claude Code subagent savings from the main session ([details](docs/commands.md#savings-per-subagent)) |
 | `ecotokens filter -- CMD [ARGS]` | Run a command and print its filtered output |
 | `ecotokens show ID` | Print the full output behind a filtered result (see below) |
 | `ecotokens search QUERY` | Search the indexed codebase (run `ecotokens index` first) |

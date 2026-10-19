@@ -1,7 +1,7 @@
 use std::io::{self, Read};
 
 use crate::config::settings::Settings;
-use crate::metrics::store::{CommandFamily, FilterMode, HookType, Interception};
+use crate::metrics::store::{AgentContext, CommandFamily, FilterMode, HookType, Interception};
 use serde::{Deserialize, Serialize};
 
 use super::glob_handler::handle_glob;
@@ -65,13 +65,33 @@ impl GeminiAfterToolOutput {
     }
 }
 
-#[derive(Debug, Clone, Deserialize, Serialize)]
+#[derive(Debug, Clone, Default, Deserialize, Serialize)]
 pub struct PostHookInput {
     pub tool_name: String,
     pub tool_input: serde_json::Value,
     pub tool_response: serde_json::Value,
     #[serde(default)]
     pub cwd: Option<String>,
+    /// Claude Code session. Absent for hosts that do not send it.
+    #[serde(default)]
+    pub session_id: Option<String>,
+    /// Claude Code subagent instance; absent in the main session.
+    #[serde(default)]
+    pub agent_id: Option<String>,
+    /// Claude Code subagent type (e.g. `router-large`); absent in the main session.
+    #[serde(default)]
+    pub agent_type: Option<String>,
+}
+
+impl PostHookInput {
+    /// Session and subagent of this call, reduced to plain identifiers.
+    pub fn agent_context(&self) -> AgentContext {
+        AgentContext::new(
+            self.session_id.as_deref(),
+            self.agent_id.as_deref(),
+            self.agent_type.as_deref(),
+        )
+    }
 }
 
 #[derive(Debug, Clone, Serialize)]
@@ -263,8 +283,9 @@ fn read_post_input() -> Option<PostHookInput> {
     serde_json::from_str(&buf).ok()
 }
 
-/// Record metrics for a post-hook interception.
-fn record_post_metrics(
+/// Build the interception row recorded for a post-hook call, carrying the
+/// session and subagent of `input` (sanitized, see [`AgentContext::new`]).
+pub fn post_interception(
     input: &PostHookInput,
     family: CommandFamily,
     tokens_before: u32,
@@ -272,13 +293,13 @@ fn record_post_metrics(
     content_before: &str,
     final_output: &str,
     hook_type: HookType,
-) {
+) -> Interception {
     let mode = if tokens_after < tokens_before {
         FilterMode::Filtered
     } else {
         FilterMode::Passthrough
     };
-    let interception = Interception::new(
+    Interception::new(
         metrics_command(input),
         family,
         input.cwd.clone(),
@@ -290,7 +311,29 @@ fn record_post_metrics(
         Some(content_before.to_string()),
         Some(final_output.to_string()),
     )
-    .with_hook_type(hook_type);
+    .with_hook_type(hook_type)
+    .with_agent_context(&input.agent_context())
+}
+
+/// Record metrics for a post-hook interception.
+fn record_post_metrics(
+    input: &PostHookInput,
+    family: CommandFamily,
+    tokens_before: u32,
+    tokens_after: u32,
+    content_before: &str,
+    final_output: &str,
+    hook_type: HookType,
+) {
+    let interception = post_interception(
+        input,
+        family,
+        tokens_before,
+        tokens_after,
+        content_before,
+        final_output,
+        hook_type,
+    );
     if let Some(path) = crate::metrics::store::metrics_path() {
         let _ = crate::metrics::store::append_to(&path, &interception);
     }
@@ -452,12 +495,13 @@ pub fn handle_post_codex() {
     }
 
     let cwd = input.cwd.as_deref().map(std::path::Path::new);
-    let (filtered, tokens_before, tokens_after) = crate::filter::run_filter_pipeline_with_cwd(
+    let (filtered, tokens_before, tokens_after) = crate::filter::run_filter_pipeline_with_context(
         &command,
         &output_text,
         0,
         cwd,
         HookType::CodexPostToolUse,
+        &input.agent_context(),
     );
 
     let out = if tokens_after < tokens_before {

@@ -189,8 +189,29 @@ pub fn run_filter_pipeline_with_cwd(
     cwd: Option<&std::path::Path>,
     hook_type: crate::metrics::store::HookType,
 ) -> (String, u32, u32) {
+    run_filter_pipeline_with_context(
+        command,
+        raw,
+        duration_ms,
+        cwd,
+        hook_type,
+        &crate::metrics::store::AgentContext::default(),
+    )
+}
+
+/// [`run_filter_pipeline_with_cwd`] that also records which session and
+/// subagent triggered the interception (`agent`, see
+/// [`crate::metrics::store::AgentContext`]).
+pub fn run_filter_pipeline_with_context(
+    command: &str,
+    raw: &str,
+    duration_ms: u32,
+    cwd: Option<&std::path::Path>,
+    hook_type: crate::metrics::store::HookType,
+    agent: &crate::metrics::store::AgentContext,
+) -> (String, u32, u32) {
     let (mut filtered, tokens_before, tokens_after) =
-        filter_pipeline_core(command, raw, duration_ms, cwd, hook_type);
+        filter_pipeline_core(command, raw, duration_ms, cwd, hook_type, agent);
 
     // Skipped under `cfg(test)`: it would write into the real config dir.
     #[cfg(not(test))]
@@ -223,6 +244,7 @@ fn filter_pipeline_core(
     duration_ms: u32,
     cwd: Option<&std::path::Path>,
     hook_type: crate::metrics::store::HookType,
+    agent: &crate::metrics::store::AgentContext,
 ) -> (String, u32, u32) {
     // Jev calls made while filtering belong to the same project as the interception.
     if let Some(dir) = cwd {
@@ -308,7 +330,8 @@ fn filter_pipeline_core(
             Some(masked),
             Some(filtered.clone()),
         )
-        .with_hook_type(hook_type.clone());
+        .with_hook_type(hook_type.clone())
+        .with_agent_context(agent);
         let _ = crate::metrics::store::append_to(&path, &rec);
     }
 
@@ -329,6 +352,7 @@ fn filter_pipeline_core(
                     command,
                     cwd,
                     hook_type,
+                    agent,
                     tokens_after,
                     tokens_after_auto,
                 );
@@ -427,6 +451,7 @@ fn record_auto_rewrite_metrics(
     command: &str,
     cwd: Option<&std::path::Path>,
     hook_type: crate::metrics::store::HookType,
+    agent: &crate::metrics::store::AgentContext,
     tokens_before: u32,
     tokens_after: u32,
 ) {
@@ -449,7 +474,8 @@ fn record_auto_rewrite_metrics(
         None,
         None,
     )
-    .with_hook_type(hook_type);
+    .with_hook_type(hook_type)
+    .with_agent_context(agent);
     rec.savings_pct = 0.0;
     let _ = crate::metrics::store::append_to(&path, &rec);
 }

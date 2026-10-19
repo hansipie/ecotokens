@@ -480,3 +480,192 @@ fn filter_masks_secrets_on_stderr() {
     );
     assert!(String::from_utf8_lossy(&out.stdout).contains("out"));
 }
+
+// ── Subagent attribution in metrics ───────────────────────────────────────────
+
+fn claude_pre_tool_use(command: &str, cwd: &std::path::Path, subagent: bool) -> String {
+    let mut v = serde_json::json!({
+        "session_id": "3f2a9c1e-5b7d-4e8f-9a0b-1c2d3e4f5a6b",
+        "hook_event_name": "PreToolUse",
+        "tool_name": "Bash",
+        "tool_input": { "command": command },
+        "cwd": cwd.display().to_string(),
+    });
+    if subagent {
+        v["agent_id"] = serde_json::json!("a1b2c3d4");
+        v["agent_type"] = serde_json::json!("router-large");
+    }
+    v.to_string()
+}
+
+fn run_with_stdin(args: &[&str], config: &std::path::Path, stdin: &str) -> std::process::Output {
+    use std::io::Write;
+    let mut child = Command::new(ecotokens())
+        .args(args)
+        .env("XDG_CONFIG_HOME", config)
+        .env("HOME", config)
+        .stdin(std::process::Stdio::piped())
+        .stdout(std::process::Stdio::piped())
+        .stderr(std::process::Stdio::piped())
+        .spawn()
+        .expect("spawn ecotokens");
+    child
+        .stdin
+        .take()
+        .unwrap()
+        .write_all(stdin.as_bytes())
+        .unwrap();
+    child.wait_with_output().unwrap()
+}
+
+/// Run the Bash pre-hook, then the rewritten command (with the binary under
+/// test in place of `ecotokens`), and return the rewritten command.
+fn hook_then_run(config: &std::path::Path, subagent: bool) -> String {
+    let out = run_with_stdin(
+        &["hook"],
+        config,
+        &claude_pre_tool_use("seq 1 400", config, subagent),
+    );
+    assert!(
+        out.status.success(),
+        "{}",
+        String::from_utf8_lossy(&out.stderr)
+    );
+    let v: serde_json::Value = serde_json::from_slice(&out.stdout).expect("hook JSON");
+    let rewritten = v["hookSpecificOutput"]["updatedInput"]["command"]
+        .as_str()
+        .expect("Bash command is rewritten")
+        .to_string();
+    let runnable = rewritten
+        .strip_prefix("ecotokens ")
+        .map(|rest| format!("'{}' {rest}", ecotokens()))
+        .expect("rewrite starts with ecotokens");
+    let run = Command::new("bash")
+        .args(["-c", &runnable])
+        .env("XDG_CONFIG_HOME", config)
+        .env("HOME", config)
+        .output()
+        .unwrap();
+    assert!(
+        run.status.success(),
+        "{}",
+        String::from_utf8_lossy(&run.stderr)
+    );
+    rewritten
+}
+
+#[test]
+fn subagent_bash_call_records_its_agent_type() {
+    let config = TempDir::new().unwrap();
+    let rewritten = hook_then_run(config.path(), true);
+    assert!(
+        rewritten.contains(" --agent-type router-large --agent-id a1b2c3d4 "),
+        "{rewritten}"
+    );
+    assert!(
+        !rewritten.contains("3f2a9c1e"),
+        "session id is not forwarded"
+    );
+
+    let db = config.path().join("ecotokens").join("metrics.db");
+    let rows = ecotokens::metrics::store::read_from(&db).unwrap();
+    assert_eq!(rows.len(), 1);
+    assert_eq!(rows[0].agent_type.as_deref(), Some("router-large"));
+    assert_eq!(rows[0].agent_id.as_deref(), Some("a1b2c3d4"));
+}
+
+#[test]
+fn main_session_bash_call_records_null_agent_type() {
+    let config = TempDir::new().unwrap();
+    let rewritten = hook_then_run(config.path(), false);
+    assert!(!rewritten.contains("--agent-type"), "{rewritten}");
+    assert!(!rewritten.contains("--agent-id"), "{rewritten}");
+
+    let db = config.path().join("ecotokens").join("metrics.db");
+    let rows = ecotokens::metrics::store::read_from(&db).unwrap();
+    assert_eq!(rows.len(), 1);
+    assert_eq!(rows[0].agent_type, None);
+    assert_eq!(rows[0].agent_id, None);
+}
+
+#[test]
+fn gain_json_splits_main_session_and_subagents() {
+    let config = TempDir::new().unwrap();
+    hook_then_run(config.path(), true);
+    hook_then_run(config.path(), false);
+
+    let out = Command::new(ecotokens())
+        .args(["gain", "--json"])
+        .env("XDG_CONFIG_HOME", config.path())
+        .env("HOME", config.path())
+        .output()
+        .unwrap();
+    assert!(out.status.success());
+    let v: serde_json::Value = serde_json::from_slice(&out.stdout).unwrap();
+    let by_subagent = v["by_subagent"].as_object().expect("by_subagent");
+    assert_eq!(by_subagent["router-large"]["count"], 1);
+    assert_eq!(by_subagent["[main]"]["count"], 1);
+    let sum = |k: &str| -> u64 { by_subagent.values().map(|s| s[k].as_u64().unwrap()).sum() };
+    assert_eq!(
+        sum("tokens_before"),
+        v["total_tokens_before"].as_u64().unwrap()
+    );
+    assert_eq!(
+        sum("tokens_after"),
+        v["total_tokens_after"].as_u64().unwrap()
+    );
+    assert_eq!(v["by_agent"]["claude"]["count"], 2, "by_agent is unchanged");
+
+    let text = Command::new(ecotokens())
+        .args(["gain"])
+        .env("XDG_CONFIG_HOME", config.path())
+        .env("HOME", config.path())
+        .output()
+        .unwrap();
+    let text = String::from_utf8_lossy(&text.stdout);
+    assert!(text.contains("By subagent"), "{text}");
+    assert!(text.contains("router-large"), "{text}");
+}
+
+#[test]
+fn subagent_read_call_records_its_agent_type() {
+    let config = TempDir::new().unwrap();
+    let file = config.path().join("big.rs");
+    let mut src = String::new();
+    for i in 0..120 {
+        src.push_str(&format!(
+            "pub fn function_{i}(x: u32) -> u32 {{\n    let y = x + {i};\n    y * 2\n}}\n\n"
+        ));
+    }
+    std::fs::write(&file, &src).unwrap();
+
+    for (subagent, expected) in [(true, Some("router-large")), (false, None)] {
+        let mut input = serde_json::json!({
+            "session_id": "3f2a9c1e-5b7d-4e8f-9a0b-1c2d3e4f5a6b",
+            "hook_event_name": "PostToolUse",
+            "tool_name": "Read",
+            "tool_input": { "file_path": file.display().to_string() },
+            "tool_response": { "file": { "content": src } },
+            "cwd": config.path().display().to_string(),
+        });
+        if subagent {
+            input["agent_id"] = serde_json::json!("a1b2c3d4");
+            input["agent_type"] = serde_json::json!("router-large");
+        }
+        let out = run_with_stdin(&["hook-post"], config.path(), &input.to_string());
+        assert!(
+            out.status.success(),
+            "{}",
+            String::from_utf8_lossy(&out.stderr)
+        );
+
+        let db = config.path().join("ecotokens").join("metrics.db");
+        let rows = ecotokens::metrics::store::read_from(&db).unwrap();
+        let last = rows.last().expect("the Read call is recorded");
+        assert_eq!(last.agent_type.as_deref(), expected);
+        assert_eq!(
+            last.session_id.as_deref(),
+            Some("3f2a9c1e-5b7d-4e8f-9a0b-1c2d3e4f5a6b")
+        );
+    }
+}

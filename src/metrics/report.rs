@@ -32,6 +32,37 @@ pub struct FamilyStats {
     pub savings_pct: f32,
 }
 
+/// `by_subagent` key for interceptions made outside any subagent. The brackets
+/// keep it apart from a subagent type, which is a plain identifier.
+pub const MAIN_SESSION_BUCKET: &str = "[main]";
+
+/// Group `items` by `key` and compute each group's savings percentage.
+fn group_stats<'a>(
+    items: &[&'a Interception],
+    key: impl Fn(&'a Interception) -> &'a str,
+) -> HashMap<String, FamilyStats> {
+    let mut groups: HashMap<String, FamilyStats> = HashMap::new();
+    for item in items {
+        let entry = groups.entry(key(item).to_string()).or_insert(FamilyStats {
+            count: 0,
+            tokens_before: 0,
+            tokens_after: 0,
+            savings_pct: 0.0,
+        });
+        entry.count += 1;
+        entry.tokens_before += item.tokens_before as u64;
+        entry.tokens_after += item.tokens_after as u64;
+    }
+    for stats in groups.values_mut() {
+        stats.savings_pct = if stats.tokens_before == 0 {
+            0.0
+        } else {
+            ((1.0 - stats.tokens_after as f64 / stats.tokens_before as f64) * 100.0) as f32
+        };
+    }
+    groups
+}
+
 #[derive(Debug, Clone, Serialize, Deserialize)]
 pub struct ProjectStats {
     pub count: u32,
@@ -51,13 +82,49 @@ pub struct Report {
     pub cost_avoided_usd: Option<f64>,
     pub by_family: HashMap<String, FamilyStats>,
     pub by_project: HashMap<String, ProjectStats>,
+    /// Grouped by host tool (`claude`, `codex`, `pi`, …), see `HookType::agent_label`.
     pub by_agent: HashMap<String, FamilyStats>,
+    /// Grouped by Claude Code subagent type (`agent_type` of the hook input,
+    /// e.g. `router-large`). Rows without one — the main session, other hosts
+    /// and rows recorded before subagents were tracked — fall in
+    /// [`MAIN_SESSION_BUCKET`]. The buckets add up to the report totals.
+    #[serde(default)]
+    pub by_subagent: HashMap<String, FamilyStats>,
     /// Additive token cost of automatic-pipeline rewrite transformations
     /// (`Origin::AutoPipeline`, `FilterMode::Rewritten`). Local `Cli`/`Mcp`
     /// rewrites consume no paid tokens and are excluded entirely from this
     /// report's sums — see `aggregate()` (FR-041, FR-041a, SC-012).
     #[serde(default)]
     pub rewrite_overhead_tokens: u64,
+}
+
+/// Lines of the "By subagent" section of the plain-text `ecotokens gain`
+/// output: the main-session bucket first, then each subagent type by name.
+/// Empty when no interception came from a subagent, so the section only
+/// appears once there is something to compare.
+pub fn subagent_lines(report: &Report) -> Vec<String> {
+    if report
+        .by_subagent
+        .keys()
+        .all(|k| k.as_str() == MAIN_SESSION_BUCKET)
+    {
+        return Vec::new();
+    }
+    let mut rows: Vec<_> = report.by_subagent.iter().collect();
+    rows.sort_by(|(a, _), (b, _)| {
+        (a.as_str() != MAIN_SESSION_BUCKET, a.as_str())
+            .cmp(&(b.as_str() != MAIN_SESSION_BUCKET, b.as_str()))
+    });
+    let width = rows.iter().map(|(k, _)| k.len()).max().unwrap_or(0).max(12);
+    let mut lines = vec!["By subagent    :".to_string()];
+    for (name, stats) in rows {
+        let saved = stats.tokens_before.saturating_sub(stats.tokens_after);
+        lines.push(format!(
+            "  {name:<width$} {:>6} runs  {saved:>10} tokens saved  {:.1}% savings",
+            stats.count, stats.savings_pct
+        ));
+    }
+    lines
 }
 
 pub fn period_start(period: &Period) -> Option<DateTime<Utc>> {
@@ -179,49 +246,11 @@ pub fn aggregate_with_price(
     let cost_avoided_usd =
         input_usd_per_mtok.map(|price| (tokens_saved as f64 / 1_000_000.0) * price);
 
-    // by_family
-    let mut by_family: HashMap<String, FamilyStats> = HashMap::new();
-    for item in &filtered {
-        let key = item.command_family.as_str().to_string();
-        let entry = by_family.entry(key).or_insert(FamilyStats {
-            count: 0,
-            tokens_before: 0,
-            tokens_after: 0,
-            savings_pct: 0.0,
-        });
-        entry.count += 1;
-        entry.tokens_before += item.tokens_before as u64;
-        entry.tokens_after += item.tokens_after as u64;
-    }
-    for stats in by_family.values_mut() {
-        stats.savings_pct = if stats.tokens_before == 0 {
-            0.0
-        } else {
-            ((1.0 - stats.tokens_after as f64 / stats.tokens_before as f64) * 100.0) as f32
-        };
-    }
-
-    // by_agent
-    let mut by_agent: HashMap<String, FamilyStats> = HashMap::new();
-    for item in &filtered {
-        let agent = item.hook_type.agent_label();
-        let entry = by_agent.entry(agent.to_string()).or_insert(FamilyStats {
-            count: 0,
-            tokens_before: 0,
-            tokens_after: 0,
-            savings_pct: 0.0,
-        });
-        entry.count += 1;
-        entry.tokens_before += item.tokens_before as u64;
-        entry.tokens_after += item.tokens_after as u64;
-    }
-    for stats in by_agent.values_mut() {
-        stats.savings_pct = if stats.tokens_before == 0 {
-            0.0
-        } else {
-            ((1.0 - stats.tokens_after as f64 / stats.tokens_before as f64) * 100.0) as f32
-        };
-    }
+    let by_family = group_stats(&filtered, |i| i.command_family.as_str());
+    let by_agent = group_stats(&filtered, |i| i.hook_type.agent_label());
+    let by_subagent = group_stats(&filtered, |i| {
+        i.agent_type.as_deref().unwrap_or(MAIN_SESSION_BUCKET)
+    });
 
     // by_project
     let mut by_project: HashMap<String, ProjectStats> = HashMap::new();
@@ -257,6 +286,7 @@ pub fn aggregate_with_price(
         by_family,
         by_project,
         by_agent,
+        by_subagent,
         rewrite_overhead_tokens,
     }
 }

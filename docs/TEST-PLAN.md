@@ -187,6 +187,7 @@ Scenarios:
 - Run grep through the agent and confirm result trimming
 - Run glob or list-directory through the agent and confirm noisy directories are removed
 - Repeat with malformed or empty tool results and confirm safe passthrough
+- Run a Bash command and a Read inside a Claude Code subagent: the Bash rewrite carries `--agent-type` / `--agent-id`, both rows record the subagent type, and main-session rewrites are unchanged
 
 Verify:
 - Output is filtered only when appropriate
@@ -237,6 +238,8 @@ Verify:
 - By-family and by-project grouping looks correct
 - JSON output is valid and stable enough for automation
 - Cost avoided is non-negative when savings exist
+- `by_subagent` buckets add up to `total_tokens_before` / `total_tokens_after`; main-session, non-Claude and pre-existing rows land in `[main]`; `by_agent` still groups by host tool
+- A metrics database created before subagent tracking opens without error and reports the same totals
 
 Model router (`ecotokens router status`, `outcome`):
 - `router status --json` keeps every pre-existing key and only adds keys; rows written before the policy router are reported as `legacy-size`

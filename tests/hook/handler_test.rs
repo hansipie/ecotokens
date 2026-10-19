@@ -4,6 +4,7 @@ fn make_input(command: &str) -> HookInput {
     HookInput {
         command: command.to_string(),
         cwd: None,
+        ..Default::default()
     }
 }
 
@@ -118,6 +119,7 @@ fn cwd_and_command_are_shell_quoted_in_rewrite() {
     let input = HookInput {
         command: "printf 'hello'".to_string(),
         cwd: Some("/tmp/dir with spaces".to_string()),
+        ..Default::default()
     };
     let out = handle_hook_input(&input, &exclusions, false, "claude");
 
@@ -339,6 +341,7 @@ fn own_wrapper_peels_back_for_any_cwd() {
             let input = HookInput {
                 command: cmd.clone(),
                 cwd: Some(cwd.to_string()),
+                ..Default::default()
             };
             cmd = match handle_hook_input(&input, &[], false, "claude") {
                 HookOutput::Rewrite(out) => out,
@@ -580,7 +583,10 @@ mod gemini_handler {
             .as_str()
             .unwrap_or("")
             .to_string();
-        let input = ecotokens::hook::handler::HookInput { command, cwd: None };
+        let input = ecotokens::hook::handler::HookInput {
+            command,
+            ..Default::default()
+        };
         let out = ecotokens::hook::handler::handle_hook_input(&input, &[], false, "gemini");
 
         match out {
@@ -604,6 +610,7 @@ mod gemini_handler {
         let input = ecotokens::hook::handler::HookInput {
             command: String::new(),
             cwd: None,
+            ..Default::default()
         };
         // An empty command is an edge case — handle_hook_input trims and rewrites non-excluded
         // commands including empty ones. The actual guard for non-shell tools is in handle_gemini().
@@ -622,6 +629,7 @@ mod gemini_handler {
         let input = ecotokens::hook::handler::HookInput {
             command: "echo hello".to_string(),
             cwd: None,
+            ..Default::default()
         };
         let exclusions = vec!["echo".to_string()];
         let out = ecotokens::hook::handler::handle_hook_input(&input, &exclusions, false, "gemini");
@@ -676,4 +684,84 @@ mod gemini_handler {
             "allow"
         );
     }
+}
+
+// ── Subagent attribution ──────────────────────────────────────────────────────
+
+fn subagent_input(command: &str, agent_type: &str, agent_id: &str) -> HookInput {
+    HookInput {
+        command: command.to_string(),
+        cwd: Some("/tmp".to_string()),
+        session_id: Some("3f2a9c1e-5b7d-4e8f-9a0b-1c2d3e4f5a6b".to_string()),
+        agent_id: Some(agent_id.to_string()),
+        agent_type: Some(agent_type.to_string()),
+    }
+}
+
+fn rewrite_of(input: &HookInput) -> String {
+    match handle_hook_input(input, &[], false, "claude") {
+        HookOutput::Rewrite(cmd) => cmd,
+        HookOutput::Passthrough => panic!("expected a rewrite"),
+    }
+}
+
+#[test]
+fn subagent_call_carries_agent_type_and_id_into_the_wrapper() {
+    assert_eq!(
+        rewrite_of(&subagent_input("ls -la", "router-large", "a1b2c3d4")),
+        "ecotokens filter --agent claude --agent-type router-large --agent-id a1b2c3d4 \
+         --cwd '/tmp' -- bash -c 'ls -la'"
+    );
+}
+
+#[test]
+fn main_session_wrapper_is_unchanged() {
+    let input = HookInput {
+        command: "ls -la".to_string(),
+        cwd: Some("/tmp".to_string()),
+        session_id: Some("3f2a9c1e-5b7d-4e8f-9a0b-1c2d3e4f5a6b".to_string()),
+        ..Default::default()
+    };
+    assert_eq!(
+        rewrite_of(&input),
+        "ecotokens filter --agent claude --cwd '/tmp' -- bash -c 'ls -la'"
+    );
+}
+
+#[test]
+fn hook_input_without_agent_fields_deserializes() {
+    // Codex, Gemini and older Claude Code payloads carry none of the fields.
+    let input: HookInput = serde_json::from_str(r#"{"command":"ls","cwd":"/tmp"}"#).unwrap();
+    assert_eq!(input.session_id, None);
+    assert_eq!(input.agent_id, None);
+    assert_eq!(input.agent_type, None);
+    assert_eq!(input.agent_context(), Default::default());
+}
+
+#[test]
+fn unsafe_agent_values_never_reach_the_command_line() {
+    for hostile in ["x; echo pwned", "$(id)", "`id`", "--help", "a b", "x'y"] {
+        assert_eq!(
+            rewrite_of(&subagent_input("ls", hostile, hostile)),
+            "ecotokens filter --agent claude --cwd '/tmp' -- bash -c 'ls'",
+            "{hostile:?} must be dropped"
+        );
+    }
+}
+
+#[test]
+fn resubmitted_subagent_wrapper_is_rewrapped_once() {
+    let first = rewrite_of(&subagent_input(
+        "git status",
+        "claude-seo:seo-backlinks",
+        "a1b2c3d4",
+    ));
+    // The model copies the wrapped command back: it must not grow a layer.
+    let again = rewrite_of(&subagent_input(
+        &first,
+        "claude-seo:seo-backlinks",
+        "a1b2c3d4",
+    ));
+    assert_eq!(again, first);
+    assert_eq!(again.matches("ecotokens filter").count(), 1);
 }

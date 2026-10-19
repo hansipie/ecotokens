@@ -1,10 +1,31 @@
 use serde::{Deserialize, Serialize};
 
-#[derive(Debug, Clone, Deserialize, Serialize)]
+#[derive(Debug, Clone, Default, Deserialize, Serialize)]
 pub struct HookInput {
     pub command: String,
     #[serde(default)]
     pub cwd: Option<String>,
+    /// Claude Code session. Read but not forwarded to `ecotokens filter`: it
+    /// would lengthen every rewritten command for no per-subagent gain.
+    #[serde(default)]
+    pub session_id: Option<String>,
+    /// Claude Code subagent instance; absent in the main session.
+    #[serde(default)]
+    pub agent_id: Option<String>,
+    /// Claude Code subagent type (e.g. `router-large`); absent in the main session.
+    #[serde(default)]
+    pub agent_type: Option<String>,
+}
+
+impl HookInput {
+    /// Session and subagent of this call, reduced to plain identifiers.
+    pub fn agent_context(&self) -> crate::metrics::store::AgentContext {
+        crate::metrics::store::AgentContext::new(
+            self.session_id.as_deref(),
+            self.agent_id.as_deref(),
+            self.agent_type.as_deref(),
+        )
+    }
 }
 
 #[derive(Debug, Clone)]
@@ -114,28 +135,31 @@ fn parse_bash_c(s: &str) -> Option<String> {
     trim_separators(after).is_empty().then_some(inner)
 }
 
-/// Parse one `ecotokens filter [--agent A] [--cwd C] -- bash -c '<inner>'`
-/// layer — exactly the shape the hook and the plugins emit — and return
-/// `<inner>`. Anything else (other options, a marker inside a comment,
-/// commands before the marker, text after the quoted token) is not a wrapper,
-/// and neither is a layer clap would reject (a repeated option, an invalid
-/// value, see [`skip_option_value`]): its inner command never runs.
+/// Options a wrapper layer may carry, each at most once and in any order.
+const WRAPPER_OPTIONS: [&str; 4] = ["--agent ", "--agent-type ", "--agent-id ", "--cwd "];
+
+/// Parse one `ecotokens filter [--agent A] [--agent-type T] [--agent-id I]
+/// [--cwd C] -- bash -c '<inner>'` layer — exactly the shape the hook and the
+/// plugins emit — and return `<inner>`. Anything else (other options, a marker
+/// inside a comment, commands before the marker, text after the quoted token)
+/// is not a wrapper, and neither is a layer clap would reject (a repeated
+/// option, an invalid value, see [`skip_option_value`]): its inner command
+/// never runs.
 /// Tokens are separated by blanks only: a newline between them would split the
 /// original into several commands, so peeling it would change what runs.
 fn parse_wrapper(s: &str) -> Option<String> {
     let mut rest = trim_separators(s).strip_prefix("ecotokens filter ")?;
-    let (mut agent, mut cwd) = (false, false);
+    let mut seen = [false; WRAPPER_OPTIONS.len()];
     loop {
         rest = rest.trim_start_matches(is_blank);
         if let Some(r) = rest.strip_prefix("-- ") {
             return parse_bash_c(r);
         }
-        let (r, seen) = if let Some(r) = rest.strip_prefix("--agent ") {
-            (r, &mut agent)
-        } else {
-            (rest.strip_prefix("--cwd ")?, &mut cwd)
-        };
-        if std::mem::replace(seen, true) {
+        let (idx, r) = WRAPPER_OPTIONS
+            .iter()
+            .enumerate()
+            .find_map(|(i, opt)| rest.strip_prefix(opt).map(|r| (i, r)))?;
+        if std::mem::replace(&mut seen[idx], true) {
             return None;
         }
         rest = skip_option_value(r.trim_start_matches(is_blank))?;
@@ -308,19 +332,23 @@ pub fn handle_hook_input(
         .cwd
         .as_deref()
         .filter(|c| !c.is_empty() && !c.starts_with('-'));
-    let rewritten = match cwd {
-        Some(cwd) => format!(
-            "ecotokens filter --agent {} --cwd {} -- bash -c {}",
-            agent,
-            shell_single_quote(cwd),
-            shell_single_quote(&cmd)
-        ),
-        None => format!(
-            "ecotokens filter --agent {} -- bash -c {}",
-            agent,
-            shell_single_quote(&cmd)
-        ),
-    };
+    let mut rewritten = format!("ecotokens filter --agent {agent}");
+    // Inside a Claude Code subagent, tell `ecotokens filter` which one, so its
+    // metrics row can be attributed. Sanitized values are plain identifiers
+    // (letters, digits, `_-.:`, never a leading `-`): safe as bare words, and
+    // accepted by `skip_option_value`, so the wrapper still peels. The main
+    // session emits neither option and keeps the short wrapper.
+    let ctx = input.agent_context();
+    if let Some(agent_type) = &ctx.agent_type {
+        rewritten.push_str(&format!(" --agent-type {agent_type}"));
+    }
+    if let Some(agent_id) = &ctx.agent_id {
+        rewritten.push_str(&format!(" --agent-id {agent_id}"));
+    }
+    if let Some(cwd) = cwd {
+        rewritten.push_str(&format!(" --cwd {}", shell_single_quote(cwd)));
+    }
+    rewritten.push_str(&format!(" -- bash -c {}", shell_single_quote(&cmd)));
     HookOutput::Rewrite(rewritten)
 }
 
@@ -354,9 +382,15 @@ fn handle_with_agent(agent: &str) {
         .as_str()
         .unwrap_or("")
         .to_string();
-    let cwd = v["cwd"].as_str().map(|s| s.to_string());
+    let field = |name: &str| v[name].as_str().map(|s| s.to_string());
     let settings = crate::config::Settings::load();
-    let input = HookInput { command, cwd };
+    let input = HookInput {
+        command,
+        cwd: field("cwd"),
+        session_id: field("session_id"),
+        agent_id: field("agent_id"),
+        agent_type: field("agent_type"),
+    };
     let debug = settings.debug;
     let output = handle_hook_input(&input, &settings.exclusions, debug, agent);
 
@@ -464,6 +498,7 @@ fn handle_shell_tool_hook(hook_event_name: &str, label: &str) {
     let input = HookInput {
         command,
         cwd: payload.cwd,
+        ..Default::default()
     };
     let debug = settings.debug;
     let output = handle_hook_input(&input, &settings.exclusions, debug, label);
@@ -529,7 +564,7 @@ mod tests {
     fn hook(cmd: &str) -> HookOutput {
         let input = HookInput {
             command: cmd.to_string(),
-            cwd: None,
+            ..Default::default()
         };
         handle_hook_input(&input, &[], false, "claude")
     }

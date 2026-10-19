@@ -165,6 +165,74 @@ pub struct Interception {
     pub content_after: Option<String>,
     #[serde(default)]
     pub hook_type: HookType,
+    /// Host session that triggered the interception (Claude Code `session_id`).
+    /// `None` for rows written before it was recorded and for hosts that do not
+    /// send it.
+    #[serde(default)]
+    pub session_id: Option<String>,
+    /// Subagent instance (Claude Code `agent_id`). `None` in the main session.
+    #[serde(default)]
+    pub agent_id: Option<String>,
+    /// Subagent type (Claude Code `agent_type`, e.g. `router-large`). `None` in
+    /// the main session, for other hosts and for rows written before it was
+    /// recorded.
+    #[serde(default)]
+    pub agent_type: Option<String>,
+}
+
+/// Maximum length of a stored session or agent identifier.
+const IDENTIFIER_MAX_CHARS: usize = 128;
+
+/// Keep `raw` only when it is a plain identifier: 1 to 128 ASCII letters,
+/// digits, `_`, `-`, `.` or `:`, starting with a letter or digit, and left
+/// untouched by [`crate::masking::mask`]. Anything else (free text, a value
+/// that looks like a secret, an empty string) is dropped, so a hook payload can
+/// never smuggle arbitrary text into the metrics store or the `ecotokens
+/// filter` command line, where the value is passed as a bare word.
+pub fn sanitize_identifier(raw: Option<&str>) -> Option<String> {
+    let s = raw?.trim();
+    if s.is_empty() || s.len() > IDENTIFIER_MAX_CHARS {
+        return None;
+    }
+    if !s.starts_with(|c: char| c.is_ascii_alphanumeric()) {
+        return None;
+    }
+    if !s
+        .chars()
+        .all(|c| c.is_ascii_alphanumeric() || matches!(c, '_' | '-' | '.' | ':'))
+    {
+        return None;
+    }
+    let (masked, redacted) = crate::masking::mask(s);
+    if redacted || masked != s {
+        return None;
+    }
+    Some(s.to_string())
+}
+
+/// Who triggered an interception: the host session and, inside a Claude Code
+/// subagent, the subagent instance and type. Every field is a sanitized plain
+/// identifier (see [`sanitize_identifier`]) or `None`.
+#[derive(Debug, Clone, Default, PartialEq, Serialize, Deserialize)]
+pub struct AgentContext {
+    #[serde(default)]
+    pub session_id: Option<String>,
+    #[serde(default)]
+    pub agent_id: Option<String>,
+    #[serde(default)]
+    pub agent_type: Option<String>,
+}
+
+impl AgentContext {
+    /// Build a context from raw hook values, dropping any value that is not a
+    /// plain identifier.
+    pub fn new(session_id: Option<&str>, agent_id: Option<&str>, agent_type: Option<&str>) -> Self {
+        AgentContext {
+            session_id: sanitize_identifier(session_id),
+            agent_id: sanitize_identifier(agent_id),
+            agent_type: sanitize_identifier(agent_type),
+        }
+    }
 }
 
 impl Interception {
@@ -201,11 +269,22 @@ impl Interception {
             content_before: content_before.map(truncate_content),
             content_after: content_after.map(truncate_content),
             hook_type: HookType::PreToolUse,
+            session_id: None,
+            agent_id: None,
+            agent_type: None,
         }
     }
 
     pub fn with_hook_type(mut self, hook_type: HookType) -> Self {
         self.hook_type = hook_type;
+        self
+    }
+
+    /// Attach the session and subagent that triggered this interception.
+    pub fn with_agent_context(mut self, ctx: &AgentContext) -> Self {
+        self.session_id = ctx.session_id.clone();
+        self.agent_id = ctx.agent_id.clone();
+        self.agent_type = ctx.agent_type.clone();
         self
     }
 }
@@ -254,13 +333,43 @@ fn create_schema(conn: &Connection) -> io::Result<()> {
             duration_ms     INTEGER NOT NULL,
             content_before  TEXT,
             content_after   TEXT,
-            hook_type       TEXT    NOT NULL DEFAULT 'pre_tool_use'
+            hook_type       TEXT    NOT NULL DEFAULT 'pre_tool_use',
+            session_id      TEXT,
+            agent_id        TEXT,
+            agent_type      TEXT
         );
         CREATE INDEX IF NOT EXISTS idx_timestamp      ON interceptions(timestamp);
         CREATE INDEX IF NOT EXISTS idx_command_family ON interceptions(command_family);
         CREATE INDEX IF NOT EXISTS idx_git_root       ON interceptions(git_root);",
     )
-    .map_err(io::Error::other)
+    .map_err(io::Error::other)?;
+    migrate_agent_columns(conn)
+}
+
+/// Nullable columns added after the first SQLite schema. A database created
+/// before them gets them once, empty: old rows read back as `None`.
+const AGENT_COLUMNS: [&str; 3] = ["session_id", "agent_id", "agent_type"];
+
+fn migrate_agent_columns(conn: &Connection) -> io::Result<()> {
+    for column in AGENT_COLUMNS {
+        let exists = conn
+            .prepare("SELECT 1 FROM pragma_table_info('interceptions') WHERE name = ?1")
+            .and_then(|mut q| q.exists([column]))
+            .map_err(io::Error::other)?;
+        if exists {
+            continue;
+        }
+        match conn.execute(
+            &format!("ALTER TABLE interceptions ADD COLUMN {column} TEXT"),
+            [],
+        ) {
+            Ok(_) => {}
+            // Another process migrated between our check and our ALTER.
+            Err(e) if e.to_string().contains("duplicate column name") => {}
+            Err(e) => return Err(io::Error::other(e)),
+        }
+    }
+    Ok(())
 }
 
 // ── Connection ────────────────────────────────────────────────────────────────
@@ -370,6 +479,9 @@ fn row_to_interception(row: &Row) -> rusqlite::Result<Interception> {
         hook_type: str_to_enum(&hook_type).map_err(|e| {
             rusqlite::Error::InvalidColumnType(13, e.to_string(), rusqlite::types::Type::Text)
         })?,
+        session_id: row.get("session_id")?,
+        agent_id: row.get("agent_id")?,
+        agent_type: row.get("agent_type")?,
     })
 }
 
@@ -399,8 +511,9 @@ fn insert_one(conn: &Connection, i: &Interception) -> io::Result<()> {
         "INSERT OR IGNORE INTO interceptions
          (id, timestamp, command, command_family, git_root,
           tokens_before, tokens_after, savings_pct, mode, redacted,
-          duration_ms, content_before, content_after, hook_type)
-         VALUES (?1,?2,?3,?4,?5,?6,?7,?8,?9,?10,?11,?12,?13,?14)",
+          duration_ms, content_before, content_after, hook_type,
+          session_id, agent_id, agent_type)
+         VALUES (?1,?2,?3,?4,?5,?6,?7,?8,?9,?10,?11,?12,?13,?14,?15,?16,?17)",
         params![
             i.id,
             i.timestamp,
@@ -416,6 +529,9 @@ fn insert_one(conn: &Connection, i: &Interception) -> io::Result<()> {
             content_before,
             content_after,
             hook_type_to_str(&i.hook_type),
+            i.session_id,
+            i.agent_id,
+            i.agent_type,
         ],
     )
     .map_err(io::Error::other)?;
@@ -443,7 +559,7 @@ pub fn read_from(path: &Path) -> io::Result<Vec<Interception>> {
     }
     let conn = open_conn(path)?;
     let mut stmt = conn
-        .prepare("SELECT id, timestamp, command, command_family, git_root, tokens_before, tokens_after, savings_pct, mode, redacted, duration_ms, content_before, content_after, hook_type FROM interceptions ORDER BY timestamp ASC")
+        .prepare("SELECT id, timestamp, command, command_family, git_root, tokens_before, tokens_after, savings_pct, mode, redacted, duration_ms, content_before, content_after, hook_type, session_id, agent_id, agent_type FROM interceptions ORDER BY timestamp ASC")
         .map_err(io::Error::other)?;
     let items = stmt
         .query_map([], row_to_interception)

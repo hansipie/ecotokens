@@ -19,6 +19,7 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 - **New settings**: `router_private`, `router_allowed`, `router_strict`, `router_max_attempts`, `router_card_min_confidence`, `router_ambiguity_min_prob`, `router_verifiable_min_prob`.
 
 - **`ecotokens config --rewrite-model <MODEL>`** sets the model used by `ecotokens rewrite`, the `ecotokens_rewrite` MCP tool and the rewrite pipeline stage, without editing `config.json` by hand. An empty value resets it. `ecotokens config` now prints the `rewrite_model` line.
+- **Savings per Claude Code subagent**: the hooks now read `session_id`, `agent_id` and `agent_type` from the Claude Code hook input and store them (plain identifiers only, otherwise empty) in three new nullable columns of the metrics store, added in place to existing databases. `ecotokens gain --json` gains a `by_subagent` object (one bucket per subagent type plus `[main]` for everything else; the buckets add up to the totals), the plain-text `gain` output a `By subagent` section and the TUI a `Subagents:` figure. `by_agent` is unchanged. Inside a subagent, the Bash rewrite passes `--agent-type` / `--agent-id` to `ecotokens filter`; main-session commands are rewritten as before. MCP tool calls are still not recorded in the metrics.
 
 ### Changed
 

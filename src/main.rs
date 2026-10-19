@@ -101,6 +101,12 @@ enum Commands {
         /// Harness that triggered this filter (claude, gemini, qwen, pi, opencode, cli). Default: cli
         #[arg(long, default_value = "cli")]
         agent: String,
+        /// Claude Code subagent type that ran the command (set by the hook inside a subagent)
+        #[arg(long)]
+        agent_type: Option<String>,
+        /// Claude Code subagent instance that ran the command (set by the hook inside a subagent)
+        #[arg(long)]
+        agent_id: Option<String>,
     },
     /// Filter an already captured tool output from stdin, record metrics
     FilterOutput {
@@ -740,7 +746,13 @@ fn default_claude_json_path() -> PathBuf {
         .join(".claude.json")
 }
 
-fn cmd_filter(args: Vec<String>, debug: bool, cwd: Option<PathBuf>, agent: String) {
+fn cmd_filter(
+    args: Vec<String>,
+    debug: bool,
+    cwd: Option<PathBuf>,
+    agent: String,
+    subagent: metrics::store::AgentContext,
+) {
     if args.is_empty() {
         eprintln!("ecotokens filter: no command given");
         std::process::exit(1);
@@ -784,12 +796,13 @@ fn cmd_filter(args: Vec<String>, debug: bool, cwd: Option<PathBuf>, agent: Strin
 
     let duration_ms = start.elapsed().as_millis().min(u32::MAX as u128) as u32;
     let hook_type = metrics::store::agent_to_hook_type_pre(&agent);
-    let (filtered, tokens_before, tokens_after) = filter::run_filter_pipeline_with_cwd(
+    let (filtered, tokens_before, tokens_after) = filter::run_filter_pipeline_with_context(
         &command,
         &raw,
         duration_ms,
         cwd.as_deref(),
         hook_type,
+        &subagent,
     );
 
     if debug || settings.debug {
@@ -1229,6 +1242,9 @@ fn cmd_gain(period: metrics::report::Period, json: bool, history: bool, project:
                     agent, stats.count, stats.savings_pct
                 );
             }
+        }
+        for line in metrics::report::subagent_lines(&report) {
+            println!("{line}");
         }
     }
 }
@@ -4155,7 +4171,13 @@ fn main() {
             debug,
             cwd,
             agent,
-        } => cmd_filter(args, debug, cwd, agent),
+            agent_type,
+            agent_id,
+        } => {
+            let subagent =
+                metrics::store::AgentContext::new(None, agent_id.as_deref(), agent_type.as_deref());
+            cmd_filter(args, debug, cwd, agent, subagent)
+        }
         Commands::FilterOutput {
             command,
             exit_code,

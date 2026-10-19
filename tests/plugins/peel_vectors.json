@@ -16,7 +16,9 @@
     { "cmd": "ecotokens filter --agent claude -- bash -c 'ls'\n", "inner": "ls" },
     { "cmd": "bash -c 'git status'", "inner": "git status" },
     { "cmd": "bash -c \"ls -la\"", "inner": "ls -la" },
-    { "cmd": "ecotokens filter --agent claude -- bash -c 'bash -c '\\''ls | head'\\'''", "inner": "ls | head" }
+    { "cmd": "ecotokens filter --agent claude -- bash -c 'bash -c '\\''ls | head'\\'''", "inner": "ls | head" },
+    { "cmd": "ecotokens filter --agent claude --agent-type router-large --agent-id a1b2c3 --cwd '/tmp' -- bash -c 'ls -la'", "inner": "ls -la" },
+    { "cmd": "ecotokens filter --agent-id a1b2c3 --agent claude --agent-type claude-seo:seo-backlinks -- bash -c 'git status'", "inner": "git status" }
   ],
   "rebash": [
     { "cmd": "ecotokens filter --agent x -- bash -c 'ecotokens filter -- echo __no_such_file_*'", "inner": "ecotokens filter -- echo __no_such_file_*" },
@@ -47,6 +49,9 @@
     { "cmd": "ecotokens filter --agent -x -- bash -c 'echo NEVER'", "expect": "bare" },
     { "cmd": "ecotokens filter --agent x --agent y -- bash -c 'echo NEVER'", "expect": "bare" },
     { "cmd": "ecotokens filter --cwd /a --cwd /b -- bash -c 'echo NEVER'", "expect": "bare" },
+    { "cmd": "ecotokens filter --agent-type x --agent-type y -- bash -c 'echo NEVER'", "expect": "bare" },
+    { "cmd": "ecotokens filter --agent-id -x -- bash -c 'echo NEVER'", "expect": "bare" },
+    { "cmd": "ecotokens filter --agent-types x -- bash -c 'echo NEVER'", "expect": "bare" },
     { "cmd": "ecotokens filter --agent {x,y} -- bash -c 'echo NEVER'", "expect": "bare" },
     { "cmd": "ecotokens filter --cwd f* -- bash -c 'echo NEVER'", "expect": "bare" },
     { "cmd": "ecotokens filter --cwd '' -- bash -c 'echo NEVER'", "expect": "bare" },
