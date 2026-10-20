@@ -78,12 +78,31 @@ fn route_reports_service_failures() {
 fn commands_and_empty_messages_never_reach_jev() {
     let settings = router_settings();
     let judge = StubJudge::with_answers(answers("tiny", 1.0, 0.0));
-    for prompt in ["", "   ", "/clear", "  /plan", "!ls -la"] {
+    for prompt in [
+        "",
+        "   ",
+        "/clear",
+        "  /plan",
+        "!ls -la",
+        "<task-notification>\n<task-id>b1</task-id>\n</task-notification>",
+        "<agent-message from=\"a1\">\n[Subagent hand-back] The text below is the final report of a subagent...",
+        "Another Claude session sent a message:\n<agent-message from=\"a1\">\n[Subagent hand-back] The text below is the final report of a subagent...",
+    ] {
         assert!(skip_reason(prompt).is_some(), "{prompt:?}");
         let r = route(prompt, &settings, &judge, T);
         assert_eq!(r.decision, Decision::Skipped);
     }
     assert_eq!(judge.call_count(), 0);
+}
+
+#[test]
+fn messages_that_only_mention_harness_markers_are_still_routed() {
+    for prompt in [
+        "what is a <task-notification> in Claude Code?",
+        "Another Claude session sent a message, can you explain it?",
+    ] {
+        assert!(skip_reason(prompt).is_none(), "{prompt:?}");
+    }
 }
 
 #[test]
