@@ -250,7 +250,8 @@ pub fn skip_reason(prompt: &str) -> Option<&'static str> {
         Some("shell command")
     } else if trimmed.starts_with("<task-notification>") {
         Some("task notification")
-    } else if trimmed.starts_with("Another Claude session sent a message")
+    } else if (trimmed.starts_with("<agent-message")
+        || trimmed.starts_with("Another Claude session sent a message"))
         && trimmed.contains("[Subagent hand-back]")
     {
         Some("subagent hand-back")

@@ -85,6 +85,7 @@ fn commands_and_empty_messages_never_reach_jev() {
         "  /plan",
         "!ls -la",
         "<task-notification>\n<task-id>b1</task-id>\n</task-notification>",
+        "<agent-message from=\"a1\">\n[Subagent hand-back] The text below is the final report of a subagent...",
         "Another Claude session sent a message:\n<agent-message from=\"a1\">\n[Subagent hand-back] The text below is the final report of a subagent...",
     ] {
         assert!(skip_reason(prompt).is_some(), "{prompt:?}");
