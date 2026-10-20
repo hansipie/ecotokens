@@ -120,7 +120,8 @@ pub enum Decision {
     SelfUnsure,
     /// A short reply that only makes sense in the conversation.
     SelfFollowup,
-    /// Empty message, slash command or `!` shell command: Jev not asked.
+    /// Empty message, slash command, `!` shell command, task notification or
+    /// subagent hand-back: Jev not asked.
     Skipped,
     /// Jev failed recently; not asked until the marker expires.
     JevDown,
@@ -247,6 +248,12 @@ pub fn skip_reason(prompt: &str) -> Option<&'static str> {
         Some("slash command")
     } else if trimmed.starts_with('!') {
         Some("shell command")
+    } else if trimmed.starts_with("<task-notification>") {
+        Some("task notification")
+    } else if trimmed.starts_with("Another Claude session sent a message")
+        && trimmed.contains("[Subagent hand-back]")
+    {
+        Some("subagent hand-back")
     } else {
         None
     }
