@@ -28,7 +28,7 @@ Built on a *"set it and forget it!"* philosophy: one install command, zero confi
 Full methodology and per-family breakdown: [`docs/BENCHMARKS.md`](docs/BENCHMARKS.md).
 
 <p align="center">
-  <img src="assets/demo.0.10.0.gif" alt="ecotokens demo" width="800">
+  <img src="assets/tui-slideshow.webp" alt="ecotokens TUIs: gain, gain diff view, Jev and game" width="800">
 </p>
 
 ## Features highlight
