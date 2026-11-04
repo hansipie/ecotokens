@@ -9,6 +9,7 @@ use std::path::{Path, PathBuf};
 use rusqlite::{params, Connection};
 use serde::Serialize;
 
+use super::outcome::PENDING_MAX_AGE_DAYS;
 use super::{Decision, Routing, Size};
 use crate::config::Settings;
 
@@ -107,7 +108,8 @@ fn init(conn: &Connection) -> rusqlite::Result<()> {
              regressions  INTEGER,
              judged_at    TEXT,
              reminded     INTEGER NOT NULL DEFAULT 0,
-             judged_by    TEXT
+             judged_by    TEXT,
+             expired      INTEGER NOT NULL DEFAULT 0
          );",
     )?;
     migrate_outcomes(conn)
@@ -117,20 +119,56 @@ fn init(conn: &Connection) -> rusqlite::Result<()> {
 /// without it was entered by the user.
 fn migrate_outcomes(conn: &Connection) -> rusqlite::Result<()> {
     let mut stmt = conn.prepare("PRAGMA table_info(router_outcomes)")?;
-    let has_column = stmt
+    let columns: Vec<String> = stmt
         .query_map([], |r| r.get::<_, String>(1))?
         .filter_map(Result::ok)
-        .any(|c| c == "judged_by");
+        .collect();
     drop(stmt);
-    if has_column {
+    for (name, ddl) in [
+        ("judged_by", "judged_by TEXT"),
+        ("expired", "expired INTEGER NOT NULL DEFAULT 0"),
+    ] {
+        if columns.iter().any(|c| c == name) {
+            continue;
+        }
+        match conn.execute(&format!("ALTER TABLE router_outcomes ADD COLUMN {ddl}"), []) {
+            Ok(_) => {}
+            // Another process migrated between our check and our ALTER.
+            Err(e) if e.to_string().contains("duplicate column name") => {}
+            Err(e) => return Err(e),
+        }
+    }
+    // Best effort: a locked database must never stop the router from opening.
+    let _ = expire_stale(conn);
+    Ok(())
+}
+
+/// Marks delegated jobs still unjudged after [`PENDING_MAX_AGE_DAYS`] as
+/// expired: they leave the pending list for good but stay in the data (their
+/// decision, cost and duration still count in the statistics).
+fn expire_stale(conn: &Connection) -> rusqlite::Result<()> {
+    let cutoff = (chrono::Utc::now() - chrono::Duration::days(PENDING_MAX_AGE_DAYS)).to_rfc3339();
+    let due: bool = conn.query_row(
+        "SELECT EXISTS (SELECT 1 FROM router_decisions d
+         LEFT JOIN router_outcomes o ON o.decision_id = d.id
+         WHERE d.decision = 'delegated' AND o.success IS NULL
+           AND COALESCE(o.expired, 0) = 0 AND d.timestamp < ?1)",
+        [&cutoff],
+        |r| r.get(0),
+    )?;
+    if !due {
         return Ok(());
     }
-    match conn.execute("ALTER TABLE router_outcomes ADD COLUMN judged_by TEXT", []) {
-        Ok(_) => Ok(()),
-        // Another process migrated between our check and our ALTER.
-        Err(e) if e.to_string().contains("duplicate column name") => Ok(()),
-        Err(e) => Err(e),
-    }
+    conn.execute(
+        "INSERT INTO router_outcomes (decision_id, expired)
+         SELECT d.id, 1 FROM router_decisions d
+         LEFT JOIN router_outcomes o ON o.decision_id = d.id
+         WHERE d.decision = 'delegated' AND o.success IS NULL
+           AND COALESCE(o.expired, 0) = 0 AND d.timestamp < ?1
+         ON CONFLICT(decision_id) DO UPDATE SET expired = 1",
+        [cutoff],
+    )?;
+    Ok(())
 }
 
 /// Opens the database, creating and migrating it. Concurrent first opens by
