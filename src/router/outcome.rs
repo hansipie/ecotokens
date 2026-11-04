@@ -198,6 +198,10 @@ pub struct Pending {
 /// The route of a row; rows from the size-only router name their size.
 const ROUTE_SQL: &str = "COALESCE(d.route, 'router-' || d.size, 'unknown')";
 
+/// An unjudged delegated job older than this many days is marked `expired`
+/// in `router_outcomes` and leaves the pending list and the reminders.
+pub(crate) const PENDING_MAX_AGE_DAYS: i64 = 2;
+
 /// Delegated jobs without a verdict, oldest first. No message text exists to
 /// show: none is ever stored.
 pub fn pending(db: &Path) -> io::Result<Vec<Pending>> {
@@ -209,6 +213,7 @@ pub fn pending(db: &Path) -> io::Result<Vec<Pending>> {
         "SELECT d.id, d.timestamp, {ROUTE_SQL}, d.nature, o.cost_usd, o.duration_ms
          FROM router_decisions d LEFT JOIN router_outcomes o ON o.decision_id = d.id
          WHERE d.decision = 'delegated' AND o.success IS NULL
+           AND COALESCE(o.expired, 0) = 0
          ORDER BY d.id"
     );
     let mut stmt = conn.prepare(&query).map_err(sql)?;

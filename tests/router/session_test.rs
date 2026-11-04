@@ -6,6 +6,7 @@ use common::{
 
 use std::path::{Path, PathBuf};
 
+use chrono::Datelike;
 use chrono::{DateTime, TimeZone, Utc};
 use ecotokens::config::Settings;
 use ecotokens::router::session::{end, start, SessionInput};
@@ -17,7 +18,19 @@ use tempfile::TempDir;
 const FIXTURE: &str = include_str!("fixtures/transcript_subagent.jsonl");
 
 fn at(h: u32, m: u32, s: u32) -> DateTime<Utc> {
-    Utc.with_ymd_and_hms(2026, 10, 17, h, m, s).unwrap()
+    let d = day();
+    Utc.with_ymd_and_hms(d.year(), d.month(), d.day(), h, m, s)
+        .unwrap()
+}
+
+/// The fixtures happen yesterday, so they stay inside the pending window.
+fn day() -> chrono::NaiveDate {
+    (Utc::now() - chrono::Duration::days(1)).date_naive()
+}
+
+/// The transcript fixture, dated like [`at`].
+fn fixture() -> String {
+    FIXTURE.replace("2026-10-17", &day().format("%Y-%m-%d").to_string())
 }
 
 fn delegated(route: &str, session: &str) -> Routing {
@@ -47,7 +60,7 @@ fn world() -> World {
     let root = dir.path().canonicalize().unwrap();
     let db = root.join("router.db");
     let transcript = root.join("transcript.jsonl");
-    std::fs::write(&transcript, FIXTURE).unwrap();
+    std::fs::write(&transcript, fixture()).unwrap();
     let cwd = root.join("work");
     std::fs::create_dir_all(&cwd).unwrap();
     record_at(&db, &delegated("router-large", "sess-1"), at(10, 0, 0)).unwrap();
@@ -475,7 +488,7 @@ fn the_session_end_hook_prints_nothing_and_the_start_hook_prints_one_message() {
     let dir = TempDir::new().unwrap();
     let root = dir.path().canonicalize().unwrap();
     let transcript = root.join("t.jsonl");
-    std::fs::write(&transcript, FIXTURE).unwrap();
+    std::fs::write(&transcript, fixture()).unwrap();
     let cwd = root.join("work");
     std::fs::create_dir_all(&cwd).unwrap();
     let db = home.router_db();
@@ -537,7 +550,7 @@ fn transcript_of(runs: &[(&str, &str)]) -> String {
     for (i, (agent, reply)) in runs.iter().enumerate() {
         let id = format!("tu{i}");
         let (start, end) = (30 + i * 60, 50 + i * 60);
-        let ts = |s: usize| format!("2026-10-17T10:{:02}:{:02}.000Z", s / 60, s % 60);
+        let ts = |s: usize| format!("{}T10:{:02}:{:02}.000Z", day(), s / 60, s % 60);
         out.push_str(&format!(
             "{}\n",
             serde_json::json!({"type": "assistant", "timestamp": ts(start),

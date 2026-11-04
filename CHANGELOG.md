@@ -7,6 +7,12 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ## [Unreleased]
 
+## [0.31.1] - 2026-11-04
+
+### Fixed
+
+- **Stale delegated router jobs expire**: a delegated router job still unjudged after two days (`PENDING_MAX_AGE_DAYS`) is now marked `expired` in `router_outcomes` instead of piling up in `router outcome --pending` and the session reminders. Its decision, cost and duration stay in the statistics. The new `expired` column is added by the existing outcomes migration, so existing databases are migrated on open. See PR #146.
+
 ## [0.31.0] - 2026-10-20
 
 ### Added

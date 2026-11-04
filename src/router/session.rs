@@ -432,6 +432,7 @@ pub fn start(
              LEFT JOIN router_outcomes o ON o.decision_id = d.id
              WHERE d.decision = 'delegated' AND o.success IS NULL
                AND COALESCE(o.reminded, 0) = 0
+               AND COALESCE(o.expired, 0) = 0
              ORDER BY d.id",
         )
         .ok()?;

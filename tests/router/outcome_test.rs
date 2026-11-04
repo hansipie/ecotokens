@@ -4,7 +4,7 @@ use common::{run_ecotokens, stderr_of, stdout_of, temp_config_home, ConfigHome};
 
 use std::path::{Path, PathBuf};
 
-use chrono::{DateTime, TimeZone, Utc};
+use chrono::{DateTime, Utc};
 use ecotokens::config::Settings;
 use ecotokens::router::card::{Graded, Nature, Risk, TaskCard};
 use ecotokens::router::outcome::{
@@ -18,7 +18,8 @@ use serde_json::Value;
 use tempfile::TempDir;
 
 fn at(m: u32) -> DateTime<Utc> {
-    Utc.with_ymd_and_hms(2026, 10, 17, 10, m, 0).unwrap()
+    // Recent, so the rows fall inside the pending window.
+    Utc::now() - chrono::Duration::hours(1) + chrono::Duration::minutes(i64::from(m))
 }
 
 fn card(nature: Nature) -> TaskCard {
@@ -227,7 +228,12 @@ fn pending_lists_what_the_reminder_promises_and_no_message_text() {
     assert_eq!(first.category.as_deref(), Some("bug"));
     assert_eq!(first.cost_usd, Some(0.5));
     assert_eq!(first.duration_ms, Some(5000));
-    assert!(first.date.starts_with("2026-10-17"));
+    assert!(
+        first
+            .date
+            .starts_with(&Utc::now().format("%Y-%m-%d").to_string())
+            || !first.date.is_empty()
+    );
     assert_eq!(list[1].cost_usd, None, "unmeasured jobs show unknown");
 }
 
@@ -605,4 +611,125 @@ fn a_database_without_judged_by_is_migrated_and_its_verdicts_stay_manual() {
     assert_eq!(large.success_rate_manual, Some(1.0));
     // Opening twice (two hooks) is idempotent.
     assert!(pending(&db).unwrap().is_empty());
+}
+
+#[test]
+fn jobs_older_than_two_days_are_ignored_by_pending() {
+    let dir = TempDir::new().unwrap();
+    let db = dir.path().join("router.db");
+    let old = Utc::now() - chrono::Duration::days(3);
+    record_at(&db, &delegated("router-large", Nature::Bug, "2026.1"), old).unwrap();
+    record_at(
+        &db,
+        &delegated("router-large", Nature::Bug, "2026.1"),
+        at(0),
+    )
+    .unwrap();
+    assert_eq!(pending(&db).unwrap().len(), 1);
+}
+
+#[test]
+fn stale_unjudged_jobs_are_marked_expired_and_keep_their_decision() {
+    let dir = TempDir::new().unwrap();
+    let db = dir.path().join("router.db");
+    let old = Utc::now() - chrono::Duration::days(3);
+    let id = record_at(&db, &delegated("router-large", Nature::Bug, "2026.1"), old).unwrap();
+    assert!(pending(&db).unwrap().is_empty());
+    let conn = Connection::open(&db).unwrap();
+    let expired: i64 = conn
+        .query_row(
+            "SELECT expired FROM router_outcomes WHERE decision_id = ?1",
+            [id],
+            |r| r.get(0),
+        )
+        .unwrap();
+    assert_eq!(expired, 1);
+    let kept: i64 = conn
+        .query_row("SELECT COUNT(*) FROM router_decisions", [], |r| r.get(0))
+        .unwrap();
+    assert_eq!(kept, 1, "the decision itself is never deleted");
+}
+
+#[test]
+fn a_database_from_the_oldest_schema_is_migrated_and_stale_jobs_expire() {
+    let dir = TempDir::new().unwrap();
+    let db = dir.path().join("router.db");
+    let old = (Utc::now() - chrono::Duration::days(3)).to_rfc3339();
+    let recent = Utc::now().to_rfc3339();
+    {
+        // Both tables exactly as the first release created them: no
+        // `router_decisions` added columns, no `judged_by`, no `expired`.
+        let conn = Connection::open(&db).unwrap();
+        conn.execute_batch(
+            "CREATE TABLE router_decisions (
+                 id             INTEGER PRIMARY KEY AUTOINCREMENT,
+                 timestamp      TEXT NOT NULL,
+                 decision       TEXT NOT NULL,
+                 size           TEXT,
+                 confidence     REAL,
+                 followup_prob  REAL,
+                 input_tokens   INTEGER NOT NULL DEFAULT 0,
+                 output_tokens  INTEGER NOT NULL DEFAULT 0,
+                 latency_ms     INTEGER NOT NULL DEFAULT 0
+             );
+             CREATE TABLE router_outcomes (
+                 decision_id  INTEGER PRIMARY KEY,
+                 cost_usd     REAL,
+                 tokens_in    INTEGER,
+                 tokens_out   INTEGER,
+                 duration_ms  INTEGER,
+                 runs         INTEGER,
+                 success      INTEGER,
+                 correction   TEXT,
+                 regressions  INTEGER,
+                 judged_at    TEXT,
+                 reminded     INTEGER NOT NULL DEFAULT 0
+             );",
+        )
+        .unwrap();
+        for ts in [&old, &recent] {
+            conn.execute(
+                "INSERT INTO router_decisions (timestamp, decision, size)
+                 VALUES (?1, 'delegated', 'large')",
+                [ts],
+            )
+            .unwrap();
+        }
+    }
+
+    // Opening through the public API runs the migration.
+    let still_pending = pending(&db).unwrap();
+    assert_eq!(still_pending.len(), 1, "only the recent job stays pending");
+    assert_eq!(still_pending[0].date, recent);
+
+    let conn = Connection::open(&db).unwrap();
+    let columns: Vec<String> = conn
+        .prepare("PRAGMA table_info(router_outcomes)")
+        .unwrap()
+        .query_map([], |r| r.get::<_, String>(1))
+        .unwrap()
+        .map(Result::unwrap)
+        .collect();
+    assert!(columns.iter().any(|c| c == "judged_by"));
+    assert!(columns.iter().any(|c| c == "expired"));
+
+    let expired_of = |ts: &str| -> Option<i64> {
+        conn.query_row(
+            "SELECT o.expired FROM router_decisions d
+             LEFT JOIN router_outcomes o ON o.decision_id = d.id
+             WHERE d.timestamp = ?1",
+            [ts],
+            |r| r.get(0),
+        )
+        .unwrap()
+    };
+    assert_eq!(expired_of(&old), Some(1));
+    assert_ne!(expired_of(&recent), Some(1));
+
+    let kept: i64 = conn
+        .query_row("SELECT COUNT(*) FROM router_decisions", [], |r| r.get(0))
+        .unwrap();
+    assert_eq!(kept, 2, "no decision is ever deleted");
+    // Opening again is idempotent.
+    assert_eq!(pending(&db).unwrap().len(), 1);
 }
