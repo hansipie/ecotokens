@@ -15,7 +15,7 @@ pub struct Symbol {
     /// Stable ID: "{rel_file_path}::{name}#{kind}"
     pub id: String,
     pub name: String,
-    /// "fn" | "struct" | "impl" | "enum" | "trait" | "h1" | "h2" | "h3" | "table" | "key"
+    /// "fn" | "struct" | "impl" | "enum" | "trait" | "signal" | "h1" | "h2" | "h3" | "table" | "key"
     pub kind: String,
     pub file_path: String,
     pub line_start: u64,
@@ -55,6 +55,7 @@ fn language_for_ext(ext: &str) -> Option<Language> {
         "js" | "jsx" => Some(tree_sitter_javascript::LANGUAGE.into()),
         "c" | "h" => Some(tree_sitter_c::LANGUAGE.into()),
         "cpp" | "cc" | "cxx" | "hpp" | "hh" | "hxx" => Some(tree_sitter_cpp::LANGUAGE.into()),
+        "gd" => Some(tree_sitter_gdscript::LANGUAGE.into()),
         _ => None,
     }
 }
@@ -67,26 +68,30 @@ fn is_declaration_node(node_kind: &str) -> Option<&'static str> {
         "impl_item" => Some("impl"),
         "enum_item" => Some("enum"),
         "trait_item" => Some("trait"),
-        "function_definition" => Some("fn"),   // Python, C, C++
-        "class_definition" => Some("struct"),  // Python
-        "function_declaration" => Some("fn"),  // JS
+        "function_definition" => Some("fn"), // Python, C, C++, GDScript
+        "class_definition" => Some("struct"), // Python, GDScript
+        "function_declaration" => Some("fn"), // JS
         "class_declaration" => Some("struct"), // JS
-        "struct_specifier" => Some("struct"),  // C, C++
-        "enum_specifier" => Some("enum"),      // C, C++
-        "type_definition" => Some("type"),     // C (typedef)
-        "class_specifier" => Some("struct"),   // C++
+        "struct_specifier" => Some("struct"), // C, C++
+        "enum_specifier" => Some("enum"),    // C, C++
+        "type_definition" => Some("type"),   // C (typedef)
+        "class_specifier" => Some("struct"), // C++
         "namespace_definition" => Some("namespace"), // C++
+        "class_name_statement" => Some("struct"), // GDScript (`class_name Foo`)
+        "enum_definition" => Some("enum"),   // GDScript
+        "signal_statement" => Some("signal"), // GDScript
         _ => None,
     }
 }
 
-/// Extract the declaration name from a node (first `identifier` child).
+/// Extract the declaration name from a node (first `identifier` child, or
+/// `name` child for GDScript).
 /// For C/C++ functions, the name is nested inside `function_declarator` or
 /// `pointer_declarator`, so we recurse into those.
 fn extract_name<'a>(node: tree_sitter::Node<'a>, source: &'a str) -> Option<&'a str> {
     let mut cursor = node.walk();
     for child in node.children(&mut cursor) {
-        if child.kind() == "identifier" || child.kind() == "type_identifier" {
+        if matches!(child.kind(), "identifier" | "type_identifier" | "name") {
             return child.utf8_text(source.as_bytes()).ok();
         }
         if matches!(child.kind(), "function_declarator" | "pointer_declarator") {

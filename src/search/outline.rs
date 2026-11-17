@@ -72,8 +72,7 @@ fn symbols_for_file(path: &Path, cwd: &Path) -> Result<Vec<Symbol>, Box<dyn std:
     let ext = path.extension().and_then(|e| e.to_str()).unwrap_or("");
 
     match ext {
-        "rs" | "py" | "js" | "ts" | "jsx" | "tsx" | "c" | "h" | "cpp" | "cc" | "cxx" | "hpp"
-        | "hh" | "hxx" => {
+        e if super::is_code_extension(e) => {
             let mut syms = parse_symbols(path)?;
             for sym in &mut syms {
                 if sym.file_path == filename {
@@ -85,7 +84,7 @@ fn symbols_for_file(path: &Path, cwd: &Path) -> Result<Vec<Symbol>, Box<dyn std:
             }
             result.extend(syms);
         }
-        "md" | "markdown" | "toml" | "json" | "yaml" | "yml" => {
+        e if super::is_text_doc_extension(e) => {
             let syms = index_text_doc(path, &rel_path)?;
             result.extend(syms);
         }

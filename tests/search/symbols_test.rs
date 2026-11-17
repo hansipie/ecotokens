@@ -128,3 +128,36 @@ fn lookup_valid_id_returns_source_snippet() {
         "snippet should contain the function name"
     );
 }
+
+// ── GDScript ──────────────────────────────────────────────────────────────────
+
+const GDSCRIPT_FIXTURE: &str = "class_name Player\nextends CharacterBody2D\n\nsignal died(reason)\n\nenum State { IDLE, RUN }\n\nconst SPEED := 200.0\nvar hp: int = 3\n\nfunc _ready() -> void:\n\ttake_damage(1)\n\nstatic func create() -> Player:\n\treturn Player.new()\n\nfunc take_damage(amount: int) -> void:\n\thp -= amount\n\nclass Inventory:\n\tvar items = []\n";
+
+#[test]
+fn parse_gdscript_extracts_declarations() {
+    let dir = TempDir::new().unwrap();
+    let path = dir.path().join("player.gd");
+    fs::write(&path, GDSCRIPT_FIXTURE).unwrap();
+    let symbols = parse_symbols(&path).unwrap();
+    let found: Vec<(String, String)> = symbols
+        .iter()
+        .map(|s| (s.name.clone(), s.kind.clone()))
+        .collect();
+    for (name, kind) in [
+        ("Player", "struct"),
+        ("died", "signal"),
+        ("State", "enum"),
+        ("_ready", "fn"),
+        ("create", "fn"),
+        ("take_damage", "fn"),
+        ("Inventory", "struct"),
+    ] {
+        assert!(
+            found.contains(&(name.to_string(), kind.to_string())),
+            "missing {name}#{kind}, got: {found:?}"
+        );
+    }
+    let ready = symbols.iter().find(|s| s.name == "_ready").unwrap();
+    assert_eq!(ready.id, "player.gd::_ready#fn");
+    assert_eq!(ready.line_start, 10);
+}

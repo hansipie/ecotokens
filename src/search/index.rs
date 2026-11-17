@@ -208,11 +208,8 @@ fn semantic_chunks_for_file(
 ) -> (Vec<SemanticChunk>, Vec<super::symbols::Symbol>) {
     let ext_str = path.extension().and_then(|e| e.to_str()).unwrap_or("");
     let mut raw_symbols = match ext_str {
-        "rs" | "py" | "js" | "ts" | "jsx" | "tsx" | "c" | "h" | "cpp" | "cc" | "cxx" | "hpp"
-        | "hh" | "hxx" => parse_symbols(path).unwrap_or_default(),
-        "md" | "markdown" | "toml" | "json" | "yaml" | "yml" => {
-            index_text_doc(path, rel_path).unwrap_or_default()
-        }
+        e if super::is_code_extension(e) => parse_symbols(path).unwrap_or_default(),
+        e if super::is_text_doc_extension(e) => index_text_doc(path, rel_path).unwrap_or_default(),
         _ => vec![],
     };
 
