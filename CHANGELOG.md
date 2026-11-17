@@ -7,6 +7,8 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ## [Unreleased]
 
+## [0.32.0] - 2026-11-17
+
 ### Added
 
 - **GDScript support**: Godot `.gd` files are now indexed and watched. `tree-sitter-gdscript` extracts top-level functions (including `static func`), inner classes, `class_name`, enums and signals, so `search`, `outline`, `symbol` and `trace` work on Godot projects. Signals use the new `signal` symbol kind.
