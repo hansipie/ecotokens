@@ -411,3 +411,30 @@ fn reindexing_leaves_no_orphan_segment_files() {
         "segment files no longer referenced by meta.json: {orphans:?}"
     );
 }
+
+#[test]
+fn markdown_extension_is_indexed() {
+    let src = TempDir::new().unwrap();
+    let idx = TempDir::new().unwrap();
+    fs::write(
+        src.path().join("GUIDE.markdown"),
+        "# Guide\n\n## Usage\n\nRun the tool.\n",
+    )
+    .unwrap();
+
+    let stats = index_directory(IndexOptions {
+        reset: true,
+        path: src.path().to_path_buf(),
+        index_dir: idx.path().to_path_buf(),
+        progress: None,
+        embed_provider: ecotokens::config::settings::EmbedProvider::None,
+        log_tx: None,
+    })
+    .unwrap();
+
+    assert_eq!(stats.file_count, 1, ".markdown files should be indexed");
+    assert!(
+        stats.chunk_count > 0,
+        ".markdown file should produce chunks"
+    );
+}

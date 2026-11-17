@@ -172,3 +172,34 @@ fn callees_unknown_symbol_returns_empty_or_error() {
         }
     }
 }
+
+#[test]
+fn gdscript_callers_and_callees_are_traced() {
+    let src = TempDir::new().unwrap();
+    let idx = TempDir::new().unwrap();
+    fs::write(
+        src.path().join("player.gd"),
+        "extends Node\n\nfunc take_damage(amount: int) -> void:\n\tpass\n\nfunc _ready() -> void:\n\ttake_damage(1)\n",
+    )
+    .unwrap();
+    index_directory(IndexOptions {
+        reset: true,
+        path: src.path().to_path_buf(),
+        index_dir: idx.path().to_path_buf(),
+        progress: None,
+        embed_provider: ecotokens::config::settings::EmbedProvider::None,
+        log_tx: None,
+    })
+    .expect("indexing should succeed");
+
+    let callers = find_callers("take_damage", idx.path()).unwrap();
+    assert!(
+        format!("{callers:?}").contains("_ready"),
+        "_ready() should call take_damage(), got: {callers:?}"
+    );
+    let callees = find_callees("_ready", idx.path(), 1).unwrap();
+    assert!(
+        format!("{callees:?}").contains("take_damage"),
+        "_ready() should have take_damage() as callee, got: {callees:?}"
+    );
+}
