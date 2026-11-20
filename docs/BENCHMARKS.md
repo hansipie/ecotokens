@@ -1,65 +1,67 @@
 # Benchmarks
 
-Real-world token savings measured on a developer workstation running ecotokens over the **last month, from 2026-09-20 to 2026-10-20**.
+Real-world token savings measured on a developer workstation running ecotokens over the **last month, from 2026-10-21 to 2026-11-20**.
 
 ## Global Results
 
 | Metric | Value |
 |--------|-------|
-| Total hook executions | 10 581 |
-| Tokens before filtering | 11 059 097 |
-| Tokens after filtering | 4 250 103 |
-| **Tokens saved** | **6 808 994** |
-| **Overall reduction** | **61.6 %** |
-| Avg. reduction (when active) | 46.6 % |
-| Commands with savings | 4 697 / 10 581 (44.4 %) |
+| Total hook executions | 15 746 |
+| Tokens before filtering | 51 510 307 |
+| Tokens after filtering | 10 224 568 |
+| **Tokens saved** | **41 285 739** |
+| **Overall reduction** | **80.2 %** |
+| Avg. reduction (when active) | 65.2 % |
+| Commands with savings | 8 396 / 15 746 (53.3 %) |
 
-> Outputs that are too small to compress are returned as-is at zero overhead; they count in the executions but not in the savings. For comparison, the whole history (2026-03-06 to 2026-10-20, 45 505 executions) reaches 86.9 %, and the last three months 64.5 %: the large `grep` scans that dominated the early corpus are rarer now.
+> Outputs that are too small to compress are returned as-is at zero overhead; they count in the executions but not in the savings. A single recursive `grep` over a data directory weighs 7.6 M tokens of the total; without it the month still reaches 76.7 %. For comparison, the whole history (2026-03-06 to 2026-11-20, 61 273 executions) reaches 85.0 %, and the last three months 77.3 %. Hermes tool results account for 70 % of this month's savings (28.9 M tokens), shell commands intercepted by the `PreToolUse` hook for 22 % (9.0 M).
 
 ## Savings by Command Family
 
 | Family | Executions | Tokens before | Tokens after | Saved | Reduction |
 |--------|-----------:|--------------:|-------------:|------:|----------:|
-| generic | 5 679 | 5 361 665 | 2 112 913 | **3 248 752** | 60.6 % |
-| fs | 1 237 | 2 629 077 | 1 145 802 | **1 483 275** | 56.4 % |
-| native_read | 776 | 1 100 031 | 234 757 | **865 274** | 78.7 % |
-| cargo | 338 | 511 048 | 49 594 | **461 454** | 90.3 % |
-| grep | 894 | 623 294 | 326 792 | **296 502** | 47.6 % |
-| python | 625 | 358 227 | 162 597 | **195 630** | 54.6 % |
-| git | 816 | 329 747 | 146 759 | **182 988** | 55.5 % |
-| network | 57 | 110 785 | 46 508 | **64 277** | 58.0 % |
-| gh | 139 | 29 385 | 20 563 | **8 822** | 30.0 % |
-| js | 18 | 5 674 | 3 654 | **2 020** | 35.6 % |
-| container | 2 | 164 | 164 | **0** | 0.0 % |
+| generic | 9 086 | 22 599 446 | 5 946 139 | **16 653 307** | 73.7 % |
+| fs | 2 299 | 15 676 790 | 2 184 544 | **13 492 246** | 86.1 % |
+| grep | 987 | 8 156 660 | 315 737 | **7 840 923** | 96.1 % |
+| python | 1 384 | 3 503 529 | 1 355 974 | **2 147 555** | 61.3 % |
+| native_read | 718 | 1 007 588 | 126 947 | **880 641** | 87.4 % |
+| git | 762 | 344 230 | 177 009 | **167 221** | 48.6 % |
+| gh | 89 | 59 711 | 11 483 | **48 228** | 80.8 % |
+| network | 60 | 90 304 | 46 666 | **43 638** | 48.3 % |
+| js | 231 | 38 917 | 30 864 | **8 053** | 20.7 % |
+| cargo | 124 | 31 539 | 27 612 | **3 927** | 12.5 % |
+| container | 5 | 1 461 | 1 461 | **0** | 0.0 % |
+| cpp | 1 | 132 | 132 | **0** | 0.0 % |
 
-**generic commands are the biggest win** over this period with 3 248 752 tokens saved. `cargo` has the highest reduction (90.3 %).
+**generic commands are the biggest win** over this period with 16 653 307 tokens saved. `grep` has the highest reduction (96.1 %). `cargo` drops from 90.3 % last month to 12.5 % because few large builds or test runs went through the hook this month (124 executions, 31 k tokens in total).
 
 ## Processing Modes
 
 | Mode | Count | Description |
 |------|------:|-------------|
-| summarized | 5 884 | Output rewritten by the AI summarizer |
-| filtered | 3 767 | Output trimmed by a family-specific rule-based filter |
-| rewritten | 930 | Output transformed by the local text rewrite stage |
+| filtered | 8 210 | Output trimmed by a family-specific rule-based filter |
+| summarized | 7 348 | Output rewritten by the AI summarizer |
+| rewritten | 186 | Output transformed by the local text rewrite stage |
+| passthrough | 2 | Output returned unchanged |
 
 ## Top 5 Single-Command Savings
 
 | Command | Before | After | Saved | Reduction |
 |---------|-------:|------:|------:|----------:|
-| `ls -la`, `wc -l`, `head -30` and `tail -30` on the ecotokens `debug.log` file | 273 883 | 11 701 | **262 182** | 95.7 % |
-| `grep` of the `jev` lines in `debug.log`, piped to `json.tool` | 35 075 | 1 033 | **34 042** | 97.1 % |
-| Hermes `browser_exec` tool call | 35 052 | 1 026 | **34 026** | 97.1 % |
-| `sed -n 1,80p ~/.codex/config.toml` (keys redacted), `codex --version`, `ls ~/.codex` | 25 890 | 370 | **25 520** | 98.6 % |
-| Hermes `read_file` tool call | 25 808 | 1 029 | **24 779** | 96.0 % |
+| Recursive `grep -rniI` over a data directory, piped to `head -50` | 7 562 265 | 1 335 | **7 560 930** | 100.0 % |
+| Hermes `browser_exec` tool call | 616 901 | 1 015 | **615 886** | 99.8 % |
+| `claude plugin list`, `claude mcp list` and agent CLI checks | 53 898 | 442 | **53 456** | 99.2 % |
+| `gh pr view --json …` followed by `gh pr diff` | 47 420 | 1 263 | **46 157** | 97.3 % |
+| Hermes `read_file` tool call | 26 972 | 916 | **26 056** | 96.6 % |
 
-The largest single interception saved **262 182 tokens** from one command. The largest Git example saved **23 072 tokens**.
+The largest single interception saved **7 560 930 tokens** from one command. The largest Git example (`git diff --stat` then `git diff` on three directories) saved **23 845 tokens**.
 
 ## Methodology
 
 Metrics are recorded by the ecotokens hook in `~/.config/ecotokens/metrics.db`. Each entry captures:
 - `tokens_before` / `tokens_after` - token counts estimated via character heuristic, or tiktoken when the `exact-tokens` feature is enabled
 - `command_family` - detected from the command name
-- `mode` - `passthrough`, `filtered`, or `summarized`
+- `mode` - `passthrough`, `filtered`, `summarized`, or `rewritten`
 - `duration_ms` - hook processing time for the interception
 
 ## Session handoff hook latency
