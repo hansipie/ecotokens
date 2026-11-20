@@ -843,6 +843,126 @@ pub fn uninstall_hermes_plugin(plugin_dir: &Path) -> InstallResult {
     Ok(())
 }
 
+/// Get the Hermes home directory: `$HERMES_HOME` or `~/.hermes`.
+pub fn default_hermes_home() -> Option<std::path::PathBuf> {
+    std::env::var_os("HERMES_HOME")
+        .map(std::path::PathBuf::from)
+        .or_else(|| dirs::home_dir().map(|d| d.join(".hermes")))
+}
+
+/// List every Hermes home that may carry its own plugins and config: the root
+/// home itself plus each `profiles/<name>/` directory, sorted for stable output.
+pub fn hermes_profile_homes(hermes_home: &Path) -> Vec<std::path::PathBuf> {
+    let mut homes = vec![hermes_home.to_path_buf()];
+    if let Ok(entries) = std::fs::read_dir(hermes_home.join("profiles")) {
+        let mut profiles: Vec<_> = entries
+            .filter_map(|e| e.ok())
+            .map(|e| e.path())
+            .filter(|p| p.is_dir())
+            .collect();
+        profiles.sort();
+        homes.extend(profiles);
+    }
+    homes
+}
+
+/// Remove `plugin` from the `plugins.enabled` list in YAML content.
+/// Only items of that list are touched; `disabled:` entries, comments and
+/// every other line are preserved verbatim. An emptied list becomes `[]`.
+fn yaml_remove_from_plugins_enabled(content: &str, plugin: &str) -> String {
+    let plugin_item = format!("- {}", plugin);
+    let lines: Vec<&str> = content.lines().collect();
+
+    let Some(pi) = lines.iter().position(|l| {
+        let t = l.trim_end();
+        t == "plugins:" || t.starts_with("plugins: ")
+    }) else {
+        return content.to_string();
+    };
+    let Some(ei_rel) = lines[pi + 1..]
+        .iter()
+        .take_while(|l| l.is_empty() || l.starts_with(' '))
+        .position(|l| l.starts_with("  ") && l.trim() == "enabled:")
+    else {
+        return content.to_string();
+    };
+    let ei = pi + 1 + ei_rel;
+    let items = lines[ei + 1..]
+        .iter()
+        .take_while(|l| l.starts_with("    -"))
+        .count();
+    let list = &lines[ei + 1..ei + 1 + items];
+    if !list.iter().any(|l| l.trim() == plugin_item) {
+        return content.to_string();
+    }
+
+    let kept: Vec<&str> = list
+        .iter()
+        .copied()
+        .filter(|l| l.trim() != plugin_item)
+        .collect();
+    let mut out: Vec<String> = lines[..ei].iter().map(|l| l.to_string()).collect();
+    if kept.is_empty() {
+        out.push(format!(
+            "{}enabled: []",
+            &lines[ei][..lines[ei].len() - lines[ei].trim_start().len()]
+        ));
+    } else {
+        out.push(lines[ei].to_string());
+        out.extend(kept.iter().map(|l| l.to_string()));
+    }
+    out.extend(lines[ei + 1 + items..].iter().map(|l| l.to_string()));
+
+    let mut result = out.join("\n");
+    if content.ends_with('\n') {
+        result.push('\n');
+    }
+    result
+}
+
+/// Remove `ecotokens` from `plugins.enabled` in a Hermes config file.
+/// Returns true if the file was changed.
+pub fn disable_hermes_plugin_in_config(config_path: &Path) -> std::io::Result<bool> {
+    if !config_path.exists() {
+        return Ok(false);
+    }
+    let content = std::fs::read_to_string(config_path)?;
+    let new_content = yaml_remove_from_plugins_enabled(&content, "ecotokens");
+    if new_content == content {
+        return Ok(false);
+    }
+    crate::config::atomic_write(config_path, new_content)?;
+    Ok(true)
+}
+
+/// What [`uninstall_hermes_all_profiles`] removed.
+#[derive(Debug, Default)]
+pub struct HermesUninstallReport {
+    /// Plugin directories that were deleted.
+    pub removed_plugins: Vec<std::path::PathBuf>,
+    /// Config files whose `plugins.enabled` list no longer lists ecotokens.
+    pub disabled_configs: Vec<std::path::PathBuf>,
+}
+
+/// Remove the ecotokens plugin from the root Hermes home and from every
+/// `profiles/<name>/` home, and drop it from each `plugins.enabled` list.
+/// Idempotent: a second run reports nothing.
+pub fn uninstall_hermes_all_profiles(hermes_home: &Path) -> std::io::Result<HermesUninstallReport> {
+    let mut report = HermesUninstallReport::default();
+    for home in hermes_profile_homes(hermes_home) {
+        let plugin_dir = home.join("plugins").join("ecotokens");
+        if plugin_dir.exists() {
+            uninstall_hermes_plugin(&plugin_dir)?;
+            report.removed_plugins.push(plugin_dir);
+        }
+        let config = home.join("config.yaml");
+        if disable_hermes_plugin_in_config(&config)? {
+            report.disabled_configs.push(config);
+        }
+    }
+    Ok(report)
+}
+
 // ============================================================================
 // Codex Support (plugin in ~/.codex/plugins/ecotokens/ + hooks in ~/.codex/hooks.json)
 // ============================================================================
