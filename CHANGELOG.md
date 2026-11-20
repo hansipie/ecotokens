@@ -7,6 +7,8 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ## [Unreleased]
 
+## [0.33.0] - 2026-11-20
+
 ### Added
 
 - **Setup assistant for `ecotokens install`**: run with no option on a terminal, `install` opens a full-screen, coloured assistant in three steps (harnesses, features, summary). Passing any option (`--target`, `--ai-summary`, …) or running without a terminal keeps the previous behaviour, with `claude` as the default target.
