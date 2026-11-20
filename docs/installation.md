@@ -2,7 +2,48 @@
 
 [← Back to the README](../README.md)
 
-Per-agent setup, build from source, and uninstall. For the two-minute version, see the README.
+Setup assistant, per-agent setup, build from source, and uninstall. For the two-minute version, see the README.
+
+## Setup assistant
+
+Run `ecotokens install` with no option in a terminal:
+
+```bash
+cargo install --path .
+ecotokens install
+```
+
+A full-screen assistant opens in three steps. Nothing is written until you confirm the summary.
+
+1. **Harnesses**: tick the agents to install for. Those already installed or detected on the machine (their config directory exists) are preselected and marked with a badge.
+2. **Features**: only the features the chosen agents support are listed, each starting from its current state.
+
+   | Feature | Agents | Setting |
+   |---------|--------|---------|
+   | Auto-watch | Claude Code, Qwen Code, Pi, Hermes | `auto_watch` + session hooks |
+   | Model router | Claude Code | `ecotokens router on` / `off` |
+   | Session handoff | Claude Code | `ecotokens handoff on` / `off` |
+   | Enable Hermes plugin | Hermes | `--enable-plugin` |
+   | Jev judgments, Jev line selection | all | `jev_enabled`, `jev_line_select_enabled`, and the API key |
+   | AI summary | all | `ai_summary_enabled`, `ai_summary_model` |
+   | Text rewrite | all | `rewrite_auto_enabled`, `rewrite_model` |
+   | Semantic search | all | `embed_provider` (Candle, Ollama or none) |
+
+3. **Summary**: what turns on, off or changes. `Enter` applies it; `Esc` goes back.
+
+Keys: `↑↓` (or `j`/`k`) move, `space` toggles, `enter` goes to the next step, `esc` goes back, `q` quits without changing anything. On the harness step, `a` ticks or clears all. On some feature rows:
+
+| Row | Keys |
+|-----|------|
+| Jev judgments | `e` enters the API key (masked; pasting works) |
+| AI summary, Text rewrite | `m` next model pulled in Ollama, `e` edits the model (an empty rewrite model follows the AI summary one) |
+| Semantic search | `p` switches Candle / Ollama, `m` next Ollama embedding model, `e` edits the model |
+
+**Jev API key.** The Jev row shows where `TYPESAFE_API_KEY` comes from: your shell, or `~/.config/ecotokens/.env`. A key typed in the assistant is never displayed and is saved to `~/.config/ecotokens/.env` with mode 600 (the file is written to a mode-600 temporary file, then renamed over the target; an existing file with looser rights ends up at 600). If your shell also exports the variable, the shell value keeps winning.
+
+**Ollama.** Before the screen opens, the assistant asks the Ollama server at `ai_summary_url` (default `http://localhost:11434`, localhost only) for its models, or looks for the `ollama` binary on `PATH`. When it runs with pulled models, AI summary is proposed with one of them; otherwise a badge and a warning give the command to run (`ollama serve`, `ollama pull <model>`, or the install link). Text models are offered for AI summary and rewrite, embedding models (`*embed*`, `bge-*`, `all-minilm*`) for semantic search. After changing the semantic search setting, run `ecotokens index` again in your projects.
+
+Passing any option (`--target`, `--ai-summary`, `--ai-summary-model`, `--enable-plugin`), or running without a terminal (scripts, CI), skips the assistant and installs directly, with `claude` as the default target. The sections below describe that direct mode.
 
 ## Per-agent setup
 
@@ -12,7 +53,7 @@ Per-agent setup, build from source, and uninstall. For the two-minute version, s
 
 ```bash
 cargo install --path .
-ecotokens install
+ecotokens install --target claude
 ```
 
 Install commands print a section per target, followed by the entries that were written:
@@ -163,12 +204,12 @@ ecotokens install --ai-summary                          # use default model (lla
 ecotokens install --ai-summary-model qwen2.5:3b         # specify model (implies --ai-summary)
 ```
 
-This writes `ai_summary_enabled` and `ai_summary_model` to `~/.config/ecotokens/config.json`. Ollama must be running and the model must be pulled (`ollama pull llama3.2:3b`).
+This writes `ai_summary_enabled` and `ai_summary_model` to `~/.config/ecotokens/config.json`. Ollama must be running and the model must be pulled (`ollama pull llama3.2:3b`). The [setup assistant](#setup-assistant) checks both and proposes a model that is already pulled.
 
 ### Uninstall
 
 ```bash
-ecotokens uninstall                    # Claude Code
+ecotokens uninstall                    # Claude Code (default target)
 ecotokens uninstall --target codex     # Codex
 ecotokens uninstall --target hermes    # Hermes
 ecotokens uninstall --target pi        # Pi
@@ -193,6 +234,12 @@ If nothing is installed for the selected target, the command prints:
 Uninstall Claude Code
   note    nothing to uninstall
 ```
+
+For Claude Code, uninstall also removes the model router (hook and `router-*` agents) and the session handoff (hook and skills). A plain reinstall does not bring them back: run `ecotokens router on` and `ecotokens handoff on`, or tick them in the [setup assistant](#setup-assistant).
+
+For Hermes, uninstall goes through the root home and every profile (`~/.hermes/profiles/<name>/`): it deletes each `plugins/ecotokens` directory and removes `ecotokens` from `plugins.enabled` in each `config.yaml`, leaving other entries untouched. Restart the Hermes gateway afterwards, since it keeps loaded plugins in memory.
+
+To check what is left, run `ecotokens doctor`: it lists every harness (Claude Code, Gemini CLI, Qwen Code, Pi, Hermes with each profile, Codex, OpenCode) as installed, partial, or not installed.
 
 ## How each agent is wired
 

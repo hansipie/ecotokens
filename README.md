@@ -112,13 +112,14 @@ To skip the questions (scripts, CI, or when you already know what you want), pas
 Then check that everything is wired, and see what you save:
 
 ```bash
-ecotokens doctor    # diagnose PATH, config, hooks and MCP setup (changes nothing)
+ecotokens doctor    # diagnose the setup and list the harnesses it is installed for (changes nothing)
 ecotokens gain      # interactive savings dashboard
 ```
 
-To remove ecotokens, run `ecotokens uninstall` (same `--target` values). Per-agent details, the Hermes plugin
-activation, and other install options are in [`docs/installation.md`](docs/installation.md); ready-to-copy
-configuration snippets are in [`docs/example-configs.md`](docs/example-configs.md).
+To remove ecotokens, run `ecotokens uninstall` (same `--target` values; for Claude Code it also removes the model
+router and the session handoff). The setup assistant's keys, per-agent details, the Hermes plugin activation, and
+other install options are in [`docs/installation.md`](docs/installation.md); ready-to-copy configuration snippets
+are in [`docs/example-configs.md`](docs/example-configs.md).
 
 ### Companion panel for Claude Code
 

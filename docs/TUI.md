@@ -1,6 +1,6 @@
 # Terminal UI views
 
-*Last updated: 2026-09-24*
+*Last updated: 2026-11-20*
 
 ecotokens ships several interactive terminal views built with [ratatui](https://ratatui.rs). This page documents each one: how to launch it, what it shows, where the data comes from, and which keys it accepts. The source lives in `src/tui/`, and the entry points are the `cmd_*` functions in `src/main.rs`.
 
@@ -14,11 +14,12 @@ ecotokens ships several interactive terminal views built with [ratatui](https://
 | [Outline](#outline) | `ecotokens outline <path>` | Source files (tree-sitter) | `src/tui/outline.rs` |
 | [Trace](#trace) | `ecotokens trace callers\|callees <symbol>` | Tantivy index | `src/tui/trace.rs` |
 | [Watch](#watch) | `ecotokens watch` | Tantivy index + file watcher | `src/tui/watch.rs`, `src/tui/progress.rs` |
+| [Setup assistant](#setup-assistant) | `ecotokens install` (no option) | Settings, harness config files, Ollama, `.env` | `src/tui/install.rs`, `src/install_wizard.rs` |
 
 ### Common behavior
 
 - **Interactive terminal only.** Every view opens on the alternate screen in raw mode, and only when stdout is a terminal. When stdout is piped or redirected, the same command prints plain text instead (or JSON with `--json`), and `ecotokens game` exits with an error. The terminal state is always restored on exit, including on panic.
-- **Quit keys.** `q`, `Q`, `Esc` and `Ctrl-C` quit every view. Any other key is view-specific.
+- **Quit keys.** `q`, `Q`, `Esc` and `Ctrl-C` quit every view. Any other key is view-specific. In the setup assistant, `Esc` goes back a step (it quits only on the first step), and letters typed into a text field are not commands.
 - **`--period`.** `gain`, `jev` and `game` accept `--period all|today|week|month` (default `all`). It restricts the data to the last 24 hours (`today`), 7 days (`week`), 30 days (`month`), or everything (`all`).
 - **`--project`.** `gain` and `jev` accept `--project PATH` to show a single project. A directory inside a repository stands for its git root (outside git, the directory itself). The filter applies to the TUI, the plain-text output and `--json`, survives the 10-second refresh, and is kept when `v` switches between the two views. Jev calls recorded before 0.30.0 have no project and do not appear in a filtered view.
 - **Live refresh.** The gain and Jev views reload their data every 10 seconds, and the game picks up new interceptions on the same cadence. The gain dashboard and Jev view show the last refresh time (UTC) in their title.
@@ -250,3 +251,41 @@ Both phases show a help line, ` q/Esc: quit  Ctrl-C: stop`.
 ## Testing notes
 
 The render functions take a `ratatui::Frame`, so they are unit-tested against a test backend (for example `render_gain`, `render_jev`, `render_outline`, `render_trace`, `render_watch`). Small terminals are covered to make sure rendering never panics. See [TEST-PLAN.md](TEST-PLAN.md) for the TUI checks in the release process.
+
+## Setup assistant
+
+Launched by `ecotokens install` with no option when stdin and stdout are terminals. With any option, or without a terminal, `install` runs directly instead. Nothing is written while the assistant is open: when you confirm, the screen closes and the regular install, `router`, `handoff` and `auto-watch` code paths apply the plan, printing their usual output.
+
+### Layout
+
+- **Header** with the version, and a **step bar** (`1 Harnesses ─── 2 Features ─── 3 Summary`); completed steps show a check mark.
+- **Body**: the list of the current step, with `[✔]` checkboxes and a highlighted cursor row (`❯`).
+  - Harnesses carry a green `installed` or cyan `detected` badge.
+  - Features list the agents they apply to; the global ones show a status badge instead: Jev key source (`key: shell`, `key: .env`, `key entered`, red `no key`), Ollama state (`Ollama ready`, `Ollama stopped`, `Ollama: no model`, red `Ollama not found`), or `local` for Candle embeddings. The chosen model follows in magenta, and a yellow `⚠` marks a feature that is on but cannot work yet.
+  - The summary marks each setting `● turn on` (green), `○ turn off` (red), `● change` (cyan), or unchanged (dimmed).
+- **Detail panel**: what the focused harness installs, or the focused feature's description, its status (pulled models, key source) and any warning with the command that fixes it.
+- **Footer**: the keys available on the focused row.
+
+The screen is at most 96 columns wide and centred on wider terminals.
+
+### Keybindings
+
+| Key | Step | Action |
+| --- | --- | --- |
+| `↑` / `↓`, `k` / `j` | Harnesses, Features | Move the cursor |
+| `space`, `x` | Harnesses, Features | Toggle the focused item |
+| `a` | Harnesses | Tick or clear all harnesses |
+| `Enter`, `→`, `Tab` | all | Next step (on the summary: apply) |
+| `Esc`, `←`, `Shift-Tab` | Features, Summary | Previous step |
+| `e` | Features | Edit the value of the focused row: Jev API key (masked), AI summary model, rewrite model, embedding model |
+| `m` | Features | Next model pulled in Ollama (text models for AI summary and rewrite, embedding models for semantic search) |
+| `p` | Features (semantic search) | Switch between Candle and Ollama |
+| `y` / `n` | Summary | Apply / quit |
+| `q`, `Ctrl-C` | all | Quit without changing anything |
+
+While a field is edited, letters are typed into it; `Backspace` erases, `Enter` validates. `Esc` validates a model field and discards a key being typed. A pasted key arrives as a single event (bracketed paste). The key is never drawn: each character shows as `•`.
+
+### Empty data
+
+On a machine with no harness detected, Claude Code is preselected. Without Ollama, the AI summary, rewrite and Ollama embedding rows explain how to install and start it, and the feature stays off unless it was already on.
+

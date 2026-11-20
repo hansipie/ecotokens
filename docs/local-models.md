@@ -14,6 +14,8 @@ Enable via install:
 ecotokens install --ai-summary-model llama3.2:3b
 ```
 
+Or run `ecotokens install` with no option: the [setup assistant](installation.md#setup-assistant) checks whether Ollama is running, proposes a text model it has already pulled (`m` cycles through them), and tells you what to run when Ollama is stopped, missing, or lacks the model.
+
 Or update the config file directly (`~/.config/ecotokens/config.json`):
 
 ```json
@@ -85,6 +87,8 @@ resulting token cost is tracked separately and shown as `rewrite_overhead_tokens
 and `ecotokens gain --json` - never hidden inside the normal savings figures.
 
 ### Configuration
+
+The [setup assistant](installation.md#setup-assistant) (`ecotokens install` with no option) sets `rewrite_model` and `rewrite_auto_enabled` on its Text rewrite row: `m` cycles through the text models Ollama has pulled, `e` edits the name, and an empty field goes back to following `ai_summary_model`.
 
 Set the model with `ecotokens config --rewrite-model <MODEL>` (an empty string resets it), update
 `~/.config/ecotokens/config.json` directly, or pass `--model`/`--save-diff`/`--no-save-diff` per
