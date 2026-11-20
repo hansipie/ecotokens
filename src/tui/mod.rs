@@ -1,5 +1,6 @@
 pub mod gain;
 pub mod game;
+pub mod install;
 pub mod jev;
 pub mod outline;
 pub mod progress;

@@ -172,6 +172,8 @@ flowchart LR
 
 The `.env` loader (`config/env_file.rs`) matters for hooks, which don't always inherit the shell's `export`. The key is never read from `config.json` and never printed. Keep `.env` at `chmod 600`.
 
+The [setup assistant](installation.md#setup-assistant) (`ecotokens install` with no option) shows where the key comes from (shell or `.env`) and can save a new one: `env_file::set_value` writes it to a mode-600 temporary file renamed over `.env`, keeps every other line, replaces an existing `TYPESAFE_API_KEY` line, and tightens a file with looser rights to 600. The assistant also switches `jev_enabled` and `jev_line_select_enabled`.
+
 Toggle the two switches from the CLI instead of editing `config.json`:
 
 ```bash

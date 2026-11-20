@@ -222,6 +222,18 @@ Model router:
 - `ecotokens uninstall` removes the router's session hooks as well
 - Also run the install and uninstall idempotence checks for Gemini CLI, Qwen Code, Pi and OpenCode, since `src/install.rs` is shared by every harness
 
+Setup assistant (`ecotokens install` with no option):
+- On a terminal it opens; with any option, or with stdin/stdout not a terminal, it does not and `install` behaves as before (default target `claude`)
+- `q`, `Ctrl-C`, and `Esc` on the first step leave every file byte-identical
+- Only the features of the chosen harnesses are offered; a feature that does not apply is never changed
+- A key typed on the Jev row never appears on screen, in the summary or in the output; `~/.config/ecotokens/.env` ends up at mode 600 (also when it was 644 before), with its other lines kept and a single `TYPESAFE_API_KEY` line
+- With Ollama running, stopped, and absent: the badges, warnings and proposed models match; embedding models are offered only for semantic search
+- After the semantic search setting changes, the output reminds to run `ecotokens index`
+
+Hermes profiles:
+- `ecotokens uninstall --target hermes` removes the plugin from the root home and from every `profiles/<name>/`, and `ecotokens` from each `plugins.enabled`; other plugins and `disabled:` entries survive
+- `ecotokens doctor` names each profile that still holds the plugin, and reports harnesses with nothing installed as `OK not installed`
+
 ### E. Metrics and gain reporting
 
 Objective: ensure savings data is trustworthy and readable.

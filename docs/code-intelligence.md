@@ -119,6 +119,8 @@ Each group shows the file paths, line ranges, similarity score, and a refactorin
 
 ### Provider
 
+The [setup assistant](installation.md#setup-assistant) (`ecotokens install` with no option) also sets the provider on its Semantic search row: `p` switches between Candle and Ollama, `m` cycles through the embedding models Ollama has pulled, `space` turns embeddings off. Run `ecotokens index` again after a change.
+
 **Candle** (default) — runs `sentence-transformers/all-MiniLM-L6-v2` (384 dim) locally. The model is downloaded automatically from HuggingFace Hub on first use (~90 MB, cached in `~/.cache/huggingface/`).
 
 ```bash

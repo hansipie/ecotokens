@@ -9,6 +9,7 @@ pub mod filter;
 pub mod handoff;
 pub mod hook;
 pub mod install;
+pub mod install_wizard;
 pub mod jev;
 pub mod masking;
 pub mod mcp;

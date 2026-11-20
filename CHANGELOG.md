@@ -9,6 +9,14 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ### Added
 
+- **Setup assistant for `ecotokens install`**: run with no option on a terminal, `install` opens a full-screen, coloured assistant in three steps (harnesses, features, summary). Passing any option (`--target`, `--ai-summary`, …) or running without a terminal keeps the previous behaviour, with `claude` as the default target.
+  - **Harnesses**: the seven harnesses as checkboxes, with badges for those detected on the machine or already installed (preselected).
+  - **Features**: only those the chosen harnesses support: auto-watch (Claude Code, Qwen, Pi, Hermes), model router and session handoff (Claude Code), plugin activation in `config.yaml` (Hermes), and for every harness Jev judgments with line selection, AI summary, text rewrite and semantic search. Every switch starts from the current state.
+  - **Jev API key**: the Jev row shows where `TYPESAFE_API_KEY` comes from (shell or `~/.config/ecotokens/.env`) and lets you type or paste a key, never displayed. It is saved to that `.env` file with mode 600: the content goes to a mode-600 temporary file that replaces the target, so the key is never readable by others, and an existing file with looser rights is tightened to 600. The router and Jev warn while no key is available.
+  - **Ollama**: checked before the screen opens (server at `ai_summary_url`, then the `ollama` binary on `PATH`). When it runs with pulled text models, AI summary is proposed on with one of them and `m` cycles through the others. When Ollama is stopped, missing, has no model, or lacks the chosen model, a badge and a warning give the command to run (`ollama serve`, `ollama pull <model>`, or the install link).
+  - **Text rewrite**: sets `rewrite_model` (by default the AI summary model) and the automatic rewrite stage of the filter pipeline.
+  - **Semantic search**: switches between Candle (local) and Ollama, cycles through the embedding models Ollama has pulled, or turns embeddings off (BM25 only), and reminds that `ecotokens index` must run again after a change. Embedding models are only offered here, never for AI summary or rewrite.
+  - **Summary**: shows what turns on, off or changes before anything is written; `q` (or `Esc` on the first step) quits without changing anything.
 - **`doctor` lists every harness**: Pi, Hermes, Codex and OpenCode are now checked alongside Claude Code, Gemini and Qwen, so `ecotokens doctor` shows which harnesses ecotokens is installed for. The Hermes line names each profile (`root`, `profiles/<name>`) that still holds the plugin.
 
 ### Fixed

@@ -94,11 +94,13 @@ cargo install --git https://github.com/hansipie/ecotokens --features exact-token
 
 ## Get started
 
-Install the hooks for your agent, restart it, and you are done:
+Run `ecotokens install` in a terminal: a full-screen setup assistant lets you tick the agents to install for, then only the features they can use (auto-watch, model router, session handoff, Hermes plugin activation, Jev and its API key, AI summary, text rewrite, semantic search), shows a summary and applies it. Restart your agents and you are done.
+
+To skip the questions (scripts, CI, or when you already know what you want), pass any option:
 
 | Agent | Command |
 |-------|---------|
-| Claude Code | `ecotokens install` |
+| Claude Code | `ecotokens install --target claude` |
 | Codex | `ecotokens install --target codex` |
 | Hermes | `ecotokens install --target hermes --enable-plugin` |
 | Pi | `ecotokens install --target pi` |
@@ -110,13 +112,14 @@ Install the hooks for your agent, restart it, and you are done:
 Then check that everything is wired, and see what you save:
 
 ```bash
-ecotokens doctor    # diagnose PATH, config, hooks and MCP setup (changes nothing)
+ecotokens doctor    # diagnose the setup and list the harnesses it is installed for (changes nothing)
 ecotokens gain      # interactive savings dashboard
 ```
 
-To remove ecotokens, run `ecotokens uninstall` (same `--target` values). Per-agent details, the Hermes plugin
-activation, and other install options are in [`docs/installation.md`](docs/installation.md); ready-to-copy
-configuration snippets are in [`docs/example-configs.md`](docs/example-configs.md).
+To remove ecotokens, run `ecotokens uninstall` (same `--target` values; for Claude Code it also removes the model
+router and the session handoff). The setup assistant's keys, per-agent details, the Hermes plugin activation, and
+other install options are in [`docs/installation.md`](docs/installation.md); ready-to-copy configuration snippets
+are in [`docs/example-configs.md`](docs/example-configs.md).
 
 ### Companion panel for Claude Code
 

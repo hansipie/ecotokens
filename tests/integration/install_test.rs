@@ -1624,3 +1624,29 @@ fn hermes_uninstall_cli_cleans_profiles_with_hermes_home() {
     );
     assert!(!stdout.contains("nothing to uninstall"), "stdout: {stdout}");
 }
+
+#[test]
+fn install_without_options_and_without_a_terminal_installs_for_claude_without_questions() {
+    // `.output()` pipes stdin/stdout, so the setup assistant must not start:
+    // scripts and CI keep the direct behaviour (default target: claude).
+    let home = TempDir::new().unwrap();
+    let out = Command::new(ecotokens_bin())
+        .arg("install")
+        .env("HOME", home.path())
+        .env("XDG_CONFIG_HOME", home.path().join(".config"))
+        .stdin(std::process::Stdio::null())
+        .output()
+        .expect("failed to run ecotokens install");
+
+    assert!(
+        out.status.success(),
+        "install failed: {}",
+        String::from_utf8_lossy(&out.stderr)
+    );
+    let stdout = String::from_utf8_lossy(&out.stdout);
+    assert!(!stdout.contains("setup assistant"), "stdout: {stdout}");
+    assert!(stdout.contains("Install Claude Code"), "stdout: {stdout}");
+    assert!(ecotokens::install::is_hook_installed(
+        &temp_claude_settings(&home)
+    ));
+}
