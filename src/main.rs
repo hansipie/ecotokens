@@ -1790,7 +1790,7 @@ fn cmd_uninstall(target: String) {
     let claude_json = default_claude_json_path();
     let gemini_path = install::default_gemini_settings_path();
     let qwen_path = install::default_qwen_settings_path();
-    let hermes_plugin_dir = install::default_hermes_plugin_dir();
+    let hermes_home = install::default_hermes_home();
     let codex_plugin_dir = install::default_codex_plugin_dir();
 
     let uninstall_claude = matches!(target.as_str(), "claude" | "all");
@@ -1981,32 +1981,30 @@ fn cmd_uninstall(target: String) {
 
     if uninstall_hermes {
         print_install_section(&mut first_section, "Uninstall Hermes Agent");
-        match hermes_plugin_dir {
-            Some(ref p) => {
-                let had = install::is_hermes_plugin_installed(p);
-                match install::uninstall_hermes_plugin(p) {
-                    Ok(()) => {
-                        if had {
-                            print_install_item("removed", "plugin", p);
-                            let disabled = run_hermes_cli(&["plugins", "disable", "ecotokens"]);
-                            match disabled {
-                                Ok(out) if out.status.success() => {
-                                    print_install_note("plugin disabled in Hermes");
-                                }
-                                _ => {}
-                            }
-                        } else {
-                            print_install_note("nothing to uninstall");
-                        }
+        match hermes_home {
+            // Each Hermes profile (`profiles/<name>/`) carries its own plugins
+            // directory and config, so the root home alone is not enough.
+            Some(ref home) => match install::uninstall_hermes_all_profiles(home) {
+                Ok(report) => {
+                    for p in &report.removed_plugins {
+                        print_install_item("removed", "plugin", p);
                     }
-                    Err(e) => {
-                        eprintln!("uninstall error (hermes): {e}");
-                        std::process::exit(1);
+                    for c in &report.disabled_configs {
+                        print_install_item("removed", "enabled entry", c);
+                    }
+                    if report.removed_plugins.is_empty() && report.disabled_configs.is_empty() {
+                        print_install_note("nothing to uninstall");
+                    } else {
+                        print_install_note("restart the Hermes gateway so it unloads the plugin");
                     }
                 }
-            }
+                Err(e) => {
+                    eprintln!("uninstall error (hermes): {e}");
+                    std::process::exit(1);
+                }
+            },
             None => {
-                eprintln!("cannot determine Hermes plugin path on this system");
+                eprintln!("cannot determine Hermes home directory on this system");
                 std::process::exit(1);
             }
         }

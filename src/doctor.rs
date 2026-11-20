@@ -41,6 +41,13 @@ struct DoctorPaths {
     claude_settings_path: Option<PathBuf>,
     gemini_settings_path: Option<PathBuf>,
     qwen_settings_path: Option<PathBuf>,
+    pi_extension_path: Option<PathBuf>,
+    /// Hermes root home; its `profiles/<name>/` homes are scanned too.
+    hermes_home: Option<PathBuf>,
+    codex_plugin_dir: Option<PathBuf>,
+    codex_hooks_path: Option<PathBuf>,
+    codex_config_path: Option<PathBuf>,
+    opencode_plugin_path: Option<PathBuf>,
     /// Where the router's helper agents live.
     agents_dir: Option<PathBuf>,
     /// The router's optional custom rules file.
@@ -62,6 +69,12 @@ pub fn run() -> DoctorReport {
         claude_settings_path: install::default_claude_settings_path(),
         gemini_settings_path: install::default_gemini_settings_path(),
         qwen_settings_path: install::default_qwen_settings_path(),
+        pi_extension_path: install::default_pi_extension_path(),
+        hermes_home: install::default_hermes_home(),
+        codex_plugin_dir: install::default_codex_plugin_dir(),
+        codex_hooks_path: install::default_codex_hooks_path(),
+        codex_config_path: install::default_codex_config_path(),
+        opencode_plugin_path: install::default_opencode_plugin_path(),
         agents_dir: crate::router::agents::default_agents_dir(),
         router_rules_path: crate::router::policy::Policy::user_rules_path(),
     })
@@ -92,6 +105,48 @@ fn run_with_paths(paths: DoctorPaths) -> DoctorReport {
             install::is_qwen_hook_installed,
             install::is_qwen_post_hook_installed,
             install::is_qwen_mcp_registered,
+        ),
+        check_components(
+            "Pi setup",
+            &[(
+                "extension",
+                paths.pi_extension_path.as_deref(),
+                install::is_pi_extension_installed,
+            )],
+        ),
+        check_hermes(paths.hermes_home.as_deref()),
+        check_components(
+            "Codex setup",
+            &[
+                (
+                    "plugin",
+                    paths.codex_plugin_dir.as_deref(),
+                    install::is_codex_plugin_installed,
+                ),
+                (
+                    "pre_hook",
+                    paths.codex_hooks_path.as_deref(),
+                    install::is_codex_hook_installed,
+                ),
+                (
+                    "post_hook",
+                    paths.codex_hooks_path.as_deref(),
+                    install::is_codex_post_hook_installed,
+                ),
+                (
+                    "mcp_server",
+                    paths.codex_config_path.as_deref(),
+                    install::is_codex_mcp_registered,
+                ),
+            ],
+        ),
+        check_components(
+            "OpenCode setup",
+            &[(
+                "plugin",
+                paths.opencode_plugin_path.as_deref(),
+                install::is_opencode_plugin_installed,
+            )],
         ),
         check_auto_watch(&settings, paths.claude_settings_path.as_deref()),
         check_metrics(paths.metrics_path.as_deref()),
@@ -410,19 +465,15 @@ fn check_agent_install(
         };
     };
     if !path.exists() {
-        return DoctorCheck {
-            name,
-            status: DoctorStatus::Warning,
-            message: "settings file not found; run ecotokens install when this agent is used"
-                .to_string(),
-            path: Some(path.display().to_string()),
-        };
+        return not_installed(name, path);
     }
 
     let pre = has_pre_hook(path);
     let post = has_post_hook(path);
     let mcp = has_mcp(path);
-    if pre && post && mcp {
+    if !pre && !post && !mcp {
+        not_installed(name, path)
+    } else if pre && post && mcp {
         DoctorCheck {
             name,
             status: DoctorStatus::Ok,
@@ -443,6 +494,88 @@ fn check_agent_install(
             ),
             path: Some(path.display().to_string()),
         }
+    }
+}
+
+/// A harness with no ecotokens piece at all is a normal state, not a fault.
+fn not_installed(name: &'static str, path: &Path) -> DoctorCheck {
+    DoctorCheck {
+        name,
+        status: DoctorStatus::Ok,
+        message: "not installed".to_string(),
+        path: Some(path.display().to_string()),
+    }
+}
+
+/// Probe for one ecotokens piece of a harness: label, location, detector.
+type Component<'a> = (&'static str, Option<&'a Path>, fn(&Path) -> bool);
+
+/// Report a harness made of several independent pieces: all present is OK,
+/// none present is "not installed", anything in between is a partial setup.
+fn check_components(name: &'static str, components: &[Component<'_>]) -> DoctorCheck {
+    let Some(first) = components.iter().find_map(|(_, p, _)| *p) else {
+        return DoctorCheck {
+            name,
+            status: DoctorStatus::Warning,
+            message: "install path could not be resolved".to_string(),
+            path: None,
+        };
+    };
+    let states: Vec<(&str, bool)> = components
+        .iter()
+        .map(|(label, p, detect)| (*label, p.is_some_and(*detect)))
+        .collect();
+    let path = Some(first.display().to_string());
+    if states.iter().all(|(_, on)| !on) {
+        return not_installed(name, first);
+    }
+    if states.iter().all(|(_, on)| *on) {
+        let labels: Vec<&str> = states.iter().map(|(l, _)| *l).collect();
+        return DoctorCheck {
+            name,
+            status: DoctorStatus::Ok,
+            message: format!("installed ({})", labels.join(", ")),
+            path,
+        };
+    }
+    let detail: Vec<String> = states.iter().map(|(l, on)| format!("{l}={on}")).collect();
+    DoctorCheck {
+        name,
+        status: DoctorStatus::Warning,
+        message: format!("partial setup detected: {}", detail.join(", ")),
+        path,
+    }
+}
+
+/// Hermes keeps one plugins directory per profile, so the root home and every
+/// `profiles/<name>/` home are listed: a plugin left in a profile keeps firing.
+fn check_hermes(home: Option<&Path>) -> DoctorCheck {
+    let name = "Hermes setup";
+    let Some(home) = home else {
+        return DoctorCheck {
+            name,
+            status: DoctorStatus::Warning,
+            message: "Hermes home could not be resolved".to_string(),
+            path: None,
+        };
+    };
+    let installed: Vec<String> = install::hermes_profile_homes(home)
+        .into_iter()
+        .filter(|h| install::is_hermes_plugin_installed(&h.join("plugins").join("ecotokens")))
+        .map(|h| match h.strip_prefix(home) {
+            Ok(rel) if rel.as_os_str().is_empty() => "root".to_string(),
+            Ok(rel) => rel.display().to_string(),
+            Err(_) => h.display().to_string(),
+        })
+        .collect();
+    if installed.is_empty() {
+        return not_installed(name, home);
+    }
+    DoctorCheck {
+        name,
+        status: DoctorStatus::Ok,
+        message: format!("plugin installed in: {}", installed.join(", ")),
+        path: Some(home.display().to_string()),
     }
 }
 
@@ -492,6 +625,12 @@ mod tests {
             claude_settings_path: Some(dir.path().join(".claude").join("settings.json")),
             gemini_settings_path: Some(dir.path().join(".gemini").join("settings.json")),
             qwen_settings_path: Some(dir.path().join(".qwen").join("settings.json")),
+            pi_extension_path: Some(dir.path().join(".pi").join("ecotokens.ts")),
+            hermes_home: Some(dir.path().join(".hermes")),
+            codex_plugin_dir: Some(dir.path().join(".codex").join("plugins").join("ecotokens")),
+            codex_hooks_path: Some(dir.path().join(".codex").join("hooks.json")),
+            codex_config_path: Some(dir.path().join(".codex").join("config.toml")),
+            opencode_plugin_path: Some(dir.path().join("opencode").join("ecotokens.ts")),
             agents_dir: Some(dir.path().join(".claude").join("agents")),
             router_rules_path: Some(dir.path().join("router_rules.toml")),
         });
@@ -610,6 +749,76 @@ mod tests {
         let check = check_handoff(&on, Some(&settings_path), Some(&skills));
         assert_eq!(check.status, DoctorStatus::Ok);
         assert_eq!(check.name, "Handoff");
+    }
+
+    #[test]
+    fn agent_with_nothing_installed_is_ok_not_installed() {
+        let dir = tempdir().unwrap();
+        let settings = dir.path().join("settings.json");
+        std::fs::write(&settings, "{}").unwrap();
+
+        let check = check_agent_install(
+            "Gemini setup",
+            Some(&settings),
+            |_| false,
+            |_| false,
+            |_| false,
+        );
+
+        assert_eq!(check.status, DoctorStatus::Ok);
+        assert_eq!(check.message, "not installed");
+    }
+
+    #[test]
+    fn components_report_installed_partial_and_absent() {
+        let dir = tempdir().unwrap();
+        let p = dir.path();
+        let none = check_components("X", &[("a", Some(p), |_| false), ("b", Some(p), |_| false)]);
+        assert_eq!(
+            (none.status, none.message.as_str()),
+            (DoctorStatus::Ok, "not installed")
+        );
+
+        let all = check_components("X", &[("a", Some(p), |_| true), ("b", Some(p), |_| true)]);
+        assert_eq!(
+            (all.status, all.message.as_str()),
+            (DoctorStatus::Ok, "installed (a, b)")
+        );
+
+        let part = check_components("X", &[("a", Some(p), |_| true), ("b", Some(p), |_| false)]);
+        assert_eq!(part.status, DoctorStatus::Warning);
+        assert!(part.message.contains("a=true, b=false"), "{}", part.message);
+    }
+
+    #[test]
+    fn hermes_check_lists_every_profile_holding_the_plugin() {
+        let dir = tempdir().unwrap();
+        let home = dir.path();
+        assert_eq!(check_hermes(Some(home)).message, "not installed");
+
+        install::install_hermes_plugin(
+            &home
+                .join("profiles")
+                .join("iris")
+                .join("plugins")
+                .join("ecotokens"),
+        )
+        .unwrap();
+        std::fs::create_dir_all(home.join("profiles").join("mike")).unwrap();
+        let check = check_hermes(Some(home));
+        assert_eq!(check.status, DoctorStatus::Ok);
+        assert_eq!(
+            check.message,
+            format!(
+                "plugin installed in: {}",
+                Path::new("profiles").join("iris").display()
+            )
+        );
+
+        install::install_hermes_plugin(&home.join("plugins").join("ecotokens")).unwrap();
+        assert!(check_hermes(Some(home))
+            .message
+            .starts_with("plugin installed in: root, "));
     }
 
     #[test]

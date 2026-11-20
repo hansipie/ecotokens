@@ -7,6 +7,15 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ## [Unreleased]
 
+### Added
+
+- **`doctor` lists every harness**: Pi, Hermes, Codex and OpenCode are now checked alongside Claude Code, Gemini and Qwen, so `ecotokens doctor` shows which harnesses ecotokens is installed for. The Hermes line names each profile (`root`, `profiles/<name>`) that still holds the plugin.
+
+### Fixed
+
+- **`uninstall --target hermes` cleans every profile**: the plugin was only removed from the root Hermes home, so a copy left in `~/.hermes/profiles/<name>/plugins/ecotokens` kept starting `ecotokens watch` on each Hermes session. Uninstall now goes through the root home and each profile, deletes the plugin directory and drops `ecotokens` from `plugins.enabled` in each `config.yaml` (other entries, `disabled:` lists and comments are left untouched).
+- **`doctor` no longer reports an error for a harness that is simply not installed**: Gemini and Qwen showed `ERROR partial setup detected` when none of the hooks or the MCP entry were present. That state is now reported as `OK not installed`.
+
 ## [0.32.0] - 2026-11-17
 
 ### Added

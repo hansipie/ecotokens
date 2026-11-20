@@ -28,7 +28,7 @@ Every `ecotokens` command, shell completions, the gain dashboard and the filter 
 | `ecotokens jev [--period PERIOD] [--project PATH] [--json]` | TUI with detailed Jev usage - calls, fallbacks, latency, tokens, cost, recent calls (also `v` in `gain`); `--project` keeps the calls made in one project |
 | `ecotokens game [--period PERIOD]` | Space Invaders mini-game - filtered commands spawn enemies scaled by tokens saved |
 | `ecotokens config [--debug true\|false]` | Show or update global configuration (including debug mode) |
-| `ecotokens doctor [--json]` | Diagnose PATH, config, hook, MCP, and metrics setup without mutating files |
+| `ecotokens doctor [--json]` | Diagnose PATH, config, hook, MCP, and metrics setup without mutating files; shows which harnesses ecotokens is installed for (Claude Code, Gemini, Qwen, Pi, Hermes with each profile, Codex, OpenCode) |
 | `ecotokens gain price --input X --output Y` | Set the model price in USD per million tokens, used for the cost avoided figure of `gain` (cost stays `n/a` until set) |
 | `ecotokens config --embed-provider candle\|ollama\|none` | Set the embedding backend (`candle` = local BERT, `ollama` = Ollama HTTP API, `none` = BM25 only) |
 | `ecotokens config --embed-model MODEL` | Set the embedding model (e.g. `qwen3-embedding:latest` for Ollama, or a HuggingFace ID for Candle) |

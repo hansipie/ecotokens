@@ -1535,3 +1535,92 @@ fn install_all_includes_opencode_and_unknown_target_errors() {
         "error message must list opencode as a valid target"
     );
 }
+
+#[test]
+fn hermes_uninstall_all_profiles_removes_profile_plugins_and_enabled_entries() {
+    use ecotokens::install::uninstall_hermes_all_profiles;
+
+    let dir = TempDir::new().unwrap();
+    let home = dir.path();
+    let iris = home.join("profiles").join("iris");
+    let mike = home.join("profiles").join("mike");
+
+    install_hermes_plugin(&home.join("plugins").join("ecotokens")).unwrap();
+    install_hermes_plugin(&iris.join("plugins").join("ecotokens")).unwrap();
+    std::fs::create_dir_all(&mike).unwrap();
+    // A third-party plugin in the same profile must survive.
+    std::fs::create_dir_all(iris.join("plugins").join("vaultwarden")).unwrap();
+
+    std::fs::write(
+        home.join("config.yaml"),
+        "plugins:\n  enabled:\n    - herdr\n    - ecotokens\n  disabled:\n    - disk-cleanup\n",
+    )
+    .unwrap();
+    std::fs::write(
+        iris.join("config.yaml"),
+        "model: x\nplugins:\n  enabled:\n    - ecotokens\n  disabled:\n    - ecotokens\nother: 1\n",
+    )
+    .unwrap();
+    std::fs::write(
+        mike.join("config.yaml"),
+        "plugins:\n  enabled:\n    - homeassistant\n",
+    )
+    .unwrap();
+
+    let report = uninstall_hermes_all_profiles(home).unwrap();
+
+    assert_eq!(report.removed_plugins.len(), 2, "{report:?}");
+    assert!(!home.join("plugins").join("ecotokens").exists());
+    assert!(!iris.join("plugins").join("ecotokens").exists());
+    assert!(iris.join("plugins").join("vaultwarden").exists());
+
+    assert_eq!(report.disabled_configs.len(), 2, "{report:?}");
+    assert_eq!(
+        std::fs::read_to_string(home.join("config.yaml")).unwrap(),
+        "plugins:\n  enabled:\n    - herdr\n  disabled:\n    - disk-cleanup\n"
+    );
+    // Emptied list becomes `[]`; the `disabled:` entry is left untouched.
+    assert_eq!(
+        std::fs::read_to_string(iris.join("config.yaml")).unwrap(),
+        "model: x\nplugins:\n  enabled: []\n  disabled:\n    - ecotokens\nother: 1\n"
+    );
+    assert_eq!(
+        std::fs::read_to_string(mike.join("config.yaml")).unwrap(),
+        "plugins:\n  enabled:\n    - homeassistant\n"
+    );
+
+    let again = uninstall_hermes_all_profiles(home).unwrap();
+    assert!(again.removed_plugins.is_empty() && again.disabled_configs.is_empty());
+}
+
+#[test]
+fn hermes_uninstall_cli_cleans_profiles_with_hermes_home() {
+    let dir = TempDir::new().unwrap();
+    let iris = dir.path().join("profiles").join("iris");
+    install_hermes_plugin(&iris.join("plugins").join("ecotokens")).unwrap();
+    std::fs::write(
+        iris.join("config.yaml"),
+        "plugins:\n  enabled:\n    - ecotokens\n",
+    )
+    .unwrap();
+
+    let out = Command::new(ecotokens_bin())
+        .args(["uninstall", "--target", "hermes"])
+        .env("HERMES_HOME", dir.path())
+        .env("PATH", no_hermes_path())
+        .output()
+        .expect("failed to run ecotokens uninstall");
+
+    assert!(
+        out.status.success(),
+        "stderr: {}",
+        String::from_utf8_lossy(&out.stderr)
+    );
+    assert!(!iris.join("plugins").join("ecotokens").exists());
+    let stdout = String::from_utf8_lossy(&out.stdout);
+    assert!(
+        stdout.contains("profiles/iris/plugins/ecotokens"),
+        "stdout: {stdout}"
+    );
+    assert!(!stdout.contains("nothing to uninstall"), "stdout: {stdout}");
+}
