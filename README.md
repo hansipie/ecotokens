@@ -11,15 +11,16 @@
 
 # ecotokens saves real AI coding context
 
-On one developer workstation, ecotokens recorded **19 928 hook executions** between **2026-03-06 and 2026-05-27**. The result: **94 282 087 tokens before filtering**, **5 874 896 tokens after filtering**, and **88 407 191 tokens saved**. That is a **93.8% overall reduction** across real shell commands and native tool results.
+On one developer workstation, ecotokens recorded **61 273 hook executions** between **2026-03-06 and 2026-11-20**. The result: **180 666 774 tokens before filtering**, **27 187 696 tokens after filtering**, and **153 479 078 tokens saved**. That is an **85.0% overall reduction** across real shell commands and native tool results. Over the last month alone (2026-10-21 to 2026-11-20), 15 746 executions saved 41 285 739 tokens, an 80.2% reduction.
 
 | Real-world metric | Value |
 |-------------------|------:|
-| Hook executions measured | 19 928 |
-| Tokens saved | **88 407 191** |
-| Overall reduction | **93.8%** |
-| Commands with savings | 5 735 / 19 928, or 28.8% |
-| Biggest command family | `grep`, with 55 383 168 tokens saved |
+| Hook executions measured | 61 273 |
+| Tokens saved | **153 479 078** |
+| Overall reduction | **85.0%** |
+| Commands with savings | 23 939 / 61 273, or 39.1% |
+| Biggest command family | `grep`, with 64 689 640 tokens saved |
+| Last month (2026-10-21 to 2026-11-20) | 41 285 739 tokens saved, 80.2% |
 
 [Claude Code](https://claude.ai/code), Codex, [Hermes](https://hermes.dev), [Pi](https://pi.dev), [Gemini CLI](https://github.com/google-gemini/gemini-cli), [Qwen Code](https://github.com/QwenLM/qwen-code), and [OpenCode](https://opencode.ai) can all dump massive command outputs and native tool results into your context window. ecotokens sits in front of those outputs, removes the noise, preserves the important bits, and records the before/after savings locally.
 
