@@ -23,6 +23,7 @@ mod filter;
 mod handoff;
 mod hook;
 mod install;
+mod install_wizard;
 mod jev;
 mod masking;
 mod mcp;
@@ -165,9 +166,10 @@ enum Commands {
     },
     /// Install ecotokens hook in ~/.claude/settings.json, ~/.gemini/settings.json, ~/.qwen/settings.json, ~/.pi/agent/extensions/, ~/.hermes/plugins/, ~/.codex/plugins/, or ~/.config/opencode/plugins/
     Install {
-        /// Target AI tool to install for: claude, gemini, qwen, pi, hermes, codex, opencode, or all (default: claude)
-        #[arg(long, default_value = "claude")]
-        target: String,
+        /// Target AI tool to install for: claude, gemini, qwen, pi, hermes, codex, opencode, or all (default: claude).
+        /// Without any option on a terminal, `install` starts a setup assistant instead.
+        #[arg(long)]
+        target: Option<String>,
         /// Enable AI-powered output summarization via Ollama
         #[arg(long)]
         ai_summary: bool,
@@ -1451,6 +1453,22 @@ fn cmd_install(
     ai_summary_model: Option<String>,
     enable_plugin: bool,
 ) {
+    cmd_install_targets(
+        &[target.as_str()],
+        ai_summary,
+        ai_summary_model,
+        enable_plugin,
+    );
+}
+
+/// Install for every target in `targets` (each a `--target` value, `all`
+/// included). Shared by `install --target` and the setup assistant.
+fn cmd_install_targets(
+    targets: &[&str],
+    ai_summary: bool,
+    ai_summary_model: Option<String>,
+    enable_plugin: bool,
+) {
     let claude_path = default_settings_path();
     let claude_json = default_claude_json_path();
     let gemini_path = install::default_gemini_settings_path();
@@ -1458,28 +1476,23 @@ fn cmd_install(
     let hermes_plugin_dir = install::default_hermes_plugin_dir();
     let codex_plugin_dir = install::default_codex_plugin_dir();
 
-    let install_claude = matches!(target.as_str(), "claude" | "all");
-    let install_gemini = matches!(target.as_str(), "gemini" | "all");
-    let install_qwen = matches!(target.as_str(), "qwen" | "all");
-    let install_pi = matches!(target.as_str(), "pi" | "all");
-    let install_hermes = matches!(target.as_str(), "hermes" | "all");
-    let install_codex = matches!(target.as_str(), "codex" | "all");
-    let install_opencode = matches!(target.as_str(), "opencode" | "all");
-
-    if !install_claude
-        && !install_gemini
-        && !install_qwen
-        && !install_pi
-        && !install_hermes
-        && !install_codex
-        && !install_opencode
-    {
+    const VALID: [&str; 8] = [
+        "claude", "gemini", "qwen", "pi", "hermes", "codex", "opencode", "all",
+    ];
+    if let Some(bad) = targets.iter().find(|t| !VALID.contains(t)) {
         eprintln!(
-            "unknown target '{}'. Valid values: claude, gemini, qwen, pi, hermes, codex, opencode, all",
-            target
+            "unknown target '{bad}'. Valid values: claude, gemini, qwen, pi, hermes, codex, opencode, all"
         );
         std::process::exit(1);
     }
+    let wants = |name: &str| targets.iter().any(|t| *t == name || *t == "all");
+    let install_claude = wants("claude");
+    let install_gemini = wants("gemini");
+    let install_qwen = wants("qwen");
+    let install_pi = wants("pi");
+    let install_hermes = wants("hermes");
+    let install_codex = wants("codex");
+    let install_opencode = wants("opencode");
 
     let mut first_section = true;
 
@@ -1782,6 +1795,335 @@ fn cmd_install(
         }
         print_install_section(&mut first_section, "Configure ecotokens");
         print_install_note("AI summary configured in ~/.config/ecotokens/config.json");
+    }
+}
+
+/// What is on this machine for each harness, in `Harness::ALL` order.
+fn wizard_harness_states() -> [install_wizard::HarnessState; 7] {
+    use install_wizard::{Harness, HarnessState};
+    let home = dirs::home_dir();
+    let under_home = |rel: &str| home.as_ref().is_some_and(|h| h.join(rel).is_dir());
+    let check = |p: Option<std::path::PathBuf>, f: fn(&Path) -> bool| p.is_some_and(|p| f(&p));
+    let claude_settings = default_settings_path();
+    Harness::ALL.map(|h| match h {
+        Harness::Claude => HarnessState {
+            detected: under_home(".claude"),
+            installed: install::is_hook_installed(&claude_settings),
+        },
+        Harness::Gemini => HarnessState {
+            detected: under_home(".gemini"),
+            installed: check(
+                install::default_gemini_settings_path(),
+                install::is_gemini_hook_installed,
+            ),
+        },
+        Harness::Qwen => HarnessState {
+            detected: under_home(".qwen"),
+            installed: check(
+                install::default_qwen_settings_path(),
+                install::is_qwen_hook_installed,
+            ),
+        },
+        Harness::Pi => HarnessState {
+            detected: under_home(".pi"),
+            installed: check(
+                install::default_pi_extension_path(),
+                install::is_pi_extension_installed,
+            ),
+        },
+        Harness::Hermes => HarnessState {
+            detected: install::default_hermes_home().is_some_and(|h| h.is_dir()),
+            installed: check(
+                install::default_hermes_plugin_dir(),
+                install::is_hermes_plugin_installed,
+            ),
+        },
+        Harness::Codex => HarnessState {
+            detected: under_home(".codex"),
+            installed: check(
+                install::default_codex_plugin_dir(),
+                install::is_codex_plugin_installed,
+            ),
+        },
+        Harness::OpenCode => HarnessState {
+            detected: dirs::config_dir().is_some_and(|d| d.join("opencode").is_dir()),
+            installed: check(
+                install::default_opencode_plugin_path(),
+                install::is_opencode_plugin_installed,
+            ),
+        },
+    })
+}
+
+/// Where `TYPESAFE_API_KEY` comes from. The `.env` file is loaded into the
+/// environment at startup without overriding it, so a value equal to the
+/// file's came from the file; any other value was exported by the shell.
+fn wizard_key_source() -> install_wizard::KeySource {
+    use install_wizard::KeySource;
+    let key = crate::jev::API_KEY_ENV;
+    let Some(value) = std::env::var(key).ok().filter(|v| !v.trim().is_empty()) else {
+        return KeySource::Missing;
+    };
+    let from_file =
+        config::env_file::env_file_path().and_then(|p| config::env_file::read_value(&p, key));
+    if from_file.as_deref() == Some(value.as_str()) {
+        KeySource::EnvFile
+    } else {
+        KeySource::Shell
+    }
+}
+
+/// `ecotokens install` with no option on a terminal: ask, then apply through
+/// the regular install, `auto-watch`, `router` and `handoff` code paths.
+fn cmd_install_wizard() {
+    use config::settings::EmbedProvider;
+    use install_wizard::{AiSummary, EmbedChoice, Harness};
+
+    let settings = config::Settings::load();
+    let ctx = install_wizard::WizardContext {
+        harnesses: wizard_harness_states(),
+        auto_watch: settings.auto_watch,
+        router_enabled: settings.router_enabled,
+        handoff_enabled: settings.handoff_enabled,
+        jev_key: wizard_key_source(),
+        jev_enabled: settings.jev_enabled,
+        jev_line_select: settings.jev_line_select_enabled,
+        ai_summary_enabled: settings.ai_summary_enabled,
+        ai_summary_model: settings.ai_summary_model.clone(),
+        rewrite_auto: settings.rewrite_auto_enabled,
+        rewrite_model: settings.rewrite_model.clone(),
+        embed: match &settings.embed_provider {
+            EmbedProvider::None => install_wizard::EmbedChoice::None,
+            EmbedProvider::Ollama { model, .. } => {
+                install_wizard::EmbedChoice::Ollama(model.clone())
+            }
+            EmbedProvider::Candle { model } => install_wizard::EmbedChoice::Candle(model.clone()),
+            // Legacy configs are migrated to the default Candle model at load.
+            EmbedProvider::Legacy => install_wizard::EmbedChoice::Candle(
+                config::settings::DEFAULT_CANDLE_EMBED_MODEL.to_string(),
+            ),
+        },
+        // Probed once before the screen opens; a short timeout keeps the
+        // start instant when nothing listens.
+        ollama: install_wizard::detect_ollama(
+            settings
+                .ai_summary_url
+                .as_deref()
+                .unwrap_or(install_wizard::DEFAULT_OLLAMA_URL),
+            std::time::Duration::from_millis(800),
+        ),
+    };
+
+    // The screen is torn down (guard dropped) before anything is applied, so
+    // the install output prints on the normal terminal.
+    let exit = {
+        if let Err(e) = enable_raw_mode() {
+            eprintln!("install error: cannot enable raw mode: {e}");
+            std::process::exit(1);
+        }
+        let _guard = TerminalGuard::stdout();
+        if let Err(e) = std::io::stdout().execute(EnterAlternateScreen) {
+            eprintln!("install error: cannot enter the alternate screen: {e}");
+            std::process::exit(1);
+        }
+        // Bracketed paste delivers a pasted API key as one event.
+        let _ = std::io::stdout().execute(ratatui::crossterm::event::EnableBracketedPaste);
+        let result = Terminal::new(CrosstermBackend::new(std::io::stdout()))
+            .and_then(|mut terminal| tui::install::run(&mut terminal, ctx.clone()));
+        let _ = std::io::stdout().execute(ratatui::crossterm::event::DisableBracketedPaste);
+        result
+    };
+    let plan = match exit {
+        Ok(tui::install::Exit::Apply(plan)) => plan,
+        Ok(tui::install::Exit::Cancel) => {
+            println!("Cancelled. Nothing was changed.");
+            return;
+        }
+        Err(e) => {
+            eprintln!("install error: {e}");
+            std::process::exit(1);
+        }
+    };
+
+    // Auto-watch first: the harness install adds the session hooks only when
+    // the setting is already on.
+    if let Some(on) = plan.auto_watch {
+        let mut s = config::Settings::load();
+        if s.auto_watch != on {
+            s.auto_watch = on;
+            if let Err(e) = s.save() {
+                eprintln!("failed to save config: {e}");
+                std::process::exit(1);
+            }
+        }
+    }
+
+    let (ai_on, ai_model) = match &plan.ai_summary {
+        Some(AiSummary::On(model)) => (true, Some(model.clone())),
+        _ => (false, None),
+    };
+    let targets: Vec<&str> = plan.harnesses.iter().map(|h| h.target()).collect();
+    cmd_install_targets(&targets, ai_on, ai_model, plan.hermes_enable_plugin);
+
+    if plan.ai_summary == Some(AiSummary::Off) {
+        let mut s = config::Settings::load();
+        s.ai_summary_enabled = false;
+        if let Err(e) = s.save() {
+            eprintln!("failed to save config: {e}");
+            std::process::exit(1);
+        }
+        println!("\nAI summary turned off.");
+    }
+
+    // Jev key first: `router on` below warns when it is missing.
+    if let Some(key) = plan.jev_api_key.as_deref() {
+        let name = crate::jev::API_KEY_ENV;
+        let Some(path) = config::env_file::env_file_path() else {
+            eprintln!("install error: cannot locate the configuration directory");
+            std::process::exit(1);
+        };
+        // Written to a mode-600 temporary file, then renamed over the target.
+        if let Err(e) = config::env_file::set_value(&path, name, key) {
+            eprintln!(
+                "install error: cannot save {name} to {}: {e}",
+                path.display()
+            );
+            std::process::exit(1);
+        }
+        println!("\nJev API key saved to {} (mode 600).", path.display());
+        if ctx.jev_key == install_wizard::KeySource::Shell {
+            println!(
+                "  note: your shell also exports {name}; that value keeps winning over the file."
+            );
+        } else {
+            // Single-threaded here; lets the router setup below see the key.
+            std::env::set_var(name, key);
+        }
+    }
+
+    let mut s = config::Settings::load();
+    let mut changed: Vec<String> = Vec::new();
+    if let Some(on) = plan.jev {
+        if s.jev_enabled != on {
+            s.jev_enabled = on;
+            changed.push(format!("Jev judgments: {}", if on { "ON" } else { "OFF" }));
+        }
+    }
+    if let Some(on) = plan.jev_line_select {
+        if s.jev_line_select_enabled != on {
+            s.jev_line_select_enabled = on;
+            changed.push(format!(
+                "Jev line selection: {}",
+                if on { "ON" } else { "OFF" }
+            ));
+        }
+    }
+    if let Some(on) = plan.rewrite_auto {
+        if s.rewrite_auto_enabled != on {
+            s.rewrite_auto_enabled = on;
+            changed.push(format!(
+                "automatic rewrite: {}",
+                if on { "ON" } else { "OFF" }
+            ));
+        }
+    }
+    if let Some(model) = &plan.rewrite_model {
+        s.rewrite_model = model.clone();
+        changed.push(match model {
+            Some(m) => format!("rewrite model: {m}"),
+            None => "rewrite model: same as AI summary".to_string(),
+        });
+    }
+    let mut reindex = false;
+    if let Some(embed) = &plan.embed {
+        // Keep the Ollama URL already in use, else the AI summary one.
+        let url = match &s.embed_provider {
+            EmbedProvider::Ollama { url, .. } => url.clone(),
+            _ => s
+                .ai_summary_url
+                .clone()
+                .unwrap_or_else(|| install_wizard::DEFAULT_OLLAMA_URL.to_string()),
+        };
+        s.embed_provider = match embed {
+            EmbedChoice::None => EmbedProvider::None,
+            EmbedChoice::Candle(model) => EmbedProvider::Candle {
+                model: model.clone(),
+            },
+            EmbedChoice::Ollama(model) => EmbedProvider::Ollama {
+                url,
+                model: model.clone(),
+            },
+        };
+        changed.push(format!("semantic search: {}", embed.describe()));
+        reindex = *embed != EmbedChoice::None;
+    }
+    if !changed.is_empty() {
+        if let Err(e) = s.save() {
+            eprintln!("failed to save config: {e}");
+            std::process::exit(1);
+        }
+        println!();
+        for line in &changed {
+            println!("{line}");
+        }
+        if reindex {
+            println!("  run `ecotokens index` in your projects to rebuild their index");
+        }
+    }
+
+    if let Some(on) = plan.auto_watch {
+        println!("\nauto-watch: {}", if on { "ON" } else { "OFF" });
+    }
+
+    if plan.has(Harness::Claude) {
+        let settings_path = default_settings_path();
+        // "Yes" always (re)installs, which also repairs a feature kept on;
+        // "no" acts only when the feature was on.
+        let router_on = match plan.router {
+            Some(true) => Some(true),
+            Some(false) if ctx.router_enabled => Some(false),
+            _ => None,
+        };
+        if let Some(on) = router_on {
+            let Some(agents_dir) = router::agents::default_agents_dir() else {
+                eprintln!("error: cannot locate the home directory");
+                std::process::exit(1);
+            };
+            println!();
+            let result = if on {
+                router::cli::on(&settings_path, &agents_dir, None)
+            } else {
+                router::cli::off(&settings_path, &agents_dir)
+            };
+            if let Err(e) = result {
+                eprintln!("router error: {e}");
+                std::process::exit(1);
+            }
+        }
+        if plan.handoff == Some(true) || (plan.handoff == Some(false) && ctx.handoff_enabled) {
+            let Some(skills_dir) = handoff::skills::default_skills_dir() else {
+                eprintln!("error: cannot locate the home directory");
+                std::process::exit(1);
+            };
+            let mut s = config::Settings::load();
+            let outcome = if plan.handoff == Some(true) {
+                handoff::cli::on(&mut s, &settings_path, &skills_dir, None, None)
+            } else {
+                handoff::cli::off(&mut s, &settings_path, &skills_dir)
+            };
+            if outcome.code == 0 {
+                if let Err(e) = s.save() {
+                    eprintln!("error: could not save settings: {e}");
+                    std::process::exit(1);
+                }
+            }
+            println!();
+            print!("{}", outcome.out);
+            eprint!("{}", outcome.err);
+            if outcome.code != 0 {
+                std::process::exit(outcome.code);
+            }
+        }
     }
 }
 
@@ -4373,7 +4715,24 @@ fn main() {
             ai_summary,
             ai_summary_model,
             enable_plugin,
-        } => cmd_install(target, ai_summary, ai_summary_model, enable_plugin),
+        } => {
+            // No option at all on a terminal: guided setup. Any option, or a
+            // script/CI context, keeps the direct behaviour (default: claude).
+            let no_option =
+                target.is_none() && !ai_summary && ai_summary_model.is_none() && !enable_plugin;
+            let interactive = std::io::IsTerminal::is_terminal(&std::io::stdin())
+                && std::io::IsTerminal::is_terminal(&std::io::stdout());
+            if no_option && interactive {
+                cmd_install_wizard();
+            } else {
+                cmd_install(
+                    target.unwrap_or_else(|| "claude".to_string()),
+                    ai_summary,
+                    ai_summary_model,
+                    enable_plugin,
+                );
+            }
+        }
         Commands::Uninstall { target } => cmd_uninstall(target),
         Commands::Config {
             json,

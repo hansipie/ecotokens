@@ -8,7 +8,8 @@ Every `ecotokens` command, shell completions, the gain dashboard and the filter 
 
 | Command | Description |
 |---------|-------------|
-| `ecotokens install` | Install the PreToolUse + PostToolUse hooks and register the MCP server entry in `~/.claude/settings.json` |
+| `ecotokens install` | On a terminal, with no option: full-screen setup assistant (↑↓ move, space toggle, enter next, esc back, q quit) to tick the target harnesses, then the features they support (auto-watch, router, handoff, Hermes plugin activation, Jev and its API key, AI summary, text rewrite model, semantic search provider and model), and applies the choices after a summary. Without a terminal (scripts, CI): same as `--target claude` |
+| `ecotokens install --target claude` | Install the PreToolUse + PostToolUse hooks and register the MCP server entry in `~/.claude/settings.json`. Any option skips the setup assistant |
 | `ecotokens install --target codex` | Install the Codex plugin, `PreToolUse`/`PostToolUse` hooks in `~/.codex/hooks.json`, and MCP server in `~/.codex/config.toml` |
 | `ecotokens install --target hermes` | Install the Hermes plugin in `~/.hermes/plugins/` |
 | `ecotokens install --target hermes --enable-plugin` | Install and add to `plugins.enabled` in `~/.hermes/config.yaml` directly |

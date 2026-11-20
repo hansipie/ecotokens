@@ -94,11 +94,13 @@ cargo install --git https://github.com/hansipie/ecotokens --features exact-token
 
 ## Get started
 
-Install the hooks for your agent, restart it, and you are done:
+Run `ecotokens install` in a terminal: a full-screen setup assistant lets you tick the agents to install for, then only the features they can use (auto-watch, model router, session handoff, Hermes plugin activation, Jev and its API key, AI summary, text rewrite, semantic search), shows a summary and applies it. Restart your agents and you are done.
+
+To skip the questions (scripts, CI, or when you already know what you want), pass any option:
 
 | Agent | Command |
 |-------|---------|
-| Claude Code | `ecotokens install` |
+| Claude Code | `ecotokens install --target claude` |
 | Codex | `ecotokens install --target codex` |
 | Hermes | `ecotokens install --target hermes --enable-plugin` |
 | Pi | `ecotokens install --target pi` |
